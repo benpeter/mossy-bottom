@@ -10,8 +10,9 @@ set -uo pipefail
 # State -> exit code. Documented in --help; lets shell callers branch on $?.
 readonly EXIT_IDLE=0
 readonly EXIT_BUSY=10
-# waiting-input (20) and question (30) are documented in --help and reserved for
-# the next slices; their constants land when those states are implemented.
+readonly EXIT_WAITING=20
+# question (30) is documented in --help and reserved for a later slice; its
+# constant lands when that state is implemented.
 
 # Seconds between the two snapshots. Overridable for fast tests; the default
 # matches the ~2s the smoke test used.
@@ -30,9 +31,9 @@ Options:
   -h, --help    show this help
 
 States and exit codes:
-  idle           0    snapshots identical
-  busy          10    snapshots differ
-  waiting-input 20    selection menu shown        (not yet implemented)
+  idle           0    snapshots identical, no spinner, no menu
+  busy          10    snapshots differ, or a spinner line is present
+  waiting-input 20    a numbered selection menu is shown
   question      30    idle box ending in an ask   (not yet implemented)
 
 Environment:
@@ -64,24 +65,35 @@ snapshot() { tmux capture-pane -p -t "$pane"; }
 # match on the literal UTF-8 bytes regardless of the caller's locale.
 has_spinner() { printf '%s\n' "$1" | LC_ALL=C grep -qE '●.*…'; }
 
+# A selection menu (smoke-test.md section 9) is a numbered-option cursor line
+# ("❯ 1.") together with an "Enter to confirm" affordance. Requiring both keeps
+# stray prose mentioning either phrase from tripping the detector.
+has_menu() {
+  printf '%s\n' "$1" | LC_ALL=C grep -qE '❯ [0-9]' \
+    && printf '%s\n' "$1" | grep -q 'Enter to confirm'
+}
+
 snap1="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 sleep "$INTERVAL"
 snap2="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 
 if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
 if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+if has_menu "$snap2"; then menu="true"; else menu="false"; fi
 
-# A spinner present means working even if the frame stalled between snapshots;
-# otherwise advancing output (snapshots differ) means busy; else idle.
-if [ "$spinner" = "true" ] || [ "$differ" = "true" ]; then
+# Precedence: a menu is asking for a choice (waiting-input) regardless of
+# motion. Else a spinner, or advancing output, means busy. Else idle.
+if [ "$menu" = "true" ]; then
+  state="waiting-input"; code="$EXIT_WAITING"
+elif [ "$spinner" = "true" ] || [ "$differ" = "true" ]; then
   state="busy"; code="$EXIT_BUSY"
 else
   state="idle"; code="$EXIT_IDLE"
 fi
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$menu" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi

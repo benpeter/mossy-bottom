@@ -60,5 +60,16 @@ assert_state "$spin_sess" busy 10 "stalled frame with spinner classified busy"
 
 tmux kill-session -t "$spin_sess" 2>/dev/null
 
+# --- fixture: a selection menu (the trust gate shape, smoke-test.md section 9).
+# Numbered options with a cursor plus an "Enter to confirm" affordance line.
+menu_sess="timmy_t_menu_$$"
+tmux new-session -d -s "$menu_sess" -x 80 -y 24 \
+  'printf "\xe2\x9d\xaf 1. Yes, I trust this folder\n  2. No, exit\n Enter to confirm \xc2\xb7 Esc to cancel\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$menu_sess" waiting-input 20 "selection menu classified waiting-input"
+
+tmux kill-session -t "$menu_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
