@@ -36,7 +36,7 @@ fi
 CLAUDE_CMD="${CLAUDE} --model opus --dangerously-skip-permissions"
 
 # Role bootstrap prompts. shirley is intentionally absent from this list.
-SHAUN_BOOT="You are shaun, the driver in the Mossy Bottom deference chain. Read prompts/shaun.md, then GUARDRAILS.md and MISSION.md, and assume the role. Read .barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you. Begin by sending shirley her opening prompt from MISSION.md, then run your tick loop. Re-read MISSION.md and GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
+SHAUN_BOOT="You are shaun, the driver in the Mossy Bottom deference chain. Read prompts/shaun.md, then GUARDRAILS.md and MISSION.md, and assume the role. Read .barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you and will tell you when to begin. Assume the role now, confirm you are ready, and wait for bitzer's go signal. When bitzer tells you to begin, send shirley her opening prompt from MISSION.md and run your tick loop, re-reading MISSION.md and GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
 BITZER_BOOT="You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read prompts/bitzer.md, then MISSION.md and GUARDRAILS.md, and assume the role. Read .barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
 
 resolve_session() {

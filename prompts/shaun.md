@@ -113,11 +113,13 @@ shapes are stable.
   prompt back into the box, so after interrupting, overwrite rather than append -
   send your text and submit immediately.
 
-## Kickoff (the first thing you do)
+## Kickoff (after bitzer's go - not before)
 
-shirley starts with an empty session and no prompt - that is deliberate. You give
-her the first one. Take the "Opening directive" from MISSION.md and send it to
-shirley using the mechanics above. That starts the run. From then on, drive.
+shirley starts with an empty session and no prompt - that is deliberate, and you
+do not jump in on your own. After you assume the role, confirm you are ready and
+wait for bitzer's go signal (a message such as "Begin the run." typed into your
+pane). When it arrives, take the "Opening directive" from MISSION.md and send it
+to shirley using the mechanics above. That starts the run. From then on, drive.
 
 ## Context hygiene and STANDBY
 
