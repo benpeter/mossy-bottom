@@ -10,3 +10,6 @@ HH:MM | <state> | <action taken, or "-">
 State is one of: working, idle, asking, claiming-done, errored, stuck, illegible.
 
 ---
+21:10 | working | sent opening directive; shirley processing
+21:11 | working | -
+21:12 | working | -
