@@ -68,3 +68,36 @@ there, so the separate-session topology remains a one-line change if wanted.
    prompt.
 3. Invoke the planning skill, commit the plan, then build barn.sh, the prompts,
    and MISSION/GUARDRAILS.
+
+---
+
+## 2026-06-07 20:47 CEST - Empirical smoke test complete
+
+Ran the mandated smoke test in a detached `smoke` window inside `woodpecker`,
+driving a scratch Claude Code session by `send-keys` / `capture-pane` exactly as
+shaun will drive shirley. Full technical findings, with verbatim signatures, are
+in docs/smoke-test.md. The scratch instance and its window were torn down
+afterward; `woodpecker` is back to a single window.
+
+**Headline findings, each of which shapes the build:**
+
+- Boot has a trust-folder gate even with skip-permissions. barn.sh must accept it
+  (send `Enter`) and then wait for the idle box before sending role prompts.
+- Idle versus busy is reliably told by a double-snapshot: two `capture-pane`
+  reads about 2s apart are identical when idle and differ when busy. Static cues
+  back it up - an empty `❯` box with a `← for agents` suffix when idle, a
+  `● <gerund>…` spinner when busy. The verb rotates, so this is judgment, not
+  regex. This answers open question #1: judgment-based idle detection is feasible.
+- Multi-line prompts (open question #3): `send-keys -l` with embedded newlines
+  composes the block, and a separate `Enter` submits it as one message. Bracketed
+  paste works as a fallback.
+- There is no reliable single-key clear, so the discipline is to compose the whole
+  message and submit it at once, never leaving partial input in the box.
+- Interrupt is `Escape`. It also restores the interrupted prompt into the box, so
+  shaun must overwrite before composing anew.
+- Selection menus (the trust gate, and post-PoC permission prompts) are a
+  distinct, mechanically detectable `waiting-input` signature.
+
+Net result: the bootstrap heuristic is concrete, and timmy has a v0 spec
+(snapshot diffing plus the state cues). Next: invoke the planning skill, commit
+the plan, then build barn.sh, the prompts, and MISSION/GUARDRAILS.
