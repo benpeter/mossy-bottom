@@ -103,6 +103,8 @@ Early. This repo is being built in the open. Follow along:
 
 - [`docs/spawn-full.md`](docs/spawn-full.md) - the full, locked design.
 - [`docs/spawn-caveman.md`](docs/spawn-caveman.md) - a terse twin for quick reference.
+- [`docs/plan.md`](docs/plan.md) - the implementation plan.
+- [`docs/smoke-test.md`](docs/smoke-test.md) - empirical tmux findings that shaped the build.
 - [`docs/build-journal.md`](docs/build-journal.md) - how this went from prompt to plan to execution.
 - `CHRONICLE.md` and `docs/findings.md` - written during and after the runs.
 
