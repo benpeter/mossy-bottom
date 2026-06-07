@@ -49,5 +49,16 @@ assert_state "$busy_sess" busy 10 "advancing pane classified busy"
 
 tmux kill-session -t "$busy_sess" 2>/dev/null
 
+# --- fixture: a STALLED pane - identical snapshots but a spinner is present.
+# Snapshot-diff alone would call this idle; the spinner cue must force busy.
+spin_sess="timmy_t_spin_$$"
+tmux new-session -d -s "$spin_sess" -x 80 -y 24 \
+  'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$spin_sess" busy 10 "stalled frame with spinner classified busy"
+
+tmux kill-session -t "$spin_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

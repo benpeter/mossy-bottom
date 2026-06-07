@@ -58,19 +58,30 @@ done
 
 snapshot() { tmux capture-pane -p -t "$pane"; }
 
+# A working session shows a spinner line: the bullet glyph, a rotating gerund,
+# and an ellipsis (smoke-test.md section 3, e.g. "● Whirring…"). The verb
+# rotates, so we match the stable SHAPE, not any one word. LC_ALL=C keeps the
+# match on the literal UTF-8 bytes regardless of the caller's locale.
+has_spinner() { printf '%s\n' "$1" | LC_ALL=C grep -qE '●.*…'; }
+
 snap1="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 sleep "$INTERVAL"
 snap2="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 
-if [ "$snap1" = "$snap2" ]; then
-  state="idle"; code="$EXIT_IDLE"; differ="false"
+if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
+if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+
+# A spinner present means working even if the frame stalled between snapshots;
+# otherwise advancing output (snapshots differ) means busy; else idle.
+if [ "$spinner" = "true" ] || [ "$differ" = "true" ]; then
+  state="busy"; code="$EXIT_BUSY"
 else
-  state="busy"; code="$EXIT_BUSY"; differ="true"
+  state="idle"; code="$EXIT_IDLE"
 fi
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi
