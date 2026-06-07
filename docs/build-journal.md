@@ -101,3 +101,51 @@ afterward; `woodpecker` is back to a single window.
 Net result: the bootstrap heuristic is concrete, and timmy has a v0 spec
 (snapshot diffing plus the state cues). Next: invoke the planning skill, commit
 the plan, then build barn.sh, the prompts, and MISSION/GUARDRAILS.
+
+---
+
+## 2026-06-07 21:05 CEST - Harness built and verified live
+
+Wrote the plan (docs/plan.md), then built the harness: MISSION.md, GUARDRAILS.md,
+the TICKS/CHRONICLE/ESCALATIONS state files, bin/barn.sh, prompts/shaun.md, and
+prompts/bitzer.md - one commit each. One self-caught fix along the way: shaun's
+boot message originally told it to auto-start driving shirley, which violates the
+run protocol (Farmer -> bitzer -> shaun -> shirley). Corrected so shaun assumes
+its role and waits for bitzer's "Begin the run" nudge.
+
+Then ran the acceptance test - `bin/barn.sh up` with `MOSSY_SESSION=woodpecker`.
+It raised window `mossy` detached (window 0, the builder, kept the active view),
+created three panes, and wrote .barn-panes:
+
+```
+bitzer=%3  shaun=%4  shirley=%5
+```
+
+After about 60s each pane had booted (trust gate auto-accepted, idle box reached)
+and assumed its role, verified by capturing each pane:
+
+- **bitzer** read MISSION + GUARDRAILS, restated them, identified itself as the
+  logistical channel, and is standing by for the Farmer: "I will not nudge shaun
+  until you say the run starts."
+- **shaun** read shaun.md, restated the trust/diet/guardrails rules, noted shirley
+  is pane %5 (targeted by id), and is awaiting bitzer's go: "I will not jump in on
+  my own; shirley starts empty by design." The fix held - shaun did not
+  auto-start.
+- **shirley** is idle with an empty input box, cwd `timmy/`, and NO prompt
+  delivered. The asymmetry that defines the experiment is intact.
+
+Two notes for the record:
+
+- **Pane titles.** Claude overrides the tmux pane title with its own task summary,
+  so the border labels are not the role names. Pane identity comes from
+  .barn-panes, not titles, so this is cosmetic only.
+- **Public hygiene.** The Claude boot splash carries a personal welcome line and
+  the account email. They scroll off once work begins, and the run artifacts
+  (CHRONICLE/TICKS) are prose written by shaun and bitzer rather than raw boot
+  dumps, so they should not leak. Still, anyone committing raw `capture-pane`
+  output from a run must trim the splash first; the captured snippets in this
+  repo's docs are sanitized accordingly.
+
+**State:** the chain is UP and WAITING in `woodpecker:mossy`. The harness is
+verified. Per the run protocol, starting the timed run is the Farmer's call -
+attach and tell bitzer the run starts. Nothing auto-runs until then.
