@@ -28,12 +28,25 @@ tmux new-session -d -s "$sess" -x 100 -y 30 -c "$workdir" \
        -u CLAUDE_CODE_EXECPATH -u AI_AGENT -u CLAUDE_EFFORT \
    claude --dangerously-skip-permissions; echo TIMMY_CLAUDE_EXITED; sleep 600"
 
-# Settle loop: accept the trust gate if it appears, wait for the idle box.
+# Settle loop. When the trust gate appears, classify it live (it is a real
+# waiting-input menu) BEFORE accepting it, then accept and wait for the idle box.
 settled=0
+gate_seen=0
+wi_word=""; wi_code=""
 for _ in $(seq 1 40); do
   sleep 1
   frame="$(tmux capture-pane -p -t "$sess" 2>/dev/null)"
   if printf '%s\n' "$frame" | grep -q 'trust this folder'; then
+    if [ "$gate_seen" -eq 0 ]; then
+      gate_seen=1
+      show "live trust-gate frame (a real waiting-input menu, verbatim)"
+      rule; tmux capture-pane -p -t "$sess"; rule
+      show "timmy on the live trust gate"
+      wi_json="$(TIMMY_INTERVAL=0.5 "$timmy" --pane "$sess" --json)"
+      wi_word="$(TIMMY_INTERVAL=0.5 "$timmy" --pane "$sess")"; wi_code=$?
+      printf 'json: %s\n' "$wi_json"
+      printf 'word: %s   exit: %s\n' "$wi_word" "$wi_code"
+    fi
     tmux send-keys -t "$sess" Enter   # accept the trust gate (option 1)
     continue
   fi
@@ -78,6 +91,15 @@ printf 'word: %s   exit: %s\n' "$busy_word" "$busy_code"
 
 show "verdict"
 fail=0
+if [ "$gate_seen" -eq 1 ]; then
+  if [ "$wi_word" = "waiting-input" ] && [ "$wi_code" -eq 20 ]; then
+    echo "ok   - live trust gate classified waiting-input"
+  else
+    echo "FAIL - live waiting-input (got '$wi_word' exit $wi_code)"; fail=1
+  fi
+else
+  echo "SKIP - trust gate did not appear (cwd already trusted)"
+fi
 if [ "$idle_word" = "idle" ] && [ "$idle_code" -eq 0 ]; then
   echo "ok   - live idle box classified idle"
 else
