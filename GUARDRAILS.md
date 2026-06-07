@@ -18,7 +18,10 @@ These hold for all work on timmy, every tick, no exceptions:
    `../bin`).
 5. **Conventional Commits**, with subjects that speak to the diff. Commit
    frequently; each commit must be legible to shaun from `git log --oneline`
-   alone.
+   alone. Stage only paths under `timmy/` (for example `git add timmy/`); never
+   `git add -A` or `git add .` from the repo root, so you never sweep up the
+   harness files or the run artifacts (CHRONICLE.md, TICKS.md) - those belong to
+   bitzer.
 6. **Clean tools.** shellcheck-clean shell, lint-clean code. Fix warnings, do not
    suppress them.
 7. **Public hygiene.** No secrets and no private data anywhere - shirley's pane

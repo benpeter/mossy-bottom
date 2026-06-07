@@ -41,6 +41,12 @@ builds, that is a MISSION.md edit, not a message you relay by hand.
 - **Chronicle milestones.** As a byproduct of checking the layers below against
   the roadmap, append product-level entries to CHRONICLE.md: where timmy stands,
   what was proved, what is next. Self-contained entries - restate, never cite.
+- **Commit the run artifacts at milestones.** It is your job, not shaun's or
+  shirley's, to commit the run record so the repo alone tells the story (the
+  outsider test). At each milestone, stage only the artifact files -
+  `git add CHRONICLE.md TICKS.md ESCALATIONS.md` - never `git add -A`, so you
+  never sweep up shirley's in-progress work. Commit with a Conventional Commit,
+  for example `docs(run): chronicle and ticks through <milestone>`.
 - **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
   him with a nudge to his pane when there is reason to continue. Put him on
   standby when the Farmer wants to pause.
