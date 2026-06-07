@@ -74,8 +74,9 @@ tmux kill-session -t "$menu_sess" 2>/dev/null
 # A genuine Claude idle box: empty "❯" box fenced by rules, mode line ending in
 # the "← for agents" suffix (smoke-test.md section 2). The two fixtures below
 # differ only in whether the last assistant ("⏺") line ends in a question mark.
-# Note: '%%' so the pane's printf emits a literal '%' (Context: 5%).
-idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/timmy | Opus 4.8 | Context: 5%%\n  bypass permissions on \xc2\xb7 \xe2\x86\x90 for agents\n'
+# Note: '%%' so the pane's printf emits a literal '%' (Context: 5%). The mode
+# line carries the real "⏵⏵ ... (shift+tab to cycle) · ← for agents" shape.
+idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/timmy | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'
 
 # --- fixture: idle box whose last assistant line ends in '?' -> question ---
 q_sess="timmy_t_q_$$"
@@ -97,6 +98,32 @@ sleep 0.5
 assert_state "$ib_sess" idle 0 "genuine idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ib_sess" 2>/dev/null
+
+# A NARROW idle box (width 50): the mode line truncates before "← for agents"
+# (verified empirically against a live session: "...(shift+tab to cycle ·"). The
+# width-robust cues - the "⏵⏵" mode marker and the empty "❯" box - must still
+# identify the idle box so question/idle work at narrow widths. '%%' -> '%'.
+narrow_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/t | Opus 4.8 | Ctx 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle \xc2\xb7\n'
+
+# --- fixture: narrow idle box whose last assistant line ends in '?' -> question.
+nq_sess="timmy_t_nq_$$"
+tmux new-session -d -s "$nq_sess" -x 50 -y 24 \
+  "printf '\xe2\x8f\xba Should I proceed with the merge?\n${narrow_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$nq_sess" question 30 "narrow idle box ending in '?' classified question"
+
+tmux kill-session -t "$nq_sess" 2>/dev/null
+
+# --- fixture: same narrow box, last line ends in '.' -> idle (guard). ---
+ni_sess="timmy_t_ni_$$"
+tmux new-session -d -s "$ni_sess" -x 50 -y 24 \
+  "printf '\xe2\x8f\xba All settled now.\n${narrow_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ni_sess" idle 0 "narrow idle box (ends in '.') classified idle"
+
+tmux kill-session -t "$ni_sess" 2>/dev/null
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

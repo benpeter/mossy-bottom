@@ -30,9 +30,9 @@ Options:
   -h, --help    show this help
 
 States and exit codes:
-  idle           0    idle box ("← for agents" suffix), last line not a '?';
-                      or, with no suffix, two identical snapshots
-  busy          10    a spinner line is present, or (no idle suffix) snapshots
+  idle           0    settled Claude box ("⏵⏵" mode line + empty "❯"), last
+                      line not a '?'; or, if not a Claude box, identical snapshots
+  busy          10    a spinner line is present, or (not a Claude box) snapshots
                       differ
   waiting-input 20    a numbered selection menu is shown
   question      30    idle box whose last assistant line ends in '?'
@@ -75,12 +75,20 @@ has_menu() {
 }
 
 # A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line
-# and a mode line ending in the "← for agents" suffix. That suffix is absent
-# while busy (section 3), so it is the positive marker of a settled idle box -
-# this is what gates question, keeping it off random static panes.
+# plus the "⏵⏵ ... (shift+tab to cycle)" mode line. We key on the "⏵⏵" marker,
+# NOT the trailing "← for agents" suffix: that suffix is the FIRST thing to
+# truncate on a narrow pane (verified live - at width 50 the mode line ends
+# "...(shift+tab to cycle ·" with the suffix gone), whereas "⏵⏵" and "❯" are
+# left-aligned and survive. The spinner check (above) already separates busy,
+# so a settled "⏵⏵" box with no spinner is idle/question at any width.
 is_idle_box() {
-  printf '%s\n' "$1" | LC_ALL=C grep -qE '❯' \
-    && printf '%s\n' "$1" | LC_ALL=C grep -q '← for agents'
+  # Claude renders the empty input line as "❯" + a U+00A0 NO-BREAK SPACE, which
+  # grep's [[:space:]] does NOT reliably match (verified live). Normalise the
+  # no-break space to a plain space in-shell (locale-independent) before testing.
+  local nbsp=$'\xc2\xa0' text
+  text="${1//$nbsp/ }"
+  printf '%s\n' "$text" | LC_ALL=C grep -qE '^❯[[:space:]]*$' \
+    && printf '%s\n' "$text" | LC_ALL=C grep -q '⏵⏵'
 }
 
 # Mechanical first cut at a question: the last assistant line (prefixed "⏺",
