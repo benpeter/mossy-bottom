@@ -71,5 +71,32 @@ assert_state "$menu_sess" waiting-input 20 "selection menu classified waiting-in
 
 tmux kill-session -t "$menu_sess" 2>/dev/null
 
+# A genuine Claude idle box: empty "❯" box fenced by rules, mode line ending in
+# the "← for agents" suffix (smoke-test.md section 2). The two fixtures below
+# differ only in whether the last assistant ("⏺") line ends in a question mark.
+# Note: '%%' so the pane's printf emits a literal '%' (Context: 5%).
+idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/timmy | Opus 4.8 | Context: 5%%\n  bypass permissions on \xc2\xb7 \xe2\x86\x90 for agents\n'
+
+# --- fixture: idle box whose last assistant line ends in '?' -> question ---
+q_sess="timmy_t_q_$$"
+tmux new-session -d -s "$q_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Want me to take question next, or harden idle first?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$q_sess" question 30 "idle box ending in '?' classified question"
+
+tmux kill-session -t "$q_sess" 2>/dev/null
+
+# --- fixture: same genuine idle box, last assistant line ends in '.' -> idle.
+# Proves the idle box is positively recognised and NOT misread as question. ---
+ib_sess="timmy_t_ib_$$"
+tmux new-session -d -s "$ib_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba All four states are wired up now.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ib_sess" idle 0 "genuine idle box (ends in '.') classified idle"
+
+tmux kill-session -t "$ib_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

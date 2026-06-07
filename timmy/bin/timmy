@@ -11,8 +11,7 @@ set -uo pipefail
 readonly EXIT_IDLE=0
 readonly EXIT_BUSY=10
 readonly EXIT_WAITING=20
-# question (30) is documented in --help and reserved for a later slice; its
-# constant lands when that state is implemented.
+readonly EXIT_QUESTION=30
 
 # Seconds between the two snapshots. Overridable for fast tests; the default
 # matches the ~2s the smoke test used.
@@ -31,10 +30,10 @@ Options:
   -h, --help    show this help
 
 States and exit codes:
-  idle           0    snapshots identical, no spinner, no menu
+  idle           0    settled idle box, last assistant line not a question
   busy          10    snapshots differ, or a spinner line is present
   waiting-input 20    a numbered selection menu is shown
-  question      30    idle box ending in an ask   (not yet implemented)
+  question      30    idle box whose last assistant line ends in '?'
 
 Environment:
   TIMMY_INTERVAL   seconds between the two snapshots (default: 2)
@@ -73,6 +72,27 @@ has_menu() {
     && printf '%s\n' "$1" | grep -q 'Enter to confirm'
 }
 
+# A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line
+# and a mode line ending in the "← for agents" suffix. That suffix is absent
+# while busy (section 3), so it is the positive marker of a settled idle box -
+# this is what gates question, keeping it off random static panes.
+is_idle_box() {
+  printf '%s\n' "$1" | LC_ALL=C grep -qE '❯' \
+    && printf '%s\n' "$1" | LC_ALL=C grep -q '← for agents'
+}
+
+# Mechanical first cut at a question: the last assistant line (prefixed "⏺",
+# section 3), trailing space trimmed, ends in a question mark. Reliable question
+# detection is a later hardening (backlog item 1).
+ends_in_question() {
+  local last
+  last="$(printf '%s\n' "$1" | LC_ALL=C grep '⏺' | tail -n 1 | sed 's/[[:space:]]*$//')"
+  case "$last" in
+    *'?') return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 snap1="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 sleep "$INTERVAL"
 snap2="$(snapshot)" || die "capture-pane failed for pane '$pane'"
@@ -80,20 +100,25 @@ snap2="$(snapshot)" || die "capture-pane failed for pane '$pane'"
 if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
 if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
 if has_menu "$snap2"; then menu="true"; else menu="false"; fi
+if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
+if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
 
-# Precedence: a menu is asking for a choice (waiting-input) regardless of
-# motion. Else a spinner, or advancing output, means busy. Else idle.
+# Precedence: a menu asks for a choice (waiting-input) regardless of motion.
+# Else a spinner or advancing output means busy. Else, inside a genuine idle
+# box, a trailing question mark means question. Otherwise idle.
 if [ "$menu" = "true" ]; then
   state="waiting-input"; code="$EXIT_WAITING"
 elif [ "$spinner" = "true" ] || [ "$differ" = "true" ]; then
   state="busy"; code="$EXIT_BUSY"
+elif [ "$idle_box" = "true" ] && [ "$ends_q" = "true" ]; then
+  state="question"; code="$EXIT_QUESTION"
 else
   state="idle"; code="$EXIT_IDLE"
 fi
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$menu" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"ends_in_question":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$ends_q" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi
