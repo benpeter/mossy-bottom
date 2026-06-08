@@ -125,5 +125,30 @@ assert_state "$ni_sess" idle 0 "narrow idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ni_sess" 2>/dev/null
 
+# A MULTI-LINE assistant turn (reconstructed from a verbatim live capture): the
+# question is an indented CONTINUATION line (no "⏺" prefix), followed by the
+# "✻ ... for Ns" post-turn timer and a tip footer. The last content line of the
+# message - not the last "⏺" line - is the question. '✻' = e2 9c bb.
+mlq_sess="timmy_t_mlq_$$"
+tmux new-session -d -s "$mlq_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba - tmux lets you run multiple terminal sessions in one window via splits and panes.\n  - tmux sessions persist after you detach, so long-running work survives disconnects.\n\n  Which one do you want me to explain?\n\n\xe2\x9c\xbb Cooked for 5s\n  tmux focus-events off, a footer tip ending in a period.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$mlq_sess" question 30 "multi-line turn (question as continuation line) classified question"
+
+tmux kill-session -t "$mlq_sess" 2>/dev/null
+
+# Guard: a statement as the last content line, with ADVERSARIAL chrome - the tip
+# footer below "✻" ends in '?'. The footer must not mask the real last line, and
+# must not fabricate a question: this must read idle, not question.
+cs_sess="timmy_t_cs_$$"
+tmux new-session -d -s "$cs_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba All four states are wired up now.\n\n\xe2\x9c\xbb Cooked for 1s\n  Tip: press ? for keyboard shortcuts?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$cs_sess" idle 0 "statement with adversarial '?' chrome footer classified idle"
+
+tmux kill-session -t "$cs_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

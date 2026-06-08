@@ -91,16 +91,33 @@ is_idle_box() {
     && printf '%s\n' "$text" | LC_ALL=C grep -q '⏵⏵'
 }
 
-# Mechanical first cut at a question: the last assistant line (prefixed "⏺",
-# section 3), trailing space trimmed, ends in a question mark. Reliable question
-# detection is a later hardening (backlog item 1).
+# Does the assistant's final message end in a question? Multi-line turns only
+# prefix their FIRST line with "⏺"; the real closing line is often an indented
+# CONTINUATION. So find the last non-blank CONTENT line, not the last "⏺" line:
+#   1. drop the input box and status tail (everything from the empty "❯" down);
+#   2. cut above the "✻ ... for Ns" post-turn timer, which also drops the tip
+#      footer rendered below it (a footer must never mask or fake the question);
+#   3. the last remaining non-blank line is the closing content line.
+# Then test whether THAT line ends in '?'. ("✻" = e2 9c bb.) The no-break space
+# is normalised so the empty-box match in step 1 is reliable.
 ends_in_question() {
-  local last
-  last="$(printf '%s\n' "$1" | LC_ALL=C grep '⏺' | tail -n 1 | sed 's/[[:space:]]*$//')"
-  case "$last" in
-    *'?') return 0 ;;
-    *) return 1 ;;
-  esac
+  local nbsp=$'\xc2\xa0'
+  printf '%s\n' "${1//$nbsp/ }" | LC_ALL=C awk '
+    { line[NR] = $0 }
+    END {
+      box = 0
+      for (i = NR; i >= 1; i--) if (line[i] ~ /^❯ *$/) { box = i; break }
+      hi = (box > 0) ? box - 2 : NR
+      cut = hi + 1
+      for (i = hi; i >= 1; i--) if (line[i] ~ /✻.*for [0-9]+s *$/) { cut = i; break }
+      last = ""
+      for (i = cut - 1; i >= 1; i--) {
+        s = line[i]; sub(/[ \t]+$/, "", s)
+        if (s != "") { last = s; break }
+      }
+      exit (last ~ /\?$/) ? 0 : 1
+    }
+  '
 }
 
 snap1="$(snapshot)" || die "capture-pane failed for pane '$pane'"

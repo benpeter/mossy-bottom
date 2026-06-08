@@ -79,20 +79,20 @@ else
   echo "FAIL - live question (got '$w1' exit $c1)"; fail=1
 fi
 
-# --- case 2: a multi-line turn (content THEN a question) - heuristic probe ---
+# --- case 2: a multi-line turn (content THEN a continuation-line question) ---
 show "case 2: driving a multi-line turn (list, then a trailing question)"
 send_prompt "List two short bullet points about tmux, then on a new final line ask me which one I want explained, ending in a question mark."
 q2="$(await_turn)"
 show "case 2 settled frame (verbatim)"
 rule; tmux capture-pane -p -t "$sess"; rule
-show "timmy on case 2 (DIAGNOSTIC - exposes the heuristic, not a gate)"
-j2="$(classify_json)"; w2="$(classify)"
+show "timmy on case 2 (multi-line: question is an indented continuation line)"
+j2="$(classify_json)"; w2="$(classify)"; c2=$?
 printf 'json: %s\n' "$j2"
-printf 'word: %s   (await_turn saw: %s)\n' "$w2" "$q2"
-if [ "$w2" = "question" ]; then
-  echo "note - heuristic held: last ⏺ line was the question"
+printf 'word: %s   exit: %s   (await_turn saw: %s)\n' "$w2" "$c2" "$q2"
+if [ "$w2" = "question" ] && [ "$c2" -eq 30 ]; then
+  echo "ok   - live multi-line turn classified question"
 else
-  echo "note - heuristic did NOT fire: question was not the last ⏺ line (read '$w2')"
+  echo "FAIL - live multi-line question (got '$w2' exit $c2)"; fail=1
 fi
 
 show "verdict"
