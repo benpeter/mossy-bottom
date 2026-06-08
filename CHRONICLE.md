@@ -199,3 +199,131 @@ shirley shadowing, and it remains correct; the actual cause here was shaun's pat
 addressed by steering, not by another guardrail. One cosmetic residue: shaun's
 wake entry above is stamped 08:25, but the real clock and his own tick read 03:38
 - left as written, since the chronicle is append-only.
+
+## 08:50 - Shadow-file race corrected; question proven live, multi-line limit exposed (shaun)
+
+Two threads this wake. First, a self-inflicted scare worth recording. When bitzer
+told me GUARDRAILS rule 4 was amended to forbid run-artifact filenames inside
+timmy/ and that timmy/CHRONICLE.md and timmy/TICKS.md existed as shadows, I read
+them as shirley's stray files and directed shirley to delete them. They were
+actually my own ledger and chronicle, misfiled into timmy/ because my relative
+">> TICKS.md" appends ran from a timmy/ working directory and landed there instead
+of the repo root. bitzer caught it and sent a correction, but my delete order had
+already reached shirley and she ran "rm -f" seconds before it arrived; the
+untracked files were gone. Nothing was lost: bitzer had copied both aside and
+merged their full content chronologically into the root TICKS.md and CHRONICLE.md
+(commit 3f27021). Root cause and fix: I now write run artifacts only to the repo
+root by absolute path, never relative from timmy/, and I never stage or commit them
+- the root artifacts are bitzer's to commit at milestones (rule 5). Lesson logged
+so a future reader knows why the run history briefly forked and rejoined.
+
+Second, the work advanced. shirley proved the question state live: commit bcd39d4
+"test(timmy): prove question live; expose the multi-line heuristic limit". A real
+throwaway claude session driven into a single-line question frame read question
+live (case 1). The same run exposed case 2 - a multi-line assistant turn where the
+'?' is not the last rendered line - which the mechanical "last bullet line ends in
+?" heuristic misses; shirley captured the verbatim frame shape and recorded it as
+a non-gating diagnostic rather than papering over it. All four v1 words are now
+proven against a real pane, with question's multi-line gap honestly open. She did
+not claim done.
+
+Action: re-anchored to the next backlog slice (item 1, reliable question
+detection) - build robust multi-line question detection that finds the last
+non-empty content line of the assistant's final message block while skipping
+trailing chrome (the "brewed for Ns" line, tip footers), RED-first from a fixture
+reconstructed from the real case-2 capture, with two mandatory guards (a normal
+idle box still reads idle - no false positive; the footer must not mask the real
+last line), then a live re-run confirming both cases read question. This matched
+shirley's own recommendation.
+
+## 2026-06-08 - multi-line question slice accepted; shirley compacted
+
+Post-compaction wake. Adopted two policy changes confirmed in the files:
+(1) shaun now manages compaction for shirley as well as himself (prompts/shaun.md
+"Context management and STANDBY"); (2) shirley no longer chooses the next slice -
+shaun selects from the MISSION backlog (MISSION.md "Direction is shaun's", and the
+claiming-done action in shaun.md).
+
+shirley was idle-at-prompt, claiming the robust multi-line question slice done.
+Verified by evidence, not by her word: commit 64c4738 surfaces the test summary -
+hermetic suite 10/10, plus the two guards I had mandated, both green (a
+continuation-line question reads question; an adversarial tip footer ending in '?'
+still reads idle). live-question case 2 is now a gated assertion (single-line and
+multi-line continuation question both read question live). The commit touched only
+timmy/ (bin/timmy, test/run.sh, test/live-question.sh) - stayed home. Last tick had
+already proved case 1 live (bcd39d4). All four v1 words now proven against a real
+Claude Code pane. Accepted.
+
+shirley honestly surfaced a real gap she did NOT paper over: the last-content-line
+cut anchors on the post-turn timer line; if a turn fully settles and that timer
+line vanishes while a tip footer lingers, the footer could become the "last content
+line" and corrupt question detection. That is a correctness hole in shipped
+behavior - the most load-bearing next step, above net-new features. She proposed
+exactly this; I am selecting it on my own reasoning (close a known correctness gap
+before gold-plating), not because she asked. Her proposed framing ("drive a live
+session and see what remains") I am tightening to hermetic + RED-first so it lands
+inside the Farmer's ~1h window.
+
+Her pane footer showed "/clear to save 236.3k tokens" - context heavy. She was idle,
+the only time compaction works, so I compacted her (keep the v1 spec, the
+question-detection algorithm and its known timer-cut gap, and the proven status;
+drop exploration) before handing the next slice. Re-anchor goes out next tick once
+she settles from compaction.
+
+## 2026-06-08 - settled-frame gap closed; re-anchored to watch mode
+
+shirley closed the timer-cut gap she had surfaced. Verified by evidence: commit
+566ed67 surfaces "12/12 green" with the two guards I mandated (timer-gone +
+question survives; timer-gone + adversarial '?' tip footer stays idle). She kept the
+timer regex unchanged per the constraint and added a no-timer fallback that strips
+footer chrome by its own signature ("Tip:" prefix or " · " hint separator). Scope
+clean: only timmy/bin/timmy and timmy/test/run.sh. RED-first honored. She listed
+honest residual edges (other footer shapes, a content line containing " · ",
+hermetic-only/no live confirmation, single machine/version) and held for my call
+rather than picking next - respecting direction-is-shaun's. Accepted on the
+surfaced test-summary (my diet trusts it) plus git scope confirmation.
+
+Next slice is mine: minimal watch mode (backlog item 2). Reasoning I own: the
+mission's verb is "watches a pane," so a --watch loop is the most load-bearing next
+capability - net mission value, not the speculative configurability YAGNI warns
+against (deferred backlog item 3). Scoped tight and RED-first: reuse the existing
+classifier, emit one line per state CHANGE only (initial state once, then silence
+while unchanged), clean signal exit, nonzero on classify error; hermetic test drives
+a synthetic pane idle->busy->idle and asserts exactly three ordered lines with no
+duplicate-on-hold. Given the Farmer calls time in ~35 min, I attached a pacing
+guard: if the long-running-loop harness turns fiddly enough to threaten landing a
+proven result, stop at the largest proven sub-slice (the emit-on-change decision
+unit-tested without the live loop) and report - a clean proven boundary beats a
+bigger half-built one.
+
+## 10:04 (2026-06-08) - Run 1 closed (bitzer)
+
+The Farmer called time on run 1. timmy stands as a working, vanilla,
+single-purpose CLI, closed at a clean proven boundary with no half-built work left
+in the tree.
+
+What it achieved against the roadmap. The v1 specification is fully met and, more
+than that, proven against reality: timmy --pane classifies a real Claude Code pane
+as one of busy|idle|waiting-input|question, with --json evidence output and a
+distinct exit code per state (0/10/20/30). All four words were validated live
+against a genuine Claude session in a detached pane, not only against synthetic
+fixtures - the one place a blind spot would have hidden. Past v1, two backlog
+expansions were taken. Item 1 (reliable question detection) was substantially
+delivered: question is gated by a positive idle-box cue, survives a multi-line
+assistant turn, and survives a settled frame whose post-turn timer has vanished
+(two adversarial guards). Item 2 (watch mode) landed its core: timmy --watch emits
+one line per state change over the shared classifier - 13/13 hermetic tests green,
+stable across three repeated runs, shellcheck clean (commit 02cb59e).
+
+State at close and what run 2 inherits. Open, named honestly rather than papered
+over: --watch's clean signal-exit and classify-error paths were left unproven at
+the bell; question detection still has untested footer shapes and only
+single-machine confirmation; and backlog items 3 (configurable interval and capture
+depth), 4 (a man page), and 5 (property tests) are untouched. The run held its
+discipline throughout - never a false "done," every accepted claim backed by
+visible test output and a scope-checked commit inside timmy/. The one process
+failure, a stretch of shaun's ledger misfiled into timmy/ and a mis-ordered
+cleanup, was caught and fully repaired with no history lost, and the guardrails and
+prompts were amended mid-run (anti-shadowing, the compaction duty, direction-
+ownership moving to shaun) without disturbing the build. timmy works, its limits
+are known, and the repo alone tells the story.
