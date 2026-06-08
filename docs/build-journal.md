@@ -149,3 +149,53 @@ Two notes for the record:
 **State:** the chain is UP and WAITING in `woodpecker:mossy`. The harness is
 verified. Per the run protocol, starting the timed run is the Farmer's call -
 attach and tell bitzer the run starts. Nothing auto-runs until then.
+
+---
+
+## 2026-06-08 03:55 CEST - Course-corrections: context management and direction ownership
+
+Run 1 has been live (kicked off 2026-06-07 21:10). It is validating itself:
+
+- **The chain self-corrected a drift.** shirley had shadowed the run artifacts as
+  `timmy/CHRONICLE.md` and `timmy/TICKS.md`. shaun caught it, had them migrated
+  back to the root, and a guardrail was added forbidding the shadow (commits
+  `4b1e4ca`, `3f27021`). No Farmer was involved - exactly the directional catch
+  the driver is supposed to make.
+- **shaun manages its own context.** It proactively ended a turn with `STANDBY` at
+  a clean slice boundary when its context grew, rather than soldiering on degraded.
+
+Two corrections the Farmer asked for, now applied:
+
+1. **Context management (compaction).** Verified against the Claude Code docs:
+   `/compact <focus>` accepts free-text focus instructions; the footer
+   `Context: N%` is context USED (climbs toward ~85-90%, where Claude
+   auto-compacts); `/compact` sent via `send-keys` works on an idle pane, not
+   mid-turn. Policy now in the prompts: shaun compacts shirley (targeted, while she
+   is idle, when high); shaun ends with `STANDBY (context)` when its own context is
+   heavy and bitzer compacts shaun before waking; the Farmer compacts bitzer by
+   typing `/compact` directly into bitzer's pane (the Farmer types into bitzer
+   normally - `send-keys` is only for cross-pane). Auto-compaction is the backstop
+   throughout.
+2. **Direction ownership.** shirley had begun proposing the next slice ("my
+   recommendation for next..."). MISSION.md now states that shirley reports what
+   she proved plus blockers, but does not pick the next slice - shaun selects from
+   the backlog, and shirley's direction suggestions are noise to set aside (trust
+   rule).
+
+**Change-management protocol (the meta-question: how to brief changes so they are
+transparent and trackable).**
+
+- **The ledger is git.** Every change is a Conventional Commit; the history is the
+  transparent, trackable record. No side channel needed for the record itself.
+- **Propagation to a live run depends on what each agent re-reads.** shaun re-reads
+  MISSION.md and GUARDRAILS.md every tick, so changes there reach the run within
+  one tick (proven: the shadow-forbid guardrail propagated on its own). Role
+  prompts (shaun.md, bitzer.md) are read once at boot, so a change there is
+  propagated by a one-time re-read briefed through the steering channel
+  (Farmer -> bitzer -> shaun). Re-reading the long role files every tick was
+  rejected: it would bloat context, which is the opposite of what we want.
+- **GitHub issues as a change channel: deferred (post-PoC).** The Farmer can
+  already steer a live run remotely by attaching to bitzer over tmux. Issues only
+  earn their keep once steering-without-attaching is needed (for example filing a
+  change from a phone, which shaun would pick up via `gh` at each re-anchor without
+  a local pull). Kept on the roadmap, not built now.

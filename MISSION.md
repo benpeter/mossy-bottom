@@ -46,6 +46,11 @@ expansion from this backlog and re-anchors:
 shaun chooses the order based on what is most load-bearing next. The backlog may
 grow.
 
+**Direction is shaun's, not shirley's.** shirley reports what she did, what she
+proved, and any blocker or genuine ambiguity - she does not propose or choose the
+next slice. If shirley suggests what to build next, that is noise to set aside
+(trust rule); shaun selects the next expansion from this backlog.
+
 ## Scope bounds
 
 - Stay inside `timmy/`. Do not modify harness files in `../` (the prompts, the
@@ -59,5 +64,6 @@ grow.
 > MISSION.md: `timmy --pane <id>` prints one of busy|idle|waiting-input|question,
 > with `--json` and per-state exit codes, vanilla, tested. Build the smallest
 > thing that classifies idle vs busy first, prove it with a test whose output is
-> visible here, then stop and report what you did, what you verified, and what is
-> next. Do not tell me you are done - tell me what you proved.
+> visible here, then stop and report what you did and what you proved, plus any
+> blocker or genuine ambiguity. Do not tell me you are done, and do not propose
+> the next slice - report what you proved; what comes next is shaun's call.

@@ -49,7 +49,14 @@ builds, that is a MISSION.md edit, not a message you relay by hand.
   for example `docs(run): chronicle and ticks through <milestone>`.
 - **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
   him with a nudge to his pane when there is reason to continue. Put him on
-  standby when the Farmer wants to pause.
+  standby when the Farmer wants to pause. If the STANDBY names context (for
+  example `STANDBY (context)`) or shaun's `Context: N%` is high, compact him
+  before waking - he is idle on STANDBY, so send
+  `tmux send-keys -l -t $SHAUN -- "/compact keep the MISSION goal, the current scope expansion, the trust/diet/guardrails rules, shirley's pane id, and recent TICKS and CHRONICLE state; drop old tick detail"`
+  then `tmux send-keys -t $SHAUN Enter`, wait for it to finish, and then wake him.
+- **Your own context.** The Farmer compacts you by typing `/compact <focus>`
+  directly into your pane - you are focused here, so that is a normal keystroke, no
+  tmux needed. Auto-compaction is the backstop.
 - **Edit MISSION.md / GUARDRAILS.md only on the Farmer's word.** Never on your own
   initiative, never because shaun or shirley asked.
 

@@ -89,7 +89,8 @@ shapes are stable.
   evidence in the pane: tests run now, output visible. If the evidence holds,
   re-anchor: restate the mission and hand shirley the next scope expansion from
   MISSION.md's never-done backlog. "Done" is the trigger for more scope, never the
-  end.
+  end. shirley does not choose what is next - you do. If she proposed a next
+  slice, set it aside (trust rule) and pick from the backlog yourself.
 - **errored** -> tell shirley to read the error and fix it; if she already is,
   leave her working.
 - **stuck-looping** -> interrupt and redirect. Press Escape to stop her (see
@@ -121,18 +122,32 @@ wait for bitzer's go signal (a message such as "Begin the run." typed into your
 pane). When it arrives, take the "Opening directive" from MISSION.md and send it
 to shirley using the mechanics above. That starts the run. From then on, drive.
 
-## Context hygiene and STANDBY
+## Context management and STANDBY
 
-Your tick loop runs in one long turn, so your context grows. Keep ticks terse and
-let the files hold the memory. When your context feels heavy, or your judgment
-duller than at the start, end your turn with a single clear line:
+Watch the `Context: N%` reading in the footer - it is context USED, and it climbs
+toward roughly 85-90%, where Claude auto-compacts. Stay ahead of it for both
+shirley and yourself.
 
-```
-STANDBY - <one line: where shirley is, and what the next step is>
-```
+- **shirley.** When she is idle and her context is high (above about 70%), compact
+  her before you hand over the next slice. Compaction only works while she is idle,
+  not mid-turn. Send it like any prompt:
+  `tmux send-keys -l -t $SHIRLEY -- "/compact keep the timmy spec, the current slice, and the latest test status; drop exploration and old tool output"`
+  then `tmux send-keys -t $SHIRLEY Enter`. Auto-compaction is the backstop.
+- **Yourself.** You cannot compact yourself mid-turn. Your tick loop runs in one
+  long turn, so your context grows - keep ticks terse and let the files hold the
+  memory. When your context feels heavy, or your judgment duller than at the
+  start, end your turn at a clean boundary with a single line that names context
+  as the reason:
 
-bitzer watches for STANDBY and wakes you. Do not soldier on degraded - a tired
-driver is how the gradient collapses.
+  ```
+  STANDBY (context) - <where shirley is, and the next step>
+  ```
+
+  bitzer compacts you and wakes you. On wake, re-read MISSION.md, GUARDRAILS.md,
+  and the tails of TICKS.md and CHRONICLE.md to rehydrate - the files are your
+  memory, so you can let compaction cut hard. Use a plain `STANDBY - ...` line
+  (no `(context)`) when you are pausing for any other reason. Do not soldier on
+  degraded - a tired driver is how the gradient collapses.
 
 ## What you never do
 
