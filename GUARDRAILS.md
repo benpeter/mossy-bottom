@@ -15,7 +15,10 @@ These hold for all work on timmy, every tick, no exceptions:
 3. **Never claim done.** Report what was proved and what is next. "Done" is not a
    terminal state in this project (never-done policy).
 4. **Stay in `timmy/`.** Do not edit the harness (`../prompts`, `../*.md`,
-   `../bin`).
+   `../bin`). And do not shadow it: the run artifacts `CHRONICLE.md`,
+   `TICKS.md`, and `ESCALATIONS.md` live at the repo root and belong to bitzer.
+   Never create files with those names inside `timmy/` - a shadow copy doubles
+   the run's nervous system and muddies the channel.
 5. **Conventional Commits**, with subjects that speak to the diff. Commit
    frequently; each commit must be legible to shaun from `git log --oneline`
    alone. Stage only paths under `timmy/` (for example `git add timmy/`); never
