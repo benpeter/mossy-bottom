@@ -93,13 +93,25 @@ is_idle_box() {
 
 # Does the assistant's final message end in a question? Multi-line turns only
 # prefix their FIRST line with "⏺"; the real closing line is often an indented
-# CONTINUATION. So find the last non-blank CONTENT line, not the last "⏺" line:
-#   1. drop the input box and status tail (everything from the empty "❯" down);
-#   2. cut above the "✻ ... for Ns" post-turn timer, which also drops the tip
-#      footer rendered below it (a footer must never mask or fake the question);
-#   3. the last remaining non-blank line is the closing content line.
-# Then test whether THAT line ends in '?'. ("✻" = e2 9c bb.) The no-break space
-# is normalised so the empty-box match in step 1 is reliable.
+# CONTINUATION. So find the last non-blank CONTENT line, not the last "⏺" line.
+# First drop the input box and status tail (everything from the empty "❯" down),
+# then locate the closing content line two ways depending on the post-turn chrome:
+#
+#   TIMER PRESENT: cut above the "✻ ... for Ns" post-turn timer. The timer is a
+#     reliable anchor - everything at or below it is chrome (the timer plus any
+#     tip footer rendered beneath it), so the closing content line is the last
+#     non-blank line ABOVE the timer.
+#
+#   TIMER GONE (turn fully settled): the timer vanishes but a tip/hint footer can
+#     still linger directly above the box. With no anchor, walk up from the box
+#     and STRIP footer chrome by its own signature - a "Tip:" line, or a hint
+#     line carrying the " · " separator - rather than mistaking it for content.
+#     Stop at the first non-chrome, non-blank line: that is the closing line.
+#
+# Then test whether THAT line ends in '?'. ("✻" = e2 9c bb, "·" = c2 b7.) The
+# no-break space is normalised so the empty-box match is reliable. The timer
+# regex is intentionally NOT widened here - unseen verb/format variants are a
+# separate concern; this change only handles the timer's ABSENCE.
 ends_in_question() {
   local nbsp=$'\xc2\xa0'
   printf '%s\n' "${1//$nbsp/ }" | LC_ALL=C awk '
@@ -108,12 +120,25 @@ ends_in_question() {
       box = 0
       for (i = NR; i >= 1; i--) if (line[i] ~ /^❯ *$/) { box = i; break }
       hi = (box > 0) ? box - 2 : NR
-      cut = hi + 1
-      for (i = hi; i >= 1; i--) if (line[i] ~ /✻.*for [0-9]+s *$/) { cut = i; break }
+
+      timer = 0
+      for (i = hi; i >= 1; i--) if (line[i] ~ /✻.*for [0-9]+s *$/) { timer = i; break }
+
       last = ""
-      for (i = cut - 1; i >= 1; i--) {
-        s = line[i]; sub(/[ \t]+$/, "", s)
-        if (s != "") { last = s; break }
+      if (timer > 0) {
+        for (i = timer - 1; i >= 1; i--) {
+          s = line[i]; sub(/[ \t]+$/, "", s)
+          if (s != "") { last = s; break }
+        }
+      } else {
+        for (i = hi; i >= 1; i--) {
+          s = line[i]; sub(/[ \t]+$/, "", s)
+          t = s; sub(/^[ \t]+/, "", t)
+          if (t == "") continue
+          if (t ~ /^Tip:/) continue
+          if (t ~ / · /) continue
+          last = s; break
+        }
       }
       exit (last ~ /\?$/) ? 0 : 1
     }

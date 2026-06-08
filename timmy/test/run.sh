@@ -150,5 +150,32 @@ assert_state "$cs_sess" idle 0 "statement with adversarial '?' chrome footer cla
 
 tmux kill-session -t "$cs_sess" 2>/dev/null
 
+# A FULLY-SETTLED frame: the "✻ ... for Ns" post-turn timer has DISAPPEARED, but
+# a tip/hint footer still lingers directly above the input box. The timer was the
+# anchor the cut relied on; with it gone, the footer must NOT be mistaken for the
+# closing content line. Here the true last line is a question, the lingering
+# footer is a real-shaped hint line ("... · ..."). The footer must be stripped by
+# its own signature so the question still wins. '·' = c2 b7.
+ntq_sess="timmy_t_ntq_$$"
+tmux new-session -d -s "$ntq_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba Here are two tmux concepts worth knowing.\n  Which one do you want me to explain?\n\n  esc to interrupt \xc2\xb7 ctrl+t to show todos\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ntq_sess" question 30 "settled frame, timer gone, lingering hint footer, question survives"
+
+tmux kill-session -t "$ntq_sess" 2>/dev/null
+
+# Same shape, adversarial: timer gone, true last line is a STATEMENT, and the
+# lingering "Tip:" footer itself ends in '?'. The footer must be stripped (not
+# treated as content) and must not fabricate a question: this reads idle.
+nts_sess="timmy_t_nts_$$"
+tmux new-session -d -s "$nts_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba All four states are wired up now.\n\n  Tip: press ? for keyboard shortcuts?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$nts_sess" idle 0 "settled frame, timer gone, adversarial '?' tip footer, stays idle"
+
+tmux kill-session -t "$nts_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
