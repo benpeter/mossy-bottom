@@ -177,5 +177,33 @@ assert_state "$nts_sess" idle 0 "settled frame, timer gone, adversarial '?' tip 
 
 tmux kill-session -t "$nts_sess" 2>/dev/null
 
+# --- fixture: --watch emits one line per state CHANGE only ---
+# Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
+# lines in that order, with NO duplicate while a state is held. The pane holds
+# each state ~2s; watch polls at TIMMY_INTERVAL. busy is forced by the spinner
+# cue (deterministic on a static frame), idle by static plain content.
+w_sess="timmy_t_watch_$$"
+w_out="$(mktemp "${TMPDIR:-/tmp}/timmy-watch-XXXXXX")"
+tmux new-session -d -s "$w_sess" -x 80 -y 24 \
+  "printf 'IDLE-A\n'; sleep 2; printf '\xe2\x97\x8f Whirring\xe2\x80\xa6\n'; sleep 2; clear; printf 'IDLE-B\n'; sleep 600" 2>/dev/null
+sleep 0.5  # let IDLE-A paint before watch takes its first read
+
+"$timmy" --watch --pane "$w_sess" > "$w_out" 2>/dev/null &
+w_pid=$!
+sleep 6                       # span all three phases (idle, busy, idle)
+kill "$w_pid" 2>/dev/null     # SIGTERM -> watch must exit cleanly, flushing output
+wait "$w_pid" 2>/dev/null
+
+w_seq="$(awk '{print $1}' "$w_out" | tr '\n' ',')"
+w_n=$(awk 'END{print NR}' "$w_out")
+if [ "$w_n" -eq 3 ] && [ "$w_seq" = "idle,busy,idle," ]; then
+  ok "watch emits idle,busy,idle once each on change (got '$w_seq')"
+else
+  no "watch emits idle,busy,idle once each on change (got '$w_seq' in $w_n lines)"
+fi
+
+tmux kill-session -t "$w_sess" 2>/dev/null
+rm -f "$w_out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

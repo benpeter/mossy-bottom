@@ -12,6 +12,9 @@ readonly EXIT_IDLE=0
 readonly EXIT_BUSY=10
 readonly EXIT_WAITING=20
 readonly EXIT_QUESTION=30
+# --watch only: a snapshot failed mid-poll. Distinct from the per-state codes
+# and from the usage error (64), so a caller can tell a dead pane apart.
+readonly EXIT_WATCH_ERR=65
 
 # Seconds between the two snapshots. Overridable for fast tests; the default
 # matches the ~2s the smoke test used.
@@ -20,6 +23,7 @@ INTERVAL="${TIMMY_INTERVAL:-2}"
 usage() {
   cat <<'EOF'
 Usage: timmy --pane <pane-id> [--json]
+       timmy --watch --pane <pane-id>
 
 Classify a tmux pane running Claude Code by taking two capture-pane snapshots
 a short interval apart and comparing them.
@@ -27,15 +31,22 @@ a short interval apart and comparing them.
 Options:
   --pane <id>   tmux pane/target to inspect (e.g. %2, or a session name)
   --json        emit a JSON object with the state and the evidence used
+  --watch       poll the pane forever; print one line per state CHANGE only
   -h, --help    show this help
 
-States and exit codes:
+States and exit codes (single-shot):
   idle           0    settled Claude box ("⏵⏵" mode line + empty "❯"), last
                       line not a '?'; or, if not a Claude box, identical snapshots
   busy          10    a spinner line is present, or (not a Claude box) snapshots
                       differ
   waiting-input 20    a numbered selection menu is shown
   question      30    idle box whose last assistant line ends in '?'
+
+--watch mode:
+  Prints "<state> <tick>" once on the first read, then one line each time the
+  state CHANGES; stays silent while a state is held. The tick is a monotonic
+  poll counter. Polls every TIMMY_INTERVAL seconds. Exits 0 on SIGINT/SIGTERM;
+  exits 65 if a snapshot fails (e.g. the pane went away).
 
 Environment:
   TIMMY_INTERVAL   seconds between the two snapshots (default: 2)
@@ -46,10 +57,12 @@ die() { printf 'timmy: %s\n' "$1" >&2; exit 64; }
 
 pane=""
 json=0
+watch=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
     --json) json=1 ;;
+    --watch) watch=1 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -145,41 +158,74 @@ ends_in_question() {
   '
 }
 
-snap1="$(snapshot)" || die "capture-pane failed for pane '$pane'"
-sleep "$INTERVAL"
-snap2="$(snapshot)" || die "capture-pane failed for pane '$pane'"
-
-if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
-if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
-if has_menu "$snap2"; then menu="true"; else menu="false"; fi
-if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
-if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
-
+# Take one fresh pair of snapshots and classify them. Sets the globals `state`,
+# `code`, and the evidence vars (differ/spinner/menu/idle_box/ends_q). Returns
+# nonzero if a capture fails. Both the single-shot path and --watch call THIS, so
+# the two modes can never drift apart - there is one classifier, not two.
+#
 # Precedence:
 #   1. a menu asks for a choice            -> waiting-input
 #   2. a spinner is present                -> busy
-#   3. a genuine idle box (the "← for agents" suffix, present ONLY when idle)
-#      is authoritative for the settled state, ABOVE the snapshot diff: a real
-#      idle box can still show transient boot chrome that makes two snapshots
-#      differ (proven against a live session), so the suffix overrides motion.
-#      Inside it, a trailing "?" means question, else idle.
-#   4. no suffix to trust -> fall back to the snapshot diff (idle detector for
+#   3. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for
+#      the settled state, ABOVE the snapshot diff: a real idle box can still show
+#      transient boot chrome that makes two snapshots differ (proven against a
+#      live session), so the box overrides motion. Inside it, a trailing "?"
+#      means question, else idle.
+#   4. nothing to trust -> fall back to the snapshot diff (idle detector for
 #      panes we cannot positively identify): differ means busy, else idle.
-if [ "$menu" = "true" ]; then
-  state="waiting-input"; code="$EXIT_WAITING"
-elif [ "$spinner" = "true" ]; then
-  state="busy"; code="$EXIT_BUSY"
-elif [ "$idle_box" = "true" ]; then
-  if [ "$ends_q" = "true" ]; then
-    state="question"; code="$EXIT_QUESTION"
+classify_once() {
+  local snap1 snap2
+  snap1="$(snapshot)" || return 1
+  sleep "$INTERVAL"
+  snap2="$(snapshot)" || return 1
+
+  if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
+  if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+  if has_menu "$snap2"; then menu="true"; else menu="false"; fi
+  if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
+  if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
+
+  if [ "$menu" = "true" ]; then
+    state="waiting-input"; code="$EXIT_WAITING"
+  elif [ "$spinner" = "true" ]; then
+    state="busy"; code="$EXIT_BUSY"
+  elif [ "$idle_box" = "true" ]; then
+    if [ "$ends_q" = "true" ]; then
+      state="question"; code="$EXIT_QUESTION"
+    else
+      state="idle"; code="$EXIT_IDLE"
+    fi
+  elif [ "$differ" = "true" ]; then
+    state="busy"; code="$EXIT_BUSY"
   else
     state="idle"; code="$EXIT_IDLE"
   fi
-elif [ "$differ" = "true" ]; then
-  state="busy"; code="$EXIT_BUSY"
-else
-  state="idle"; code="$EXIT_IDLE"
+}
+
+# --watch: poll the pane and print one line per state CHANGE. Emit the first
+# read, then stay silent while the state holds. A SIGINT/SIGTERM is a clean stop
+# (exit 0); a failed snapshot is an error (exit EXIT_WATCH_ERR).
+run_watch() {
+  trap 'exit 0' INT TERM
+  local last="" tick=0
+  while :; do
+    if ! classify_once; then
+      printf 'timmy: capture-pane failed for pane %s\n' "$pane" >&2
+      exit "$EXIT_WATCH_ERR"
+    fi
+    if [ "$state" != "$last" ]; then
+      printf '%s %d\n' "$state" "$tick"
+      last="$state"
+    fi
+    tick=$((tick + 1))
+  done
+}
+
+if [ "$watch" -eq 1 ]; then
+  run_watch   # loops until a signal or a capture error; never returns
 fi
+
+classify_once || die "capture-pane failed for pane '$pane'"
 
 if [ "$json" -eq 1 ]; then
   printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"ends_in_question":%s,"interval":%s}}\n' \
