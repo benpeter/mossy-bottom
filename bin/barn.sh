@@ -11,7 +11,7 @@
 # Usage:
 #   bin/barn.sh [up [<target-repo>]]  raise the chain (no target = dogfood self)
 #   bin/barn.sh resolve [<target>]    dry-run: print resolved target + state dir
-#   bin/barn.sh relaunch <role>       respawn one pane (bitzer|shaun|shirley)
+#   bin/barn.sh relaunch <role> [<target>]  respawn one pane (reads <target>/.mossy)
 #
 # Target resolution (Issue #2 foundation):
 #   With a target, per-run state lives in <target>/.mossy (absolute) - .barn-panes
@@ -30,7 +30,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TIMMY_DIR="${REPO_ROOT}/timmy"
 SHIRLEY_DIR="${MOSSY_SHIRLEY_DIR:-${TIMMY_DIR}}"
-PANES_FILE="${REPO_ROOT}/.barn-panes"
 WINDOW="mossy"
 
 # The interactive `claude` shell wrapper force-adds flags and can nest tmux;
@@ -111,10 +110,13 @@ send_prompt() {
   tmux send-keys -t "${pane}" Enter
 }
 
+# pane_id_for <role> <panes_file> - read one pane id from a resolved panes file.
+# The panes file is passed in (resolved from STATE_DIR), so read and write target
+# the same <target>/.mossy/.barn-panes - symmetric with cmd_up.
 pane_id_for() {
-  local role="$1"
-  [ -f "${PANES_FILE}" ] || { echo "barn: no ${PANES_FILE}; run 'bin/barn.sh up' first" >&2; exit 1; }
-  awk -F= -v r="${role}" '$1==r{print $2}' "${PANES_FILE}"
+  local role="$1" panes_file="$2"
+  [ -f "${panes_file}" ] || { echo "barn: no ${panes_file}; run 'bin/barn.sh up' first" >&2; exit 1; }
+  awk -F= -v r="${role}" '$1==r{print $2}' "${panes_file}"
 }
 
 # resolve_target [<target>] - echo "TARGET<TAB>STATE_DIR", both absolute.
@@ -214,11 +216,18 @@ cmd_relaunch() {
   local role="${1:-}"
   case "${role}" in
     bitzer | shaun | shirley) ;;
-    *) echo "barn: usage: bin/barn.sh relaunch <bitzer|shaun|shirley>" >&2; exit 1 ;;
+    *) echo "barn: usage: bin/barn.sh relaunch <bitzer|shaun|shirley> [<target-repo>]" >&2; exit 1 ;;
   esac
+  # Resolve the panes file from STATE_DIR exactly as cmd_up writes it, so relaunch
+  # reads back from the same place. No target = dogfood default (repo root), so the
+  # live run's relaunch path is byte-identical to before.
+  local resolved target state_dir panes_file
+  resolved="$(resolve_target "${2:-}")" || exit 1
+  IFS=$'\t' read -r target state_dir <<<"${resolved}"
+  panes_file="${state_dir}/.barn-panes"
   local id dir
-  id="$(pane_id_for "${role}")"
-  [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${PANES_FILE}" >&2; exit 1; }
+  id="$(pane_id_for "${role}" "${panes_file}")"
+  [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }
   if [ "${role}" = shirley ]; then dir="${SHIRLEY_DIR}"; else dir="${REPO_ROOT}"; fi
 
   tmux respawn-pane -k -t "${id}" -c "${dir}" "${CLAUDE_CMD}"
@@ -244,9 +253,9 @@ main() {
       ;;
     relaunch)
       shift
-      cmd_relaunch "${1:-}"
+      cmd_relaunch "${1:-}" "${2:-}"
       ;;
-    *) echo "barn: usage: bin/barn.sh [up [<target-repo>] | resolve [<target>] | relaunch <role>]" >&2; exit 1 ;;
+    *) echo "barn: usage: bin/barn.sh [up [<target-repo>] | resolve [<target>] | relaunch <role> [<target>]]" >&2; exit 1 ;;
   esac
 }
 
