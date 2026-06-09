@@ -1492,3 +1492,116 @@ instruction). On wake: re-read MISSION/GUARDRAILS + the TICKS/CHRONICLE tails
 (SYNOPSIS.md still absent -> fallback) and re-anchor on the issue queue before
 handing the wiring slice. Watch shirley's context - if it crosses ~70% while she is
 idle, compact her before handing the wiring slice.
+
+16:21 - Woke (post-STANDBY-context), re-anchored: MISSION/GUARDRAILS unchanged;
+TICKS/CHRONICLE-tail fallback (SYNOPSIS.md still absent); bitzer swept my prior
+lines into e6926d5 (docs(run): chronicle issue #7 control-plane pieces; final
+wiring slice next), tree clean; #7's three control-plane pieces (watchdog 644844b,
+reader 0590e8b) landed and couple correctly. shirley idle at a clean boundary,
+Context 48% - under the 70% compaction line, so no compaction needed before this
+slice.
+
+Handed the FINAL #7 slice: the pause/resume wiring, scoped to prompts/shaun.md as
+the work-gating point (the watchdog gates work and shaun is what hands shirley
+work, so shaun's tick loop is the right place; shaun.md only by default, bitzer.md
+parallel duty only if shirley flags a genuine need and I approve - KISS). The
+gate: before handing shirley a new slice/step, shaun runs
+"${MOSSY_REPO_DIR}/bin/usage-read.sh" fed into "${MOSSY_REPO_DIR}/bin/watchdog.sh"
+and branches on the watchdog exit - 0 (CLEAR) hand work as normal; 10 (PAUSE) do
+not hand work, surface the observable signal (window/%/threshold) into TICKS/
+CHRONICLE, and wait, re-running the gate on each --await heartbeat, resuming only
+when it returns CLEAR (a new window started and usage dropped under). The
+re-check-on-heartbeat IS the auto-resume - no separate timer (resets_at could
+inform wait length but YAGNI).
+
+I finalized the fail-safe ruling as FAIL-OPEN: if usage-read.sh fails (nonzero /
+"usage unavailable" - network, 401/expired token, malformed JSON, jq absent),
+treat as CLEAR and proceed, but log the unavailable signal loudly so it stays
+observable. Rationale (to be stated briefly in the prompt): a fail-closed gate
+that cannot read usage could never observe usage-dropped-under and would never
+auto-resume, permanently stalling the autonomous never-done run (the opposite of
+#7's goal); the hard rate limit remains the ultimate backstop.
+
+Discipline reaffirmed: prompt edit lands at next launch, never pauses THIS live
+run; launch-free structural proof (well-formed gate step, paths resolve via
+MOSSY_REPO_DIR, branch codes match watchdog's real 0/10 and the reader's
+nonzero-fail contract; she may demo reader --parse <fixture> | watchdog showing the
+0/10/fail branches); stage only prompts/shaun.md; never the root state files;
+Conventional Commit, ASCII, no dashes; proof not "done". When this lands, #1-#7 all
+have their high-value slices landed and the never-done queue is DRAINED - I will
+then flag to bitzer that the queue is empty pending launch-verified closes and will
+NOT invent new scope (the Farmer's standing instruction). She began working.
+
+16:24 - Issue #7 complete; NEVER-DONE QUEUE DRAINED. shirley landed the final #7
+slice (commit a154401, "feat(prompts): wire usage gate into shaun's tick loop -
+pause and auto-resume"). Verified: prompts/shaun.md only (43+/8-); the gate invokes
+both ${MOSSY_REPO_DIR}/bin/usage-read.sh and ${MOSSY_REPO_DIR}/bin/watchdog.sh by
+the control-plane anchor; it branches on watchdog's real codes (CLEAR exit 0 ->
+hand work; PAUSE exit 10 -> hold, surface the window/%/threshold signal, re-check
+on each --await heartbeat, resume on CLEAR); the reader's nonzero "usage
+unavailable" drives the fail-OPEN path (proceed + loud log); PAUSE/CLEAR referenced
+8x, fail-open/unavailable 3x. She rejected a parallel bitzer duty on KISS grounds
+(matches my default - the gate belongs where shaun hands work, and auto-resume
+rides the existing heartbeat). She demonstrated all three branches launch-free over
+--parse fixtures (50/60 -> CLEAR -> proceed; 83/60 -> PAUSE -> hold + signal naming
+5h/83%/threshold 80; malformed -> fail-open), resting on the reader|watchdog
+coupling I independently proved last turn. Root state untouched; only my own
+TICKS/CHRONICLE unstaged.
+
+Issue #7 is complete across its slices: 644844b (watchdog decision tool) + the
+report-only investigation that confirmed the /api/oauth/usage source offline +
+0590e8b (usage reader: parser launch-free, fetcher structural-only) + a154401 (the
+pause/resume wiring in shaun's tick loop, fail-open).
+
+QUEUE STATUS - DRAINED. I confirmed with `gh issue list --state open
+--search '-label:draft'`: the only open non-draft issues are #1 through #7, and
+every one of them now has its high-value slices landed and structurally proven.
+They remain OPEN solely by the standing launch-verified-close convention (runtime
+behavior proves out only at a real next launch, which this run does not fake) - not
+because work remains. Parked-by-ruling items inside #6 (item 2 multi-machine, item
+3 YAGNI/draft, item 4 man-page) are deliberate non-scope, not pending work. There
+are no new issues and no unprocessed slices.
+
+Per the Farmer's standing instruction (relayed through bitzer this run), with the
+queue drained I am flagging it and NOT inventing new scope. shirley is IDLE at a
+clean boundary (empty prompt, Context 50%, nothing in flight), correctly deferring
+direction; I am leaving her idle. The next move is the Farmer's/bitzer's: authorize
+launch-verified closes for #1-#7 (a real relaunch confirming the prompt/barn/timmy
+changes behave as proven), open a new milestone, or end the run. I will not pick
+shirley's next slice because there is none to pick - that is the honest state, and
+inventing one would violate both the drained-queue instruction and the trust rule.
+
+## 2026-06-09 16:29 CEST - Issue #7 landed; the never-done queue is drained (bitzer)
+
+Issue #7 (usage-window watchdog: pause and auto-resume around rate-limit windows) is
+landed, and with it the entire defined backlog of Run 2 - issues #1 through #7 - is
+complete and structurally proven. #7 came in as three control-plane pieces plus a
+wiring slice: a standalone watchdog that maps usage percentages to a pause-or-clear
+decision with distinct exit codes, a usage reader whose parser is proven launch-free
+over fixtures (the network fetcher is structural-only and was never executed), the
+proven coupling of reader into watchdog (boundary pauses, clear continues), and finally
+the pause/resume wiring into shaun's prompt tick loop: run reader-then-watchdog before
+handing work, on a pause stop driving and signal and re-check until a window clears,
+then resume, with auto-resume falling out of the heartbeat. The deliberate fail-safe is
+fail-open: if the reader cannot read usage, treat as clear and signal loudly, because a
+fail-closed watchdog that cannot read would never auto-resume and would stall the
+autonomous run.
+
+Where the product stands. Run 2 set out to have the harness modify itself, and it has,
+end to end: it now takes its increments from GitHub issues (#1), can drive an external
+target via a control-plane/target split with routed state (#2), classifies its builder
+by calling its own tool rather than eyeballing (#3), waits event-driven on real state
+changes instead of fixed sleeps (#4), archives its own ledgers for weeks-long runs (#5),
+hardened that tool with signal-safety and a test suite (#6), and pauses and resumes
+itself around rate-limit windows (#7). Every slice was proven structurally, never by
+launching a nested chain; the live run's nervous system (the root state files and
+.barn-panes) was never touched; all builder commits were single-file-scoped with the
+root state left to bitzer.
+
+What remains is not shaun's to do. The seven issues are left OPEN on GitHub for a
+launch-verified close - their runtime only fully proves at a real next launch of the new
+harness against an authored external target, which this run is correctly forbidden to
+fake. Per the Farmer's standing instruction the queue is drained and shaun is not
+inventing scope; shirley is idle at a clean boundary. The run holds alive to its 4-hour
+floor (18:08 CEST); the closing milestone follows there unless the Farmer opens new
+scope or authorizes the launch-verified closes.
