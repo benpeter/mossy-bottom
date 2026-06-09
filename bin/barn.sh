@@ -50,9 +50,20 @@ if [ -z "${CLAUDE}" ] || [ ! -x "${CLAUDE}" ]; then
 fi
 CLAUDE_CMD="${CLAUDE} --model opus --dangerously-skip-permissions"
 
-# Role bootstrap prompts. shirley is intentionally absent from this list.
-SHAUN_BOOT="You are shaun, the driver in the Mossy Bottom deference chain. Read prompts/shaun.md, then GUARDRAILS.md and MISSION.md, and assume the role. Read .barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you and will tell you when to begin. Assume the role now, confirm you are ready, and wait for bitzer's go signal. When bitzer tells you to begin, send shirley her opening prompt from MISSION.md and run your tick loop, re-reading MISSION.md and GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
-BITZER_BOOT="You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read prompts/bitzer.md, then MISSION.md and GUARDRAILS.md, and assume the role. Read .barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
+# Role bootstrap prompts. shirley is intentionally absent. These are builders, not
+# constants, because the paths resolve per run: prompts/*.md are control-plane assets
+# that always live at REPO_ROOT (they never move into the state dir), while the per-run
+# state files are read from the resolved state_dir by absolute path. A role booted with
+# cwd=target therefore finds both. Dogfood passes state_dir=REPO_ROOT, so the resolved
+# reads point at exactly the same files as the old relative-path boot strings.
+shaun_boot() {
+  local state_dir="$1"
+  printf '%s' "You are shaun, the driver in the Mossy Bottom deference chain. Read ${REPO_ROOT}/prompts/shaun.md, then ${state_dir}/GUARDRAILS.md and ${state_dir}/MISSION.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you and will tell you when to begin. Assume the role now, confirm you are ready, and wait for bitzer's go signal. When bitzer tells you to begin, send shirley her opening prompt from ${state_dir}/MISSION.md and run your tick loop, re-reading ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
+}
+bitzer_boot() {
+  local state_dir="$1"
+  printf '%s' "You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read ${REPO_ROOT}/prompts/bitzer.md, then ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm ${state_dir}/MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
+}
 
 resolve_session() {
   if [ -n "${MOSSY_SESSION:-}" ]; then
@@ -252,8 +263,8 @@ cmd_up() {
   boot_pane "${shirley}" shirley || true
 
   echo "barn: delivering role prompts (shirley gets none)..."
-  send_prompt "${bitzer}" "${BITZER_BOOT}"
-  send_prompt "${shaun}" "${SHAUN_BOOT}"
+  send_prompt "${bitzer}" "$(bitzer_boot "${state_dir}")"
+  send_prompt "${shaun}" "$(shaun_boot "${state_dir}")"
   # shirley: intentionally nothing.
 
   cat <<EOF
@@ -310,8 +321,8 @@ cmd_relaunch() {
   tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
   boot_pane "${id}" "${role}" || true
   case "${role}" in
-    bitzer) send_prompt "${id}" "${BITZER_BOOT}" ;;
-    shaun) send_prompt "${id}" "${SHAUN_BOOT}" ;;
+    bitzer) send_prompt "${id}" "$(bitzer_boot "${state_dir}")" ;;
+    shaun) send_prompt "${id}" "$(shaun_boot "${state_dir}")" ;;
     shirley) : ;; # no prompt - the asymmetry holds on relaunch too
   esac
   echo "barn: relaunched ${role} in pane ${id}"
