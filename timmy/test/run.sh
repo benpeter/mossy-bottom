@@ -205,5 +205,47 @@ fi
 tmux kill-session -t "$w_sess" 2>/dev/null
 rm -f "$w_out"
 
+# --- fixture: a BLANK pane (no output at all). An empty capture is NOT an error:
+# two identical empty snapshots classify idle via the snapshot-diff fallback. This
+# guards the boundary between "empty" (idle) and "capture failed" (the error below). ---
+blank_sess="timmy_t_blank_$$"
+tmux new-session -d -s "$blank_sess" -x 80 -y 24 'sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$blank_sess" idle 0 "blank pane (empty capture) classified idle, not error"
+
+tmux kill-session -t "$blank_sess" 2>/dev/null
+
+# --- fixture: a GONE pane - capture-pane FAILS. The classify-error path: --await
+# must exit EXIT_WATCH_ERR (65), not hang or spin. We target a session that was
+# never created, so the first capture fails immediately. (single-shot would die 64;
+# 65 is the watch/await error code, reused so the modes cannot drift.) ---
+gone_sess="timmy_t_gone_$$" # intentionally never created
+"$timmy" --await --pane "$gone_sess" --timeout 1 >/dev/null 2>&1
+gone_code=$?
+if [ "$gone_code" -eq 65 ]; then
+  ok "capture failure on a gone pane exits 65 (EXIT_WATCH_ERR)"
+else
+  no "capture failure on a gone pane exits 65 (got exit $gone_code)"
+fi
+
+# --- fixture: --json serialises the classifier output. An idle pane must emit a
+# JSON object whose state is "idle" with exit 0 - the structured-output path, not
+# just the bare state word. ---
+json_sess="timmy_t_json_$$"
+tmux new-session -d -s "$json_sess" -x 80 -y 24 \
+  'printf "\xe2\x9d\xaf\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+json_out="$("$timmy" --pane "$json_sess" --json 2>/dev/null)"
+json_code=$?
+if [ "$json_code" -eq 0 ] && [[ "$json_out" == '{"state":"idle",'* ]]; then
+  ok "--json emits an idle state object, exit 0"
+else
+  no "--json idle object (got '$json_out' exit $json_code)"
+fi
+
+tmux kill-session -t "$json_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
