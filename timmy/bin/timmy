@@ -12,27 +12,38 @@ readonly EXIT_IDLE=0
 readonly EXIT_BUSY=10
 readonly EXIT_WAITING=20
 readonly EXIT_QUESTION=30
-# --watch only: a snapshot failed mid-poll. Distinct from the per-state codes
+# --watch/--await: a snapshot failed mid-poll. Distinct from the per-state codes
 # and from the usage error (64), so a caller can tell a dead pane apart.
 readonly EXIT_WATCH_ERR=65
+# --await only: the timeout elapsed with NO state change (a heartbeat). Distinct from
+# the per-state codes, the usage error (64), and the capture error (65), so a caller
+# can tell "nothing changed" from a real transition or a gone pane.
+readonly EXIT_TIMEOUT=66
 
 # Seconds between the two snapshots. Overridable for fast tests; the default
 # matches the ~2s the smoke test used.
 INTERVAL="${TIMMY_INTERVAL:-2}"
 
+# Default --await heartbeat window in seconds; --timeout overrides it. Kept well above
+# INTERVAL so a quiet pane is not woken needlessly; the shaun.md waker passes its own N.
+AWAIT_TIMEOUT_DEFAULT=120
+
 usage() {
   cat <<'EOF'
 Usage: timmy --pane <pane-id> [--json]
        timmy --watch --pane <pane-id>
+       timmy --await --pane <pane-id> [--timeout <secs>]
 
 Classify a tmux pane running Claude Code by taking two capture-pane snapshots
 a short interval apart and comparing them.
 
 Options:
-  --pane <id>   tmux pane/target to inspect (e.g. %2, or a session name)
-  --json        emit a JSON object with the state and the evidence used
-  --watch       poll the pane forever; print one line per state CHANGE only
-  -h, --help    show this help
+  --pane <id>       tmux pane/target to inspect (e.g. %2, or a session name)
+  --json            emit a JSON object with the state and the evidence used
+  --watch           poll the pane forever; print one line per state CHANGE only
+  --await           block until the state changes once, then print it and exit
+  --timeout <secs>  --await heartbeat window (default 120); 0 disables waiting
+  -h, --help        show this help
 
 States and exit codes (single-shot):
   idle           0    settled Claude box ("⏵⏵" mode line + empty "❯"), last
@@ -48,6 +59,16 @@ States and exit codes (single-shot):
   poll counter. Polls every TIMMY_INTERVAL seconds. Exits 0 on SIGINT/SIGTERM;
   exits 65 if a snapshot fails (e.g. the pane went away).
 
+--await mode:
+  Reads the start state (no output), then blocks until the state DIFFERS from it -
+  prints the new state and exits with that state's code (0/10/20/30). If --timeout
+  seconds pass with no change, prints the (unchanged) current state and exits 66 -
+  a heartbeat the caller uses to re-anchor without a transition. Exits 0 on
+  SIGINT/SIGTERM; exits 65 if a snapshot fails. Self-terminating: it exits on its
+  own, so no process lingers after it returns.
+
+Exit codes (multi-poll): 65 capture failed (gone pane), 66 --await timeout (no change).
+
 Environment:
   TIMMY_INTERVAL   seconds between the two snapshots (default: 2)
 EOF
@@ -58,11 +79,15 @@ die() { printf 'timmy: %s\n' "$1" >&2; exit 64; }
 pane=""
 json=0
 watch=0
+await=0
+timeout="$AWAIT_TIMEOUT_DEFAULT"
 while [ $# -gt 0 ]; do
   case "$1" in
     --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
     --json) json=1 ;;
     --watch) watch=1 ;;
+    --await) await=1 ;;
+    --timeout) shift; [ $# -gt 0 ] || die "--timeout needs a value"; timeout="$1" ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -70,6 +95,9 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$pane" ] || die "--pane is required (see --help)"
+case "$timeout" in
+  ''|*[!0-9]*) die "--timeout needs a non-negative integer (seconds)" ;;
+esac
 
 snapshot() { tmux capture-pane -p -t "$pane"; }
 
@@ -221,8 +249,40 @@ run_watch() {
   done
 }
 
+# --await: read the start state (no output), then block until the state DIFFERS from
+# it - print the new state and exit with its code. If --timeout seconds elapse with no
+# change, print the (unchanged) current state and exit EXIT_TIMEOUT (a heartbeat). Both
+# the start read and each poll call classify_once, so await never drifts from the other
+# modes. SIGINT/SIGTERM is a clean stop (exit 0); a failed snapshot exits EXIT_WATCH_ERR.
+# Self-terminating - it returns on its own, so nothing lingers (unlike --watch).
+run_await() {
+  trap 'exit 0' INT TERM
+  if ! classify_once; then
+    printf 'timmy: capture-pane failed for pane %s\n' "$pane" >&2
+    exit "$EXIT_WATCH_ERR"
+  fi
+  local start_state="$state"
+  SECONDS=0
+  while [ "$SECONDS" -lt "$timeout" ]; do
+    if ! classify_once; then
+      printf 'timmy: capture-pane failed for pane %s\n' "$pane" >&2
+      exit "$EXIT_WATCH_ERR"
+    fi
+    if [ "$state" != "$start_state" ]; then
+      printf '%s\n' "$state"
+      exit "$code"
+    fi
+  done
+  printf '%s\n' "$state"
+  exit "$EXIT_TIMEOUT"
+}
+
 if [ "$watch" -eq 1 ]; then
   run_watch   # loops until a signal or a capture error; never returns
+fi
+
+if [ "$await" -eq 1 ]; then
+  run_await   # returns on the first change or at the timeout; never lingers
 fi
 
 classify_once || die "capture-pane failed for pane '$pane'"
