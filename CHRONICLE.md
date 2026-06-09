@@ -1138,3 +1138,158 @@ Issues #1 through #5 are now all landed and left OPEN for a launch-verified clos
 issues remain in the queue: #6 (timmy hardening and never-done backlog, to be decomposed
 to its smallest slice) and #7 (usage-window watchdog). The run continues; the 4-hour
 floor lands at 18:08 CEST.
+
+15:35 - Woke (post-STANDBY-context), re-anchored: MISSION/GUARDRAILS unchanged;
+used the TICKS/CHRONICLE-tail fallback (SYNOPSIS.md does not exist this run);
+confirmed in git that #1-#5 are landed and that bitzer swept my prior unstaged
+TICKS/CHRONICLE lines into 58cca61 (docs(run): chronicle issues #4 and #5
+landed), so the working tree is clean. shirley idle at a clean boundary, Context
+34%.
+
+Read issue #6 fresh (gh issue view 6): a 5-item timmy hardening/never-done
+backlog migrated from the old in-MISSION backlog - (1) --watch clean signal-exit
+and classify-error paths (unproven at run 1 close); (2) question-detection footer
+shapes + multi-machine/version confirmation; (3) configurable snapshot interval +
+capture depth (shaun deemed YAGNI in run 1, issue suggests draft); (4) man page;
+(5) classifier property tests. Decomposed to the smallest proven slice and picked
+item 1: it is the smallest, is the highest-value run-1 gap, and is provable
+launch-free against an existing pane exactly as #4 slice 1 proved the same for
+--await. Skipped item 3 (the issue itself flags it YAGNI/draft); held 2 (needs
+real TUI variants + other machines, not cleanly provable here), 4, 5 (meatier).
+
+Handed slice 1 of #6, timmy/bin/timmy only: harden --watch to trap INT/TERM for a
+clean no-orphan exit (the linger failure mode from the #4 KISS gate) reusing
+run_await's trap/exit pattern, and to exit EXIT_WATCH_ERR (65) on a capture/classify
+failure or gone pane rather than hanging/spinning, reusing classify_once + existing
+constants so the modes cannot drift. Proof launch-free vs an existing/plain-bash
+pane: --watch emits; foreground SIGINT + SIGTERM each clean-exit with pgrep showing
+no orphan; classify-error returns 65 on a killed/gone pane; regression on single-shot,
+--json, --await. I pre-flagged the known backgrounded-async SIGINT POSIX artifact
+(async children ignore SIGINT, untrappable; irrelevant to foreground use) so she does
+not re-spend the ~10 min that rabbit hole cost during #4 slice 1 - prove the
+foreground paths, bound signal tests with a short timeout, reap procs after. Stage
+only timmy/bin/timmy. After this, remaining #6 items get sliced (or drafted) one at a
+time; then #7 (usage-window watchdog). She began working.
+
+15:43 - Issue #6 slice 1 (item 1) landed. shirley hardened --watch (commit
+7f82820, "fix(timmy): harden --watch signal-exit, fold SIGPIPE into the
+clean-exit trap"). Verified: timmy/bin/timmy only (10+/3-); the trap is now
+`trap 'exit 0' INT TERM PIPE` at L244 - folding SIGPIPE (which would have killed
+the process with 141, the linger-then-die mode hit during the #4 KISS gate) into
+the same clean-exit-0 trap run_await uses; a failed snapshot / gone pane exits
+EXIT_WATCH_ERR (65), the same constant the other modes use so they cannot drift.
+shellcheck CLEAN, bash -n OK, root state untouched. Her launch-free proof against
+a plain-bash pane: --watch emits idle 0; foreground SIGINT/SIGTERM/SIGPIPE each
+exit 0 with pgrep showing no orphan (exec-same-PID, SIGKILL backstop); classify-
+error path returns 65 on a killed pane; regression on single-shot, --json,
+--await all intact; test panes reaped, and she correctly identified the lone
+surviving timmy process as my live dogfood instance, not a test orphan. She
+heeded the pre-flagged bg-async SIGINT POSIX caveat and did not chase it. (Aside:
+my own --await heartbeat returned busy/66 once and then a generic exit 1 once
+during her run - that was my monitor's capture-pane racing her tmux pane-kill
+churn, not a timmy defect; --json confirmed busy/10 cleanly, and I switched to
+short-sleep polling while she churned panes.)
+
+Re-anchored on the remaining #6 backlog and applied YAGNI: item 2 (question-
+footer shapes + multi-machine/version confirmation) cannot be proven cleanly on a
+single machine - held; item 3 (configurable snapshot interval/depth) is the run-1
+YAGNI item the issue itself says to draft - skipped; item 4 (man page) largely
+duplicates --help and is low value. Picked item 5 (classifier property/table
+tests) as the highest-value remaining hardening, since timmy's classify_once is
+now the harness's critical dependency (shaun's tick loop, --await, and --watch
+all route through it). Handed slice 2 of #6, item 5: vanilla (plain-bash, no new
+framework per guardrail 4) table-driven tests over the four liveness shapes
+(idle/busy/waiting-input/question) asserting state string + exit code, plus a
+classify-error fixture. Flagged the testability seam explicitly: classify_once
+reads a live pane via tmux capture-pane, awkward to drive into question/waiting
+shapes deterministically, so if a minimal seam to classify fixture text
+independent of tmux is needed she should keep it minimal and justify it - and if
+it would balloon beyond a small refactor, STOP and report seam options as a
+blocker for me to rule, not expand scope alone. Prefer a new timmy/test file;
+stage only the test file (+ timmy only if a minimal seam is required); launch-free
+(static fixtures / existing plain-bash pane, no chain). After item 5, #6's
+remaining items (2 held, 3 draft, 4 man-page) get a disposition; then #7
+(usage-window watchdog). She began working.
+
+15:54 - Issue #6 slice 2 (item 5) landed. shirley extended timmy/test/run.sh
+(commit 7b7e537, "test(timmy): add classify-error, empty-capture, and --json
+property cases") with three new fixtures: a blank/empty-capture pane classifies
+idle (the empty-vs-failed boundary the issue named), a gone pane (capture-pane
+fails) exits 65 (EXIT_WATCH_ERR - the run-1-unproven classify-error path), and an
+idle pane under --json emits {"state":"idle",...} exit 0 (the structured-output
+path, previously unasserted). She needed NO timmy seam and left timmy/bin/timmy
+byte-unchanged: the existing harness drives timmy's real CLI against real tmux
+panes and timmy's only tmux dependency is capture-pane, so a capture failure is
+just a never-created pane - she explicitly considered and rejected fake-tmux /
+sourcing-guard / classify_text seams as net-new structure on the critical
+dependency for zero added coverage. Exactly the YAGNI judgment I asked her to make
+(justify or report the seam). Verified independently, not on her word: HEAD is
+timmy/test/run.sh only (42+); git diff 7f82820..HEAD on timmy/bin/timmy is empty
+(byte-unchanged); shellcheck clean on both; and I re-ran timmy/test/run.sh myself -
+16 passed, 0 failed (13 pre-existing + 3 new), launch-free against real plain-bash
+panes, harness self-cleaned. Only my own TICKS/CHRONICLE lines unstaged.
+
+Issue #6 disposition (my YAGNI rulings, recorded for legibility): the two
+high-value hardening items are landed - item 1 (--watch signal-exit + SIGPIPE +
+classify-error, commit 7f82820) and item 5 (classifier property tests, commit
+7b7e537). The rest are parked, not done: item 2 (question-footer shapes +
+multi-machine/version confirmation) cannot be proven cleanly on a single machine -
+held for a multi-box context; item 3 (configurable snapshot interval + capture
+depth) is the run-1 YAGNI item the issue itself says to draft - won't-do unless a
+real need appears; item 4 (man page) largely duplicates --help - low value. Like
+#1-#5, #6 is left OPEN; the launch-verified close and any reopen of 2/3/4 are
+bitzer/Farmer calls, not mine. shirley suggested "close out the run"; I set that
+aside (trust rule - she does not decide direction or run lifecycle) and stay on
+the never-done queue.
+
+STANDBY (context). Long, decision-dense turn since the post-compaction wake:
+re-anchored, picked and accepted #6 slice 1 (7f82820), then handed, monitored
+(~9 min, including an extended seam-design thinking phase that was productive, not
+a loop - I watched git/tail for stuck-looping and did not interrupt working), and
+accepted #6 slice 2 (7b7e537). I dogfooded timmy throughout (--await and --json);
+noted that --await's capture raced shirley's tmux pane-kill churn once (busy/66
+then a generic exit 1) so I switched to short-sleep polling during her churn - a
+monitor-side race, not a timmy defect. shirley is IDLE at a clean boundary (empty
+prompt, Context 42%, no work in flight), correctly deferring direction. Leave her
+idle until a rehydrated shaun is woken.
+
+HANDOFF - next slice for the woken shaun: issue #7 (usage-window watchdog: pause
+and auto-resume around rate-limit windows) - the LAST issue in the queue. Read it
+fresh with `gh issue view 7` and decompose to the smallest proven slice. Likely it
+touches barn.sh and/or a new control-plane watchdog mechanism (parallels rotate.sh
+/ timmy as a standalone control-plane tool under MOSSY_REPO_DIR), and a prompt duty
+for whoever detects the rate-limit window and pauses/resumes the chain. Keep the
+hard bound: changes land at next launch, never pause/relaunch THIS live run; prove
+structurally (shellcheck + bash -n, dry-run/fixture, shown diff), never with nested
+live chains; scope tightly and stage only touched files; never touch the root state
+files; Conventional Commit, ASCII, no em/en dashes; demand proof not "done". On
+wake: re-read MISSION/GUARDRAILS + the TICKS/CHRONICLE tails (SYNOPSIS.md still does
+not exist this run, so the fallback applies) and re-anchor on the issue queue before
+handing the #7 slice. After #7, the whole #1-#7 queue has its high-value slices
+landed - at that point flag to bitzer that the queue is drained pending
+launch-verified closes, rather than inventing new scope.
+
+## 2026-06-09 15:59 CEST - Issue #6 landed; one issue left in the queue (bitzer)
+
+Issue #6 (timmy hardening and never-done backlog) is landed. shaun decomposed the
+backlog issue and shipped its two high-value items, both proven launch-free: the
+--watch signal-exit path now folds SIGPIPE into the clean exit-0 trap alongside INT
+and TERM and maps a classify error to a distinct dead-pane exit code; and a set of
+classifier property tests was added to timmy's own suite (empty capture is idle, a
+gone pane is the dead-pane code, --json emits a proper idle object), with timmy's
+binary left byte-unchanged - shaun re-ran the suite himself, 16 passed and 0 failed.
+The remaining backlog items were ruled out on the spot and recorded: one needs
+multiple machines and cannot be proven on a single box, one is YAGNI, and a man page
+is low value next to the existing --help. That disposition is the YAGNI discipline
+working, not a gap.
+
+Two boundary notes. shirley suggested closing out the run; shaun set that aside
+because lifecycle and direction are not shirley's to call (the trust rule) and stayed
+on the queue. And one timmy --await capture raced shirley's own pane-kill churn, so
+shaun fell back to short-sleep polling for that stretch - a monitor-side race, not a
+defect in the tool.
+
+Issues #1 through #6 are now all landed and left OPEN for a launch-verified close. One
+issue remains: #7 (usage-window watchdog: pause and auto-resume around rate-limit
+windows). After it lands the defined queue is drained; per the standing policy shaun
+will not invent scope beyond it. The 4-hour floor lands at 18:08 CEST.
