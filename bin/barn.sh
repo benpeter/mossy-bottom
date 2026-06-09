@@ -14,8 +14,9 @@
 #   bin/barn.sh relaunch <role>       respawn one pane (bitzer|shaun|shirley)
 #
 # Target resolution (Issue #2 foundation):
-#   With a target, state lives in <target>/.mossy (absolute). With no target, the
-#   dogfood default holds: repo root, with the root state files in place.
+#   With a target, per-run state lives in <target>/.mossy (absolute) - .barn-panes
+#   is written there. With no target, the dogfood default holds: repo root, where
+#   the root state files (and .barn-panes) already live - byte-identical to before.
 #
 # Config via env:
 #   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
@@ -142,14 +143,17 @@ cmd_resolve() {
   local resolved target state_dir
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
-  printf 'barn: target    = %s\n' "${target}"
-  printf 'barn: state_dir = %s\n' "${state_dir}"
+  printf 'barn: target      = %s\n' "${target}"
+  printf 'barn: state_dir   = %s\n' "${state_dir}"
+  printf 'barn: .barn-panes = %s\n' "${state_dir}/.barn-panes"
 }
 
 cmd_up() {
-  local resolved target state_dir
+  local resolved target state_dir panes_file
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
+  mkdir -p "${state_dir}"
+  panes_file="${state_dir}/.barn-panes"
 
   local session
   session="$(resolve_session)"
@@ -182,7 +186,7 @@ cmd_up() {
     printf 'bitzer=%s\n' "${bitzer}"
     printf 'shaun=%s\n' "${shaun}"
     printf 'shirley=%s\n' "${shirley}"
-  } >"${PANES_FILE}"
+  } >"${panes_file}"
 
   echo "barn: panes -> bitzer=${bitzer} shaun=${shaun} shirley=${shirley}"
   echo "barn: booting claude in each pane..."
@@ -200,7 +204,8 @@ barn: up in session '${session}', window '${WINDOW}'.
   attach:        tmux select-window -t ${session}:${WINDOW}; tmux attach -t ${session}
   panes:         bitzer=${bitzer}  shaun=${shaun}  shirley=${shirley}
   target:        ${target}
-  state dir:     ${state_dir}  (resolved; cwds not yet rewired)
+  state dir:     ${state_dir}
+  panes file:    ${panes_file}  (pane cwds not yet rewired)
   relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley>
 EOF
 }
