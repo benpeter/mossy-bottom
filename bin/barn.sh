@@ -26,6 +26,10 @@
 #   is written there. With no target, the dogfood default holds: repo root, where
 #   the root state files (and .barn-panes) already live - byte-identical to before.
 #
+# Preflight: 'up' refuses to spawn unless the resolved state dir already holds
+# Farmer-authored MISSION.md and GUARDRAILS.md. barn never creates them. Dogfood
+# (state dir = repo root) passes silently. '--plan' reports readiness but never blocks.
+#
 # Config via env:
 #   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
 #   MOSSY_CLAUDE        path to the claude binary (default: resolved from PATH)
@@ -184,6 +188,31 @@ launch_cmd() {
   printf "MOSSY_STATE_DIR='%s' %s" "$1" "${CLAUDE_CMD}"
 }
 
+# state_authored <state_dir> - true iff both Farmer-authored state files are present.
+# Reads only (test -f); creates nothing.
+state_authored() {
+  [ -f "$1/MISSION.md" ] && [ -f "$1/GUARDRAILS.md" ]
+}
+
+# preflight_state <state_dir> - gate before any spawn: the per-run state dir must
+# already hold Farmer-authored MISSION.md and GUARDRAILS.md. barn NEVER fabricates or
+# templates them - a machine-stubbed mission is exactly the failure Mossy Bottom avoids;
+# bitzer authors them in the state dir on the Farmer's word. Reads only; creates nothing.
+# Returns 0 if both present; otherwise names what is missing, says what to do, returns 1.
+preflight_state() {
+  local state_dir="$1" f
+  if state_authored "${state_dir}"; then
+    return 0
+  fi
+  echo "barn: cannot boot - the per-run state dir is not authored yet:" >&2
+  for f in MISSION.md GUARDRAILS.md; do
+    [ -f "${state_dir}/${f}" ] || echo "barn:   missing ${state_dir}/${f}" >&2
+  done
+  echo "barn: the Farmer/bitzer must author MISSION.md and GUARDRAILS.md in that" >&2
+  echo "barn: directory first - barn does not create or template them." >&2
+  return 1
+}
+
 # cmd_resolve [<target>] - dry-run: print resolution and launch nothing.
 cmd_resolve() {
   local resolved target state_dir
@@ -215,8 +244,17 @@ cmd_up() {
     printf '  shirley  -c %s\n' "${shirley_cwd}"
     printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
     printf '  panes    %s\n' "${panes_file}"
+    if state_authored "${state_dir}"; then
+      printf '  preflight MISSION.md + GUARDRAILS.md present - up would boot\n'
+    else
+      printf '  preflight MISSION.md/GUARDRAILS.md missing - up would refuse (author them first)\n'
+    fi
     return 0
   fi
+
+  # Preflight before any side effect: refuse to boot against an unauthored state dir,
+  # and do it before mkdir so a missing-state target leaves no stray .mossy behind.
+  preflight_state "${state_dir}" || exit 1
 
   mkdir -p "${state_dir}"
 
