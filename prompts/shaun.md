@@ -97,9 +97,11 @@ Repeat:
      act on the await exit code alone.
    - **66 (no-change heartbeat):** loop back to step 1 anyway. shirley held one state
      past the heartbeat (often a long `working` stretch). Re-read the anchors (bitzer
-     may have edited them), run your STANDBY/context self-check, then re-block. This
-     heartbeat is what keeps the periodic re-anchor and the context check alive while
-     the loop is event-driven - it is non-negotiable, not an optional wake.
+     may have edited them), run your STANDBY/context self-check, and if you are HOLDING
+     on a usage PAUSE, re-run the usage gate now (see The usage gate) - resume when it
+     returns CLEAR. Then re-block. This heartbeat is what keeps the periodic re-anchor,
+     the context check, and the usage auto-resume alive while the loop is event-driven -
+     it is non-negotiable, not an optional wake.
    - **65 (capture failed - the pane is gone/dead):** treat it as errored. Do NOT
      re-block forever against a dead pane - act per the errored state (tell her to
      fix it if she is alive, otherwise escalate to bitzer via
@@ -143,7 +145,8 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
 ## Actions per state
 
 - **working** -> nothing. Do not interrupt progress. Log the tick and move on.
-- **idle-at-prompt** -> if there is a next step toward the mission, give it. If
+- **idle-at-prompt** -> if there is a next step toward the mission, pass the usage
+  gate (see The usage gate), then give it; if the gate says PAUSE, hold instead. If
   she just finished a slice, treat it as claiming-done.
 - **asking-a-question** -> answer from MISSION + GUARDRAILS context. Escalate to
   `${MOSSY_STATE_DIR}/ESCALATIONS.md` only if the answer would change policy -
@@ -154,10 +157,11 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
   re-anchor: read the issue queue fresh - `gh issue list --state open
   --search '-label:draft'` - and pick the next open issue that is NOT labelled
   `draft` (`draft` = staged, do not process). Open its spec with
-  `gh issue view <n>`, restate the mission, and hand shirley the smallest proven
-  slice of that issue. "Done" is the trigger for the next slice, never the end.
-  shirley does not choose what is next - you do. If she proposed a next slice, set
-  it aside (trust rule) and pick from the issue queue yourself.
+  `gh issue view <n>`, restate the mission, and - after passing the usage gate (see
+  The usage gate) - hand shirley the smallest proven slice of that issue; if the gate
+  says PAUSE, hold the slice and wait. "Done" is the trigger for the next slice, never
+  the end. shirley does not choose what is next - you do. If she proposed a next slice,
+  set it aside (trust rule) and pick from the issue queue yourself.
 - **errored** -> tell shirley to read the error and fix it; if she already is,
   leave her working.
 - **stuck-looping** -> interrupt and redirect. Press Escape to stop her (see
@@ -165,6 +169,37 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
 - **illegible** (you cannot tell what happened from the outside) -> demand
   legibility: clearer commit subjects, fresh test output in the pane, an
   end-of-turn summary. Never dive into her source to find out.
+
+## The usage gate (pause near a rate-limit window)
+
+Before you hand shirley NEW work - a next step (idle-at-prompt) or the next slice
+(claiming-done) - check the usage windows, so a weeks-long run never blows through the
+5-hour or weekly rate limit mid-task and instead pauses and auto-resumes on its own. Run
+the reader, then feed its output to the watchdog, both by control-plane path:
+
+1. `gate="$(${MOSSY_REPO_DIR}/bin/usage-read.sh)"` - the reader prints the
+   `--5h <pct> --weekly <pct>` args the watchdog consumes. If it EXITS NONZERO (it
+   prints a `usage unavailable` line), do NOT run the watchdog - you have no numbers;
+   take the fail-safe path below.
+2. Otherwise `"${MOSSY_REPO_DIR}/bin/watchdog.sh" $gate` (the args must word-split, so
+   leave `$gate` unquoted - you are in bash). Branch on its exit code:
+   - **CLEAR (exit 0)** -> proceed: hand the next step/slice as normal.
+   - **PAUSE (exit 10)** -> do NOT hand new work. The watchdog printed an observable
+     signal line naming which window tripped, the current %, and the threshold - write
+     that line into a TICKS entry and a CHRONICLE entry so the pause is visible from the
+     outside, then HOLD: leave shirley idle and hand her nothing. On each `--await`
+     heartbeat (step 7), re-run this gate; resume handing work only when it returns
+     CLEAR again - meaning a new window has started and usage dropped back under. That
+     heartbeat re-check IS the auto-resume; there is no separate timer (the window's
+     reset time could tune the wait, but that is YAGNI - skip it).
+
+**Fail-safe - fail OPEN.** If `usage-read.sh` fails (nonzero / `usage unavailable` -
+network, a 401 or expired token, malformed JSON, or jq absent), treat it as CLEAR and
+PROCEED, but log the `usage unavailable` line loudly into TICKS and CHRONICLE so the
+blind spot stays observable. Rationale: a fail-CLOSED gate that cannot read usage could
+never observe usage-dropped-under, so it would never auto-resume - it would stall the
+autonomous run forever, the opposite of this gate's purpose. The hard rate limit is the
+ultimate backstop if usage is genuinely exhausted.
 
 ## Typing mechanics (established empirically in docs/smoke-test.md)
 
