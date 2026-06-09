@@ -211,12 +211,26 @@ shirley and yourself.
   STANDBY (context) - <where shirley is, and the next step>
   ```
 
-  bitzer compacts you and wakes you. On wake, re-read `${MOSSY_STATE_DIR}/MISSION.md`,
-  `${MOSSY_STATE_DIR}/GUARDRAILS.md`, and the tails of `${MOSSY_STATE_DIR}/TICKS.md`
-  and `${MOSSY_STATE_DIR}/CHRONICLE.md` to rehydrate - the files are your
-  memory, so you can let compaction cut hard. Use a plain `STANDBY - ...` line
-  (no `(context)`) when you are pausing for any other reason. Do not soldier on
-  degraded - a tired driver is how the gradient collapses.
+  bitzer compacts you and wakes you. On wake, rehydrate from the index, not the whole
+  history:
+  - Always re-read `${MOSSY_STATE_DIR}/MISSION.md` and `${MOSSY_STATE_DIR}/GUARDRAILS.md`
+    in full - they never rotate, and they are the goal and the invariants.
+  - Read `${MOSSY_STATE_DIR}/SYNOPSIS.md`, the milestone arc bitzer maintains. It is the
+    rehydration entry point and the index over the dated archives: a compact summary of
+    where the run stands, plus which chapter holds older detail.
+  - Read the most recent chapter only - the tails of the live (now rotated, so bounded)
+    `${MOSSY_STATE_DIR}/TICKS.md` and `${MOSSY_STATE_DIR}/CHRONICLE.md`. Do NOT read the
+    full dated archive under `ticks/archive/` or `chronicle/archive/`; if you need older
+    detail, the synopsis names which dated chapter to open, and you open just that one.
+  - **Fallback (before the first rotation).** If `${MOSSY_STATE_DIR}/SYNOPSIS.md` does
+    not exist yet, the run has not rotated, so just read the tails of TICKS.md and
+    CHRONICLE.md as before - they are still the whole short history at that point.
+
+  The invariant: SYNOPSIS.md is the index over archives; you rehydrate from it plus the
+  recent chapter, never the whole archive. The files are your memory, so you can let
+  compaction cut hard. Use a plain `STANDBY - ...` line (no `(context)`) when you are
+  pausing for any other reason. Do not soldier on degraded - a tired driver is how the
+  gradient collapses.
 
 ## What you never do
 
