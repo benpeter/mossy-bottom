@@ -17,9 +17,10 @@
 # pane would get) and exits without creating or launching anything - a launch-free
 # preview of up/relaunch.
 #
-# Each pane is launched with MOSSY_STATE_DIR=<absolute state dir> in its environment,
-# so a role can find its state files regardless of cwd. No role consumes it yet - the
-# prompts that read it are a later slice; this injects and surfaces it only.
+# Each pane is launched with two absolute-path env vars: MOSSY_STATE_DIR (the per-run
+# state dir) and MOSSY_REPO_DIR (the control-plane repo root, where control-plane tools
+# like timmy live - always REPO_ROOT, even in target mode). A role uses them to find its
+# state and the harness tools regardless of cwd.
 #
 # Target resolution (Issue #2 foundation):
 #   With a target, per-run state lives in <target>/.mossy (absolute) - .barn-panes
@@ -178,14 +179,17 @@ pane_cwds() {
   fi
 }
 
-# launch_cmd <state_dir> - the claude command with MOSSY_STATE_DIR injected, so each
-# role has an absolute path to its state files regardless of its cwd. The env prefix
-# is applied by the same shell tmux already uses to split CLAUDE_CMD into argv, so it
-# exports to claude. Single-quoted to survive spaces in the path. Dogfood passes the
-# repo root (where the state files live today), so the launch stays behaviorally the
-# same - the var is injected but no role consumes it yet (the prompts are a later slice).
+# launch_cmd <state_dir> - the claude command with two absolute-path env vars injected
+# so each role resolves what it needs regardless of cwd:
+#   MOSSY_STATE_DIR  the per-run state dir (<target>/.mossy, or repo root in dogfood)
+#   MOSSY_REPO_DIR   the control-plane repo root - where control-plane tools (timmy,
+#                    prompts) live. Always REPO_ROOT, even in target mode, because the
+#                    harness drives the target from here; it is the twin of STATE_DIR.
+# The env prefix is applied by the same shell tmux already uses to split CLAUDE_CMD into
+# argv, so it exports to claude. Single-quoted to survive spaces in the paths. Dogfood
+# passes REPO_ROOT for both; MOSSY_REPO_DIR stays inert until shaun.md consumes it.
 launch_cmd() {
-  printf "MOSSY_STATE_DIR='%s' %s" "$1" "${CLAUDE_CMD}"
+  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' %s" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
 }
 
 # state_authored <state_dir> - true iff both Farmer-authored state files are present.
@@ -243,6 +247,7 @@ cmd_up() {
     printf '  shaun    -c %s\n' "${shaun_cwd}"
     printf '  shirley  -c %s\n' "${shirley_cwd}"
     printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
+    printf '  env      MOSSY_REPO_DIR=%s  (all three panes)\n' "${REPO_ROOT}"
     printf '  panes    %s\n' "${panes_file}"
     if state_authored "${state_dir}"; then
       printf '  preflight MISSION.md + GUARDRAILS.md present - up would boot\n'
@@ -314,6 +319,7 @@ barn: up in session '${session}', window '${WINDOW}'.
   panes file:    ${panes_file}
   pane cwds:     bitzer=${bitzer_cwd}  shaun=${shaun_cwd}  shirley=${shirley_cwd}
   state env:     MOSSY_STATE_DIR=${state_dir}  (all three panes)
+  repo env:      MOSSY_REPO_DIR=${REPO_ROOT}  (all three panes)
   relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley> [<target>]
 EOF
 }
@@ -347,8 +353,8 @@ cmd_relaunch() {
 
   # --plan: print this pane's spawn plan and exit. No panes read, no tmux, no claude.
   if [ "${plan}" -eq 1 ]; then
-    printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s (panes %s)\n' \
-      "${role}" "${dir}" "${state_dir}" "${panes_file}"
+    printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s MOSSY_REPO_DIR=%s (panes %s)\n' \
+      "${role}" "${dir}" "${state_dir}" "${REPO_ROOT}" "${panes_file}"
     return 0
   fi
 
