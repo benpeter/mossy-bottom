@@ -79,3 +79,28 @@ State is one of: working, idle, asking, claiming-done, errored, stuck, illegible
 14:36 | claiming-done->accepted | verified 4136e37 (bin/barn.sh only +38; root MISSION/GUARDRAILS mtimes 13:00/13:01 predate run, untouched; .barn-panes 73f753e; no stray .mossy); preflight guard landed, --plan stays non-blocking. Handed final #2 slice: gitignore .mossy/ escape hatch + docs/target-split.md ownership doc (root state stays tracked, prove via check-ignore; only doc+.gitignore staged; launch-free text proof)
 14:30 | working | -
 14:46 | claiming-done->accepted | verified ef75265 (.gitignore +7, docs/target-split.md +61 only; check-ignore: .mossy/ ignored, all 5 root state files tracked-ok; .barn-panes 73f753e; doc ASCII-clean no dashes); escape-hatch+docs landed. Issue #2 checklist complete (8 mechanic slices + docs). Run-2 backlog (#1+#2) mechanically exhausted -> reporting milestone up to bitzer, not inventing #3+ scope
+14:38 | idle(post-standby wake, scope extended)->steered | re-anchored (MISSION extended past #1/#2 into never-done queue; gh #3 read; shirley idle Context 19%, .barn-panes 73f753e). Handed issue #3 slice: prompts/shaun.md classify step calls timmy with eyeball heuristic as explicit fallback; re-posed for split (timmy is control-plane, invoke by cwd-independent path, blocker if no env exposes it); prompts-only, launch-free proof (running timmy on a pane spawns nothing)
+14:40 | working | -
+14:41 | blocker-reported->steered | shirley report-only (nothing staged, verified); found timmy at ${REPO_ROOT}/timmy/bin/timmy, no control-plane env var exposed to shaun. Authorized MOSSY_REPO_DIR (general, =REPO_ROOT, twin of MOSSY_STATE_DIR). Handed prerequisite slice: inject MOSSY_REPO_DIR into spawns + --plan, dogfood=REPO_ROOT inert; bin/barn.sh only; launch-free proof (3ad35f3 regime). #3 shaun.md wiring held for after it lands
+14:43 | working | -
+14:46 | claiming-done->accepted | verified 1b65270 (bin/barn.sh only 18+/12-; .barn-panes both hashes unchanged 075975d/73f753e; MOSSY_REPO_DIR in --plan both modes). Prerequisite landed. Gave go for #3 shaun.md slice: classify step shells to ${MOSSY_REPO_DIR}/timmy/bin/timmy --pane $SHIRLEY (busy->working/idle->idle-at-prompt/waiting-input/question->asking), timmy=liveness only with claiming-done/errored/stuck/illegible staying shaun's judgment, eyeball heuristic as fallback; prompts/shaun.md only, launch-free proof
+14:46 | working | -
+14:47 | working(committing) | -
+14:53 | claiming-done->accepted | verified 7eeb8f1 (prompts/shaun.md only 23+/2-; timmy invocation path + fallback present; .barn-panes 73f753e). Issue #3 landed+proven - shaun classifies via timmy, semantic states stay shaun's, eyeball fallback. Strong proof: literal invocation run vs real pane %216 -> {"state":"busy"} exit 10, spawns nothing. Re-anchoring on #4
+14:54 | idle->steered | issue #3 accepted (convergence reached); handed #4 report-only investigation: timmy --watch contract (stream vs emit-once-exit, line format), agent-loop consumption pattern (discrete tool calls can't hold a stream), recommended shaun.md tick-loop change to replace sleep/poll, any timmy prerequisite as blocker. No files changed; I decide direction from her report
+14:50 | working(investigating) | -
+14:58 | blocker-reported->steered | shirley investigated #4: raw --watch streams continuously (not consumable by discrete-tool-call agent); proposed timmy --await/--timeout/--since prereq + shaun.md step-7 rewire; nailed non-negotiable heartbeat + dead-pane escalate. Agreed direction. Before authorizing timmy surface, sent KISS-gate (report-only): can vanilla gtimeout N timmy --watch | head -1 do it (does --watch emit-on-start? SIGPIPE clean? is timeout/gtimeout present on darwin?) - one slice if yes, authorize --await if genuinely fragile
+14:54 | working(investigating) | -
+14:55 | working(probing --watch) | -
+14:57 | working(probe blocking, tool-timeout will return data) | -
+14:58 | working(probe cleanup) | -
+15:05 | blocker-resolved->steered | KISS gate decisive: timeout+gtimeout both ABSENT (independently confirmed), $(timmy --watch|head -1) hangs on pipe-linger; composition non-viable. shirley reframed KISS (system-wide moving parts) + trimmed to minimal --await (dropped --since, YAGNI). Probe procs reaped clean, turn inert. Authorized timmy --await prereq: bin/timmy only, reuse classify_once, distinct heartbeat exit code, honor INT/TERM, keep EXIT_WATCH_ERR 65; launch-free proof emphasizing NO orphan/linger. shaun.md step-7 rewire held for after
+15:02 | working(building --await) | -
+15:03 | working(building --await) | -
+15:04 | working(proving --await transitions) | -
+15:05 | working(proving signals+regression) | -
+15:07 | working(long signal-proof, watching for stuck) | -
+15:08 | working(foreground SIGINT proof + orphan cleanup) | -
+15:10 | working(SIGINT-harness rabbit-hole risk; redirect if no progress) | -
+15:11 | working(SIGINT via set -m, bounded 8s) | -
+15:20 | claiming-done->accepted | verified d006748 (timmy/bin/timmy only 65+/5-; await/EXIT_TIMEOUT present; NO lingering timmy procs; test pane reaped). Slice 1 of #4 landed+proven: --await blocks until change (state codes) or timeout (EXIT_TIMEOUT 66), EXIT_WATCH_ERR 65 dead-pane, self-terminating/no-orphan, SIGTERM clean, regression+bad-arg ok. Honest caveat recorded (bg-async SIGINT untrappable per POSIX, irrelevant to shaun's foreground use). Long dense turn -> STANDBY(context); slice 2 (shaun.md step-7 rewire) handed to fresh shaun via CHRONICLE

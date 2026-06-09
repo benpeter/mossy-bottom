@@ -731,3 +731,221 @@ heuristic), then #4 (timmy --watch event-driven waker), #5 (artifact rotation fo
 weeks-long runs), #6 (timmy hardening backlog), #7 (usage-window watchdog). The run
 stays alive at least through its 4-hour floor. Next: shaun re-anchors on the issue
 queue and hands #3's smallest proven slice.
+
+14:38 - Woke from STANDBY; the Farmer resolved the scope boundary by extending MISSION.md
+past #1/#2 into the never-done queue (#3 -> #4 -> #5 -> #6 -> #7). Re-anchored: re-read the
+updated MISSION (both #1/#2 marked LANDED, left OPEN for a launch-verified close),
+GUARDRAILS (unchanged), the TICKS/CHRONICLE tails, and the open issue queue. shirley was
+idle at a clean boundary (Context 19%); live .barn-panes still sha1sum 73f753e.
+
+gh issue view 3 - "Close the loop: shaun calls timmy instead of its eyeball heuristic":
+update shaun.md to classify shirley's pane via timmy --pane $SHIRLEY, eyeball heuristic
+as the fallback only if timmy errors. timmy v1 was built and proven in run 1.
+
+I re-posed it for the harness/target split before handing it. The split's one real effect
+on #3 is invocation path: timmy is a control-plane asset, and after #2 a target-mode shaun
+runs with cwd = target, so a bare/cwd-relative timmy would not resolve. So the slice must
+invoke timmy by a cwd-independent path (the same discipline as the boot strings pointing at
+prompts by REPO_ROOT), and if no env var yet exposes the control-plane location to shaun,
+shirley is to STOP and report a blocker (we add the env in a barn.sh slice first) rather
+than bake a cwd-relative path. Scope kept to prompts/shaun.md only; the state-signature
+section stays as the human-readable contract timmy implements and as the fallback. Proof is
+launch-free: a diff plus a real, resolvable timmy invocation - and I noted that running
+timmy against an existing pane spawns nothing, so it is a legitimate proof, not a nested
+chain. shirley began working.
+
+14:41 - shirley returned a clean report-only turn on #3: she hit the exact blocker I
+flagged and stopped rather than baking a cwd-relative path. Findings: timmy lives at
+${REPO_ROOT}/timmy/bin/timmy; barn currently injects only MOSSY_STATE_DIR and
+MOSSY_SHIRLEY_DIR, so a target-mode shaun (cwd = target) has no anchor to resolve timmy;
+a cwd-relative timmy/bin/timmy works in dogfood but breaks under the split. She recommended
+injecting MOSSY_REPO_DIR (= REPO_ROOT), general rather than timmy-specific, as the
+control-plane twin of MOSSY_STATE_DIR. She also surfaced timmy's proven contract:
+timmy --pane <id> [--json], single-shot exit codes idle=0/busy=10/waiting-input=20/
+question=30. Verified her turn was inert: git status shows only the live ledger
+(CHRONICLE/TICKS), nothing staged, no source touched. (HEAD is now 978e960, bitzer's
+milestone artifact commit which also recorded the Farmer's MISSION extension - expected,
+bitzer owns run-artifact commits.)
+
+As direction-setter I authorized MOSSY_REPO_DIR and kept her recommendation to make it
+general: it reuses the REPO_ROOT the boot strings already compute, and one control-plane
+anchor is simpler than a per-tool var and serves any future control-plane tool. Sequenced
+it as a barn.sh PREREQUISITE before the shaun.md #3 wiring. Handed the prerequisite slice:
+inject MOSSY_REPO_DIR=<absolute REPO_ROOT> into every pane spawn (mirroring the
+MOSSY_STATE_DIR injection) plus the --plan surface, for both up and relaunch; dogfood =
+REPO_ROOT, inert until shaun.md consumes it. Scope bin/barn.sh only; launch-free proof in
+the same regime as the MOSSY_STATE_DIR injection (3ad35f3) - bash -n/shellcheck, --plan
+for both modes, the sh -c env-prefix mechanism check, and no-launch assertions. I told her
+to hold the shaun.md wiring (shell out to ${MOSSY_REPO_DIR}/timmy/bin/timmy --pane
+$SHIRLEY, map exit codes/JSON to tick states, eyeball fallback on error) until the
+prerequisite lands. shirley began working.
+
+14:46 - shirley landed the MOSSY_REPO_DIR prerequisite (commit 1b65270, "feat(barn):
+inject MOSSY_REPO_DIR control-plane anchor into pane spawns"). Verified in git: bin/barn.sh
+only (18+/12-); MOSSY_REPO_DIR injected via launch_cmd alongside MOSSY_STATE_DIR, surfaced
+in --plan for both up and relaunch and in the up footer, with a header-doc note. .barn-panes
+unchanged on both hashes (blob 075975d, sha1 73f753e). She proved it launch-free in the
+3ad35f3 regime: --plan shows dogfood MOSSY_REPO_DIR=REPO_ROOT and target MOSSY_REPO_DIR=the
+harness repo (not /tmp) - the divergence from MOSSY_STATE_DIR=/tmp/.mossy that makes
+${MOSSY_REPO_DIR}/timmy/bin/timmy reachable from a target-mode pane; the sh -c env-prefix
+check confirmed both vars export with spaces surviving; nothing launched. Accepted.
+
+Gave the go for the #3 convergence slice itself: wire shaun.md's classify step (tick-loop
+step 3) to shell out to ${MOSSY_REPO_DIR}/timmy/bin/timmy --pane $SHIRLEY, mapping timmy's
+liveness result to the tick-loop base states (busy->working, idle->idle-at-prompt,
+waiting-input->waiting-input, question->asking-a-question). I made one distinction explicit
+in the instruction: timmy classifies LIVENESS only - the higher-level states it cannot see
+(claiming-done, errored, stuck-looping, illegible) stay shaun's own judgment from the pane
+tail plus git log, exactly as today - so timmy replaces the low-level eyeball discrimination,
+not the semantic interpretation, and a future shaun must not think timmy decides 'done'. The
+eyeball state-signature heuristic is retained as the explicit fallback on timmy
+error/absence, and the State signatures section stays as both the contract timmy implements
+and the fallback definition. Recommended --json with an explicit state field over exit-code
+numbers, her call, matching timmy's real contract. Scope prompts/shaun.md only; ASCII, no
+dashes; launch-free proof (diff + a real timmy run against an existing pane, which spawns
+nothing). shirley began working.
+
+14:54 - Accepted issue #3 (commit 7eeb8f1) - verified prompts/shaun.md only (23+/2-), the
+timmy invocation path and fallback both present, .barn-panes intact. #3 is the convergence
+target the experiment was built to reach: shaun now classifies liveness via timmy v1, keeps
+the semantic states as its own judgment, and falls back to the eyeball signatures on timmy
+error. shirley's proof was end-to-end yet launch-free - she ran the literal prompt invocation
+"${MOSSY_REPO_DIR}/timmy/bin/timmy" --pane %216 --json against the real pane and got
+{"state":"busy"} exit 10, which spawns nothing. Like #1/#2, left OPEN for a launch-verified
+close.
+
+Re-anchored on issue #4 (event-driven waker): shaun blocks on timmy --watch $SHIRLEY and acts
+per emitted state change, retiring the 30-60s polling sleep - run 1's biggest gap (findings
+Q6: most ticks spent re-judging "still working"). This issue has a genuine design fork, so I
+ran the same play that surfaced the MOSSY_REPO_DIR blocker on #3: a report-only investigation
+turn before any wiring. I asked shirley to report timmy --watch's actual contract (does it
+stream continuously or emit-one-change-and-exit; exact per-change line format), the right
+consumption pattern given that shaun is a Claude agent running discrete tool calls and cannot
+hold a long-lived streaming process across calls (block-until-next-change-then-exit vs bounded
+timeout vs other; whether timmy already supports block-until-one-change or needs a small
+prerequisite), and a concrete recommendation for how shaun.md's tick loop should change -
+specifically what replaces "Sleep 30-60s. Repeat" - including how the wake interacts with
+shaun's STANDBY/context handling and the periodic MISSION/GUARDRAILS re-read. No files changed
+this turn; I decide direction from her report. shirley began investigating.
+
+14:58 - shirley returned a clean report-only investigation of #4. Finding: timmy's raw
+--watch STREAMS continuously (one line per change, runs until killed), which a discrete-
+tool-call agent like shaun cannot safely consume line-by-line across tool calls. Her
+proposal: a two-slice path mirroring #3 - (1) a timmy prerequisite adding a bounded
+block-until-change-or-timeout mode (--await/--timeout/--since), then (2) the shaun.md
+step-7 rewiring on top. Her supporting analysis was strong and I accepted these points as
+settled: the --timeout heartbeat is non-negotiable because a pure infinite block would
+starve the periodic MISSION/GUARDRAILS re-read (bitzer may edit them) and shaun's own
+STANDBY/context check; each wake is still one tick that grows shaun's context, so STANDBY
+mechanics are unchanged but fire far less often (the weeks-long-run win); and a dead pane
+(await error, EXIT_WATCH_ERR 65) must escalate as errored rather than re-block forever.
+Verified her turn was inert (git status: only the live ledger, nothing staged).
+
+I agreed the direction but applied the project's KISS/YAGNI guardrail before authorizing
+new timmy flag surface: I asked her (still report-only) whether a vanilla shell composition
+over the existing streaming --watch - e.g. gtimeout N timmy --watch --pane $SHIRLEY | head -1,
+where head -1 returns on the first emitted change and closes the pipe and the timeout bounds
+the wait - could deliver the same block-until-change-or-timeout with NO timmy change. To
+judge it I asked three precise questions: (1) does --watch emit current-state-on-start or
+only on the next transition (emit-on-start would make head -1 return instantly and sink the
+approach, or force a --since baseline); (2) does timmy handle SIGPIPE cleanly when head
+closes the pipe; (3) is a timeout binary actually present on this darwin host, where plain
+'timeout' is usually absent and only 'gtimeout' from coreutils may exist. If the composition
+is viable we wire shaun.md to it in one slice with no timmy change; if it is genuinely
+fragile or the platform lacks the timeout tool, her self-contained timmy --await is the
+better-engineered prerequisite and I authorize it. Awaiting her facts and recommendation.
+
+15:05 - KISS gate resolved decisively in favour of the tool change. shirley verified the
+facts empirically rather than asserting: (1) raw --watch does NOT emit current-state-on-start
+(her probe blocked against a stable pane, waiting for a transition); (2) timmy lingers after
+head -1 closes the pipe - she demonstrated it live via out="$(timmy --watch | head -1)" hanging
+because command substitution waits for all pipeline members; (3) BOTH timeout and gtimeout are
+ABSENT on this darwin host. I independently re-confirmed timeout/gtimeout absent and that no
+timmy processes were left lingering after her probe (she reaped them with pkill and verified
+clean); her turn was inert (git status only the ledger). So the vanilla composition
+gtimeout N timmy --watch | head -1 is non-viable - it needs an absent binary, hangs on pipe
+linger, and would force a future shaun to reproduce a fragile multi-process shell dance every
+tick (failing legibility). shirley reframed KISS correctly: lean-and-mean is fewest moving
+parts SYSTEM-WIDE, not fewest lines in timmy; the composition has MORE moving parts (external
+coreutils + SIGPIPE + orphan reaping + priming skip + edge race) than a ~15-line self-contained
+--await that reuses classify_once.
+
+I authorized the minimal timmy --await prerequisite (slice 1 of 2), taking shirley's trimmed
+design as-is including her YAGNI cut of --since (step-3 --json re-classifies authoritatively on
+each wake, so an await edge-miss only delays a wake to the next change or heartbeat - the true
+state is still read). Spec: timmy --pane <id> --await [--timeout <secs>]; reuse classify_once so
+the modes cannot drift; suppress the priming line; return the instant the state differs from the
+start state with the existing state exit codes (idle=0/busy=10/waiting-input=20/question=30); on
+timeout print the current state with a DISTINCT no-change-heartbeat exit code (shirley picks one
+not colliding with the state codes or EXIT_WATCH_ERR 65); honor INT/TERM with a clean exit; keep
+EXIT_WATCH_ERR 65 for a dead pane; sane default --timeout. Scope bin/timmy only. Because the
+linger was the demonstrated failure mode, I put proof weight on no-orphan: prove NO timmy process
+survives after --await returns (pgrep clean) and that INT/TERM kill it cleanly, alongside
+returns-on-change and returns-at-timeout-with-heartbeat-code, all run against an existing pane
+(spawns no chain), launch-free. I held the shaun.md step-7 rewire (slice 2) for my go after this
+lands. shirley began working.
+
+15:20 - shirley landed slice 1 of #4 (commit d006748, "feat(timmy): add --await mode -
+block until state change or timeout"). Verified in git: timmy/bin/timmy only (65+/5-);
+no lingering timmy processes and the bash test pane reaped (resource hygiene clean despite
+heavy testing). She proved it launch-free using a PLAIN BASH test pane (not a Claude chain)
+to drive deterministic transitions: timeout/heartbeat path (static pane -> idle, exit 66,
+~3s, no linger); change path (drove the pane busy, awaited, stopped output -> busy->idle ->
+idle, exit 0, no linger); no orphan after normal return; SIGTERM clean exit 0 no orphan
+(the signal a tool-call cancellation/timeout sends); SIGINT clean exit 0 no orphan in the
+foreground context (via set -m job control, bounded 8s); single-shot and --json regression
+unaffected; bad --timeout rejected (exit 64); full cleanup. run_await reuses classify_once
+(no drift), traps INT/TERM for a clean exit, keeps EXIT_WATCH_ERR (65) for a dead pane, and
+self-terminates so nothing lingers (the failure mode --watch had). She recorded one honest
+caveat rather than hiding it: a backgrounded async (&) --await from a non-interactive shell
+cannot be killed by SIGINT, because bash/POSIX forces async children to ignore SIGINT and a
+signal ignored on entry cannot be trapped - this is a test-harness artifact, not a timmy
+defect, and is irrelevant to shaun's real usage (foreground Bash tool call, where SIGINT is
+SIG_DFL and the trap fires; and SIGTERM, the operationally relevant signal, is clean
+everywhere). The exit-code map is now: idle=0, busy=10, waiting-input=20, question=30,
+EXIT_WATCH_ERR=65 (dead pane), EXIT_TIMEOUT=66 (no-change heartbeat); bad args=64.
+
+Accepted slice 1. I am going to STANDBY for context after a long, decision-dense turn (the
+#4 investigation, the KISS gate, and an 11-minute monitored proof). shirley is IDLE at a
+clean boundary, Context ~29%, nothing in flight - leave her be until rehydrated.
+
+HANDOFF - slice 2 of 2 for #4 (the next shaun drives this), prompts/shaun.md ONLY:
+Rewire the tick loop's step 7 (currently "Sleep 30-60s. Repeat") to block on the new
+--await mode instead of polling. Concretely the loop should, after acting+logging, block on:
+  "${MOSSY_REPO_DIR}/timmy/bin/timmy" --pane $SHIRLEY --await --timeout <N>
+with a heartbeat N around 120-180s, and branch on the result:
+  - exit 0/10/20/30 (a real state CHANGE): loop back to step 1 - re-read MISSION/GUARDRAILS,
+    then re-classify authoritatively via the step-3 --json call (await only wakes shaun; step
+    3 reads the true state), then act.
+  - exit 66 (EXIT_TIMEOUT, no-change heartbeat): loop back to step 1 anyway - re-read the
+    anchors (bitzer may have edited them) and run the STANDBY/context self-check - then
+    re-block. This heartbeat is what keeps the periodic re-anchor and the context check alive;
+    it is non-negotiable, not optional.
+  - exit 65 (EXIT_WATCH_ERR, dead/gone pane): treat as errored - escalate per the errored
+    action, do NOT re-block forever.
+Keep the eyeball/sleep fallback documented for when timmy/await is unavailable (parallels the
+#3 fallback). State that this retires the polling loop and cuts TICKS volume at the source
+(pairs with #5 rotation). Same discipline: launch-free proof (diff; the invocation resolves
+via MOSSY_REPO_DIR from prereq 1b65270; the exit-code branches match timmy's actual codes
+above), stage only prompts/shaun.md, never touch root state files, Conventional Commit, ASCII,
+no dashes. After slice 2 lands, #4 is complete (left OPEN for a launch-verified close like
+#1/#2/#3); then never-done continues to #5 (artifact rotation), #6 (timmy hardening), #7
+(usage-window watchdog). On wake: re-read MISSION/GUARDRAILS + the TICKS/CHRONICLE tails and
+re-anchor on the issue queue before handing slice 2.
+
+## 2026-06-09 15:16 CEST - Issue #3 landed, issue #4 underway (bitzer)
+
+Never-done is running. With #1 and #2 already landed, the run continued into the
+queue and issue #3 (close the loop: shaun classifies shirley's state by calling the
+timmy tool instead of an eyeball heuristic) is now landed and structurally proven, on
+top of a control-plane anchor (MOSSY_REPO_DIR) that lets shaun invoke timmy by an
+absolute path regardless of cwd. Issue #4 (event-driven waker: timmy --watch wakes
+shaun on change, not on a poll) has its first of two slices landed: timmy now offers
+an --await mode that blocks until shirley's pane changes or a timeout fires, with
+distinct exit codes (change vs heartbeat-timeout vs dead pane), proven launch-free
+against a plain-bash test pane, signal-clean with no orphaned processes. The key
+design call: the obvious vanilla composition (gtimeout piped into head) was proven
+non-viable on this machine (no timeout/gtimeout binary; the watch pipe lingers and
+hangs command substitution), so a small self-contained --await was the evidence-backed
+choice over a clever one-liner. Next: slice 2 rewires shaun's own poll loop to block
+on timmy --await instead of sleeping. The run stays alive through its 4-hour floor.
