@@ -7,16 +7,26 @@
 ## Goal (Run 2): the harness evolves itself
 
 shirley's target this run is the mossy-bottom harness itself, not timmy. Her
-working directory is the repo root. The work is two GitHub issues on this repo;
-shaun reads them for the spec with `gh issue view <n>` (this is spec material,
-like MISSION - diet-legal) and drives shirley to implement them, smallest proven
-slice first:
+working directory is the repo root. The work is the open GitHub issues on this
+repo; shaun reads them for the spec with `gh issue view <n>` (this is spec
+material, like MISSION - diet-legal) and drives shirley to implement them,
+smallest proven slice first:
 
-- **Issue #1** - Adopt GitHub issues as the change/increment channel.
+- **Issue #1** - Adopt GitHub issues as the change/increment channel. LANDED
+  (structurally proven, 2 commits). Left OPEN on GitHub for a launch-verified
+  close; runtime only fully proves at a real next launch, which this run will not
+  fake.
 - **Issue #2** - Harness/target split: control-plane drives an external target.
+  LANDED (structurally proven, 9 commits). Left OPEN for the same launch-verified
+  close.
+- **Then never-done continues** into the next open non-draft issue, in order:
+  #3 (shaun calls timmy instead of its eyeball heuristic), #4 (timmy --watch
+  event-driven waker), #5 (artifact rotation for weeks-long runs), #6 (timmy
+  hardening backlog), #7 (usage-window watchdog). shaun may re-pose an issue if the
+  harness/target split changed its framing.
 
 The never-done policy holds: every proven slice triggers the next; shaun selects
-the next slice from the issues and their checklists. shirley reports proof and
+the next slice from the open issues and their checklists. shirley reports proof and
 blockers; she does not pick direction.
 
 ## Hard safety bound - this run edits the files that define this run

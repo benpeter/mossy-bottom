@@ -334,3 +334,400 @@ cleanup, was caught and fully repaired with no history lost, and the guardrails 
 prompts were amended mid-run (anti-shadowing, the compaction duty, direction-
 ownership moving to shaun) without disturbing the build. timmy works, its limits
 are known, and the repo alone tells the story.
+
+## Run 2 - 2026-06-09
+
+13:03 - Run 2 kickoff. bitzer relayed the Farmer's go. shirley's target this run
+is the mossy-bottom harness itself (cwd = repo root), not timmy; the spec lives in
+GitHub issues #1 (adopt GH issues as the change/increment channel) and #2
+(harness/target split: control-plane drives an external target). I sent shirley the
+Opening directive from MISSION.md, folded with the self-modifying-run guardrails:
+never move/delete/hand-edit the root run-state files (they are this run's nervous
+system); edits to bin/barn.sh and prompts/*.md land only at the NEXT launch, never
+live; prove every slice structurally (shellcheck / bash -n / dry-run / shown diff),
+never by spawning nested live Claude chains; stage only the slice's files, no
+git add -A; Conventional Commits, shellcheck-clean, ASCII, no em/en dashes. Told her
+to start with the smallest proven slice of issue #1 and report proof - I pick the
+next slice. shirley acknowledged and began working (thinking). Now driving the tick
+loop.
+
+13:08 - shirley landed the shaun.md half of issue #1 (commit 8ef93e3): at
+claiming-done shaun now reads the open non-draft GitHub issue queue
+(`gh issue list --state open --search '-label:draft'`) and picks the next slice
+from it, replacing the in-MISSION backlog. I verified independently rather than on
+her word: `git show --stat` confirmed the commit touches only prompts/shaun.md
+(14+/9-) with no root state file swept in; `gh issue list` showed 6 open issues
+(grounding the exact queries her prompt now tells shaun to run); the `draft` label
+is real; working tree carried only my own TICKS/CHRONICLE edits. Proof for a
+prompt-text slice is the shown diff plus verified commands, per MISSION's "Proof
+without a tangle" - bash -n/shellcheck do not apply. Evidence held.
+
+I read issue #1 directly (`gh issue view 1`) to pick the next slice myself. Its
+remaining work is the bitzer.md half - documenting that Farmer-filed issues are the
+intake/work-queue, bitzer triages by applying/removing the `draft` label, and the
+processing agent (never a human) authors the CHRONICLE entry so the narrative stays
+single-voiced. shirley had proposed this same slice (1a); I set her proposal aside
+per the trust rule and selected it because the issue text scopes it as the way to
+finish #1 before starting #2 - not because she asked for it. Handed her that slice
+with the structural-proof and stage-only-prompts/bitzer.md constraints. She began
+working.
+
+13:10 - shirley landed the bitzer.md half of issue #1 (commit b760594): bitzer.md
+now documents that Farmer-filed issues are the intake/work-queue, bitzer triages via
+the `draft` label, and the processing agent (never a human) authors the CHRONICLE so
+the narrative stays single-voiced. Verified independently: `git show --stat` showed
+only prompts/bitzer.md (21+/7-); shirley's own grep proved both prompts now use the
+identical `gh issue list --state open --search '-label:draft'` query, so shaun's
+queue ordering and bitzer's triage describe one mechanism. Both halves of issue #1
+are landed and structurally proven. I judged #1's runtime behavior only provable at
+a real next launch (forbidden to fake with a nested chain), so I left the issue open
+for bitzer's triage to close rather than closing it from below, and noted I will not
+re-pick it - the queue is an input to shaun's judgment, not a tyrant over it.
+
+I read issue #2 directly (`gh issue view 2`) and picked its foundation as the next
+slice: `barn.sh up <target-repo>` optional target arg parsing plus absolute
+`<target>/.mossy/` STATE_DIR resolution (the fix for run-1's cwd-relative misfiling
+bug), with the no-target dogfood default preserved exactly per guardrail 2. I scoped
+it to resolution only - surface the resolved TARGET and STATE_DIR via dry-run, do not
+rewire cwds or relocate anything live - as the smallest provable unit. This is the
+first slice where bash -n/shellcheck/dry-run proof genuinely applies, a healthier
+proof surface than prompt-prose diffs. shirley began working.
+
+13:17 - shirley landed the issue #2 foundation (commit 5f04adf): barn.sh up now
+takes an optional positional target, resolves it to an absolute path, and derives
+STATE_DIR=<target>/.mossy by absolute path; a new `resolve` subcommand surfaces the
+computed target + state_dir without launching anything. Her pane carried fresh,
+complete proof - bash -n OK, shellcheck clean, dry-run across all four branches
+(no-target -> repo root with the dogfood default preserved, /tmp -> /tmp/.mossy,
+relative -> absolutized demonstrating the run-1 cwd-relative misfiling fix, bad path
+-> exit 1), and the sound argument that `up` and `resolve` share identical arg
+plumbing so the no-target `resolve` is a faithful no-launch proxy for what a plain
+`barn.sh up` would compute. She honestly did NOT launch `up` (would spawn a live
+chain) and excluded the ledger files, staging only bin/barn.sh. I verified scope via
+`git show --stat`: only bin/barn.sh (51+/3-), tree clean of root state files.
+Accepted the evidence on its visible merits without re-running the harness myself -
+staying role-pure and avoiding any spawn risk.
+
+Next slice handed (my pick): make the resolved STATE_DIR actually used for per-run
+state writes - the other half of the run-1 misfiling fix. mkdir -p "$STATE_DIR" and
+route the per-run state files (e.g. .barn-panes) into it by absolute path, with the
+no-target default kept byte-identical to today so this run's nervous system cannot
+shift under a default relaunch, and proof via the dry-run surface rather than a
+launch. I deliberately kept pane-cwd rewiring deferred: it touches the tmux/Claude
+spawn and is hard to prove without launching, so it earns its own later slice.
+shirley began working.
+
+13:22 - shirley landed the STATE_DIR write-routing slice (commit afebb2a): cmd_up
+now writes .barn-panes to the resolved panes_file under STATE_DIR by absolute path.
+Proof in her pane was thorough and honest - she captured the live .barn-panes sha
+before/after all three dry-runs and showed it unchanged (resolve is pure print, no
+stray .mossy created), showed target routing (/tmp -> /tmp/.mossy/.barn-panes,
+relative -> absolutized), and proved by inspection that the writer moved (panes_file
+at line 189) while the dogfood reader (PANES_FILE / pane_id_for, line 33) did not, so
+the no-target case keeps both pointing at the identical path - this run's nervous
+system cannot shift under a default relaunch. Only bin/barn.sh staged (12+/7-),
+ledger excluded. Crucially she surfaced a deferred gap rather than hiding it: in
+target mode the writer moved to <target>/.mossy/.barn-panes but relaunch/pane_id_for
+still read <repo>/.barn-panes, so target-mode relaunch won't resolve its panes until
+the cwd-rewiring slice; harmless in dogfood mode where the paths coincide, and
+flagged in the commit body. I verified scope via git (afebb2a, only bin/barn.sh).
+
+Rather than hand the next slice immediately, I compacted shirley while she sat at a
+clean idle boundary after four commits of heavy dry-run throughput. The next slice -
+pane-cwd rewiring plus teaching relaunch to resolve the target's .mossy - is the
+hardest and most delicate of issue #2 (it touches the tmux/Claude spawn, the one
+thing that must be proven WITHOUT launching), so I bought her headroom first. The
+/compact was scoped to keep issue #2's spec, the barn.sh target/STATE_DIR design,
+the deferred relaunch-read gap, the four run-2 commits, and the never-touch-root /
+never-launch rules; drop early exploration. Will hand the slice once she is idle
+again.
+
+13:26 - Compaction completed cleanly; shirley rehydrated by re-reading bin/barn.sh,
+prompts/shaun.md, prompts/bitzer.md, and MISSION.md, and returned to idle. I
+confirmed direction unchanged and handed the next slice, which I split off from the
+hard remaining work to keep it small and launch-free: close the read-path gap she
+herself flagged. Make pane_id_for/relaunch resolve their .barn-panes from the same
+STATE_DIR the write path uses (read/write symmetry), with the no-target dogfood
+relaunch path kept byte-identical to today since it is THIS live run's own relaunch
+path. I explicitly deferred the pane-cwd-at-spawn rewiring to its own later slice -
+that is the genuinely launch-touching part - and specified proof as bash -n /
+shellcheck / dry-run-inspection with the live .barn-panes sha confirmed untouched, no
+nested chains. shirley began working with fresh context.
+
+13:29 - shirley landed the read-path symmetry slice (commit 44b1032): pane_id_for /
+cmd_relaunch now resolve their .barn-panes from STATE_DIR, the same expression
+cmd_up writes (lines 158 vs 227), and relaunch grew an optional target arg
+(relaunch <role> [<target>]). Proof in pane: ran pane_id_for's awk against the live
+.barn-panes and got %215, the real shaun pane id (parse intact); live sha 73f753e
+unchanged across edits and dry-runs; no stray .mossy, no chain launched; only
+bin/barn.sh staged (19+/10-). The asymmetry she flagged last slice is gone - read
+and write now coincide in both modes (target -> <target>/.mossy, dogfood -> repo
+root, byte-identical). Verified scope via git.
+
+Handed the final core slice of issue #2: the pane-cwd-at-spawn rewiring she had
+deferred - the one launch-touching step. In target mode all three panes (and
+relaunch) get cwd = the resolved target; no-target stays byte-identical to today's
+REPO_ROOT/SHIRLEY_DIR spawn. The crux is proving it WITHOUT spawning, so I required a
+dry-run/plan surface that prints the -c <cwd> values each pane would get for both
+modes, with bash -n / shellcheck / live-sha-untouched / nothing-launched assertions -
+and an explicit instruction to STOP and report a blocker rather than launch a nested
+chain if any branch cannot be proven statically. shirley began working.
+
+13:34 - shirley landed the pane-cwd-at-spawn rewiring (commit ed88c31), the
+launch-touching slice, and proved it without spawning: a new --plan surface prints
+each pane's -c <cwd> and returns before ensure_session (no mkdir, no tmux, no
+claude); before/after assertions showed live .barn-panes sha unchanged, tmux panes
+5->5, mossy windows 1->1, no stray .mossy. Dogfood byte-identity held - the dogfood
+pane_cwds branch emits the same three values the old hardcoded REPO_ROOT/SHIRLEY_DIR
+spawn used. Only bin/barn.sh staged (74+/17-). She surfaced two honest
+forward-looking gaps: the per-run state files still live at repo root (only
+.barn-panes is routed to .mossy so far), and the role prompts read MISSION.md etc by
+bare relative path, which only resolves when cwd is the state dir - so target-mode
+panes (cwd = target) cannot yet find their state. Verified scope via git.
+
+Picked the next slice to address that second gap at its mechanism: inject a
+MOSSY_STATE_DIR env var (= absolute STATE_DIR) into the three pane spawns at launch,
+reusing the existing MOSSY_SHIRLEY_DIR injection pattern, so every role gets an
+unambiguous absolute path to its state regardless of cwd; dogfood keeps
+MOSSY_STATE_DIR = REPO_ROOT so the live run is unchanged; surfaced in --plan for
+provability. I deferred the prompt-text edits that will consume the var to the next
+slice (prompts/*.md, lands next launch), keeping this one to barn.sh injection plus
+plan visibility, proven launch-free. shirley began working.
+
+13:39 - shirley landed the MOSSY_STATE_DIR injection (commit 3ad35f3): a launch_cmd
+helper prefixes MOSSY_STATE_DIR=<absolute STATE_DIR> onto the spawn for all three
+panes, and --plan now surfaces it. Proof: up --plan -> REPO_ROOT (dogfood),
+up --plan /tmp -> /tmp/.mossy, relaunch --plan likewise; nothing launched (sha
+unchanged, panes 5->5, windows 1->1, no stray .mossy); grep confirmed a single
+spawn source. Dogfood is behaviorally inert since no role reads the var yet, by
+design. Only bin/barn.sh staged (28+/8-); verified via git.
+
+Run-2 state at this point: issue #1 fully landed (shaun.md re-anchors from the gh
+issue queue 8ef93e3; bitzer.md intake/triage + single-voiced chronicle b760594).
+Issue #2 core mechanics landed across five commits - optional target resolution to
+absolute .mossy (5f04adf), .barn-panes write routing (afebb2a), read-path symmetry
+(44b1032), pane-cwd-at-spawn rewiring with the launch-free --plan surface (ed88c31),
+and MOSSY_STATE_DIR injection (3ad35f3). Every slice proven structurally, never by a
+nested chain; dogfood byte-identity held throughout; root state files never touched.
+
+Handoff for the next shaun (I am going to STANDBY for context). shirley is IDLE at a
+clean boundary - no slice in flight, leave her be until you have rehydrated. The next
+slice is the PROMPT HALF that consumes the var just injected: teach prompts/shaun.md
+and prompts/bitzer.md (and shirley's implicit anchors) to resolve their state files
+(MISSION/GUARDRAILS/TICKS/CHRONICLE/ESCALATIONS/.barn-panes) via $MOSSY_STATE_DIR
+instead of bare relative paths, so target-mode roles find state regardless of cwd; in
+dogfood MOSSY_STATE_DIR=REPO_ROOT so the references stay correct. Note: that slice
+edits shaun.md (my own prompt) - allowed, lands next launch, does not change this
+run; and it must REFERENCE GUARDRAILS.md via the var in prompt text without editing
+GUARDRAILS.md itself (root state file, immutable from below). After that, two more
+issue-#2 slices remain: routing the state files themselves into <target>/.mossy at
+launch (today only .barn-panes lands there; MISSION/GUARDRAILS/etc still sit at repo
+root), and the gitignore .mossy escape hatch plus the by-area ownership docs.
+Require the same launch-free structural proof and stage-only-touched-files discipline
+throughout.
+
+14:11 - Woke from STANDBY, rehydrated from the files (MISSION, GUARDRAILS, shaun.md,
+the tails of TICKS.md and CHRONICLE.md) and re-anchored on the open issue queue -
+gh issue view 2 confirms the two remaining #2 halves: prompts must locate state via
+the injected var, and the state files themselves must be routed into <target>/.mossy.
+shirley was idle at a clean boundary, Context 12% (post-compact at 13:24), and the
+live .barn-panes sha (73f753e) was unchanged - nothing moved while I was compacting.
+
+Picked the prompt-half as the next slice: the consumer of the MOSSY_STATE_DIR bridge
+landed in 3ad35f3. Handed shirley the task of teaching the role prompts (prompts/*.md
+only) to resolve the per-run state files via ${MOSSY_STATE_DIR}/<file> instead of
+bare relative paths, so a target-mode pane (cwd = target, not the state dir) still
+finds MISSION/GUARDRAILS/TICKS/CHRONICLE/ESCALATIONS/.barn-panes. Folded in the
+guardrails: dogfood must stay correct (MOSSY_STATE_DIR=REPO_ROOT, so the references
+still point at today's root files); editing shaun.md is allowed (it is the driver's
+own prompt, lands next launch, inert this run); GUARDRAILS.md may be REFERENCED via
+the var but the file itself must not be edited (immutable from below); no barn.sh
+change this slice; pure text, so the proof is the shown diffs plus a grep that no
+break-under-cwd=target bare references remain, plus a statement of dogfood
+correctness. Stage only the prompts touched. shirley began working.
+
+14:18 - shirley claimed the prompt-half done (commit 09d336f, "docs(prompts): resolve
+state files via $MOSSY_STATE_DIR for target mode"). Verified in git: only
+prompts/shaun.md (36 changes) and prompts/bitzer.md (39 changes) staged - 56+/19-;
+root state files MISSION/GUARDRAILS/ESCALATIONS not in the commit; GUARDRAILS.md
+referenced via ${MOSSY_STATE_DIR} in prompt text but the file itself never edited;
+CHRONICLE/TICKS left unstaged (my ledger). She replaced bare relative state-file refs
+with ${MOSSY_STATE_DIR}/<file> only at genuine read/write/git-add sites, and left 11
+definitional/governance/concept mentions bare (correctly - they name a file's role,
+not a path operation). Dogfood correctness: with MOSSY_STATE_DIR=REPO_ROOT all six
+paths resolve to today's existing root files, which I independently know exist.
+
+One scare worth recording: my own git hash-object of the live .barn-panes read
+075975d, not the 73f753e shirley had reported in her dry-run proofs throughout. I
+treated it as a possible root-state-file mutation and investigated before accepting:
+.barn-panes is gitignored and untracked (by design - never enters commits), its
+content is exactly intact (bitzer=%214/shaun=%215/shirley=%216, the live panes), and
+its mtime is 13:01:38 - untouched since the run began, so shirley never went near it.
+The hash gap is purely tool choice: git hash-object emits the git blob hash
+(075975d), sha1sum emits the raw-content SHA-1 (73f753e) of the same 36-byte file.
+shirley had been reporting sha1sum; I had switched to git hash-object. No mutation.
+Going forward I will cross-name the tool when citing the .barn-panes hash.
+
+Accepted the slice. Picked the next from issue #2: the boot-path gap shirley honestly
+surfaced. bin/barn.sh's boot strings (SHAUN_BOOT/BITZER_BOOT) still tell each role to
+read its prompt and state by bare relative path, which breaks under cwd=target. The
+slice makes those boot strings resolve paths unambiguously, honoring the key
+distinction that prompts/*.md are control-plane assets (stay at REPO_ROOT) while the
+per-run state files live in the resolved STATE_DIR - so a boot string points prompts
+to REPO_ROOT and state to <target>/.mossy, and the no-target case stays byte-identical
+to today (STATE_DIR=REPO_ROOT, prompts=REPO_ROOT/prompts). Scope: bin/barn.sh only;
+launch-free structural proof (bash -n/shellcheck, grep or --plan showing resolved
+paths, dogfood==today, nothing launched); stage only barn.sh. shirley began working.
+This completes the cwd-independence of the boot path before the heavier remaining
+slices (seeding the state files into <target>/.mossy, and the gitignore .mossy escape
+hatch plus ownership docs).
+
+14:27 - shirley claimed the boot-path slice done (commit d2927d3, "feat(barn): resolve
+boot-string paths by REPO_ROOT + state_dir, not cwd"). Verified in git: bin/barn.sh
+only (18+/7-); the static SHAUN_BOOT/BITZER_BOOT constants became shaun_boot/bitzer_boot
+builder functions taking state_dir, called at both delivery sites (cmd_up 266-267,
+cmd_relaunch 324-325); a grep confirms 0 references to the old uppercase constants
+remain. Boot text now points the role at its prompt by control-plane path
+(REPO_ROOT/prompts/<role>.md) and at its state by the resolved absolute path
+(${state_dir}/<file>), so a target-mode pane (cwd=target) finds both. .barn-panes
+intact (content correct, sha1sum 73f753e). She proved both modes launch-free by
+sourcing only the function defs (main "$@" stripped, isolated subshell): dogfood
+renders today's REPO_ROOT paths, target renders prompts->REPO_ROOT + state->/tmp/.mossy;
+nothing launched (sha unchanged, panes 5->5, windows 1->1, no stray .mossy). She also
+honestly caught and corrected a sourcing artifact (process substitution made
+BASH_SOURCE resolve to /dev/fd, showing REPO_ROOT=/dev) by re-rendering with the real
+REPO_ROOT. The launch+boot path for a target is now fully wired and cwd-independent.
+
+Accepted. shirley surfaced the next real gap and the fork inside it: a fresh target's
+.mossy/ has no MISSION/GUARDRAILS, and she asked whether barn should seed templates or
+bitzer authors them. I settled it as direction-setter, grounded in the writer lines of
+GUARDRAILS.md ("Writer: bitzer, and only bitzer, on the Farmer's word") and MISSION.md
+("Writer: bitzer"): those two files are Farmer-authored content; barn.sh must never
+fabricate or template them, because a run booting against a machine-stubbed MISSION is
+exactly the drift we guard against. So the next slice is a PREFLIGHT GUARD, not a
+seeder: on `up <target>`, before spawning, test that the resolved STATE_DIR contains an
+authored MISSION.md and GUARDRAILS.md; if either is missing, print a clear instruction
+(bitzer/Farmer must author them in <target>/.mossy first) and exit non-zero without
+spawning a pane; if both present, proceed as today. Dogfood is byte-identical because
+STATE_DIR=REPO_ROOT already has both files, so the guard passes silently. Scope:
+bin/barn.sh only; the check is read-only (test -f), never creates/moves/edits state;
+launch-free proof (temp dir without the files -> message + non-zero + no spawn; REPO_ROOT
+-> silent pass; nothing launched). I told shirley to flag it as a blocker if she thinks
+refuse-and-instruct is the wrong UX - she reports, I decide. shirley began working.
+
+14:36 - shirley claimed the preflight-guard done (commit 4136e37, "feat(barn):
+preflight-guard 'up' on authored MISSION + GUARDRAILS"). Verified in git: bin/barn.sh
+only, +38 pure additions; two read-only helpers - state_authored (test -f both) and
+preflight_state (names what is missing, prints the author-them-first instruction,
+returns 1) - with the gate wired into cmd_up BEFORE mkdir, so a missing-state target
+leaves no stray .mossy. Root MISSION.md (mtime 13:00:52) and GUARDRAILS.md (13:01:05)
+predate all run work, confirming the test -f never wrote them; .barn-panes intact
+(sha1sum 73f753e); no stray .mossy in repo or /tmp. shirley proved launch-free: refuse
+path (empty temp dir prints the message, exits 1, creates no .mossy), pass path
+(authored temp dir returns rc=0 silently), partial case (only MISSION present names the
+missing GUARDRAILS), and plan-readiness for both modes. She made a clean call on --plan:
+the blocking check sits only on the real spawn path after the --plan early-return, so
+--plan stays a pure never-failing preview that surfaces readiness ("would boot" /
+"would refuse") as information. She agreed refuse-and-instruct is right; no blocker.
+
+Accepted. With this, every mechanic of the control-plane/target split is landed and
+structurally proven: optional target resolution to absolute .mossy, .barn-panes
+write/read routing, pane-cwd-at-spawn, MOSSY_STATE_DIR injection, prompt-side state
+resolution, cwd-independent boot strings, and the authored-state preflight. The one
+remaining issue-#2 checklist item is the escape hatch plus ownership docs, which I
+handed as the closing slice: gitignore the .mossy/ escape hatch (added to this repo's
+.gitignore too, with proof via git check-ignore that the dogfood run record at repo
+root - MISSION/GUARDRAILS/TICKS/CHRONICLE/ESCALATIONS - stays tracked because it does
+not live under .mossy/), and a concise docs/target-split.md capturing the
+control-plane/target model, absolute-path per-run state, by-area ownership (shirley owns
+the work and never touches .mossy/; bitzer owns and authors .mossy/ on the Farmer's
+word; shaun reads .mossy/ + git log, never source), and the preflight contract. Scope:
+doc file + .gitignore only; English, ASCII, no dashes; launch-free text/config proof.
+shirley began working. After this lands, issue #2's checklist is complete (runtime
+behavior only fully proves at a real next launch, which is forbidden to fake here, so
+issue #2 - like #1 - is left open for bitzer's triage to close, not closed from below).
+
+14:46 - shirley claimed the escape-hatch+docs slice done (commit ef75265,
+"docs(target-split): document control-plane/target split; gitignore .mossy"). Verified
+in git: only .gitignore (+7) and the new docs/target-split.md (+61) staged; git
+check-ignore -v confirms .mossy/ (and a nested some/nested/target/.mossy/...) is ignored
+by rule .gitignore:12, while all five root state files (MISSION/GUARDRAILS/TICKS/
+CHRONICLE/ESCALATIONS) are NOT ignored - the dogfood run-record stays tracked, which was
+the key safety point. .barn-panes intact (sha1sum 73f753e). The doc is English, pure
+ASCII, no em/en dashes. Accepted.
+
+=== Run 2 milestone: the harness has evolved itself ===
+Both issues of this run's defined backlog are mechanically complete and each slice was
+proven structurally - never once by launching a nested live chain, and the live run's
+nervous system (.barn-panes at sha1sum 73f753e, the root state files at their 13:00-13:01
+mtimes) was never touched by any of shirley's work.
+
+Issue #1 (GitHub issues as the change channel), 2 commits:
+  8ef93e3 shaun.md re-anchors from the gh issue queue
+  b760594 bitzer.md documents issue intake/triage + single-voiced chronicle
+
+Issue #2 (harness/target split), 8 commits:
+  5f04adf resolve optional target to absolute .mossy state dir
+  afebb2a route .barn-panes write into resolved STATE_DIR by absolute path
+  44b1032 resolve panes-file read path from STATE_DIR (symmetric with write)
+  ed88c31 rewire pane spawn cwds to target, add launch-free --plan surface
+  3ad35f3 inject MOSSY_STATE_DIR into each pane spawn, surface in --plan
+  09d336f prompts resolve their state files via $MOSSY_STATE_DIR for target mode
+  d2927d3 resolve boot-string paths by REPO_ROOT + state_dir, not cwd
+  4136e37 preflight-guard 'up' on authored MISSION + GUARDRAILS
+  ef75265 gitignore .mossy escape hatch + docs/target-split.md ownership doc
+
+What this leaves for bitzer/the Farmer (above shaun's authority):
+  - Closing #1 and #2. Their runtime behavior only fully proves at a real next launch
+    against an authored external target, which this run is forbidden to fake - so both
+    are left OPEN for triage to close, not closed from below.
+  - Scope beyond this run. MISSION.md defines Run 2 as exactly issues #1 and #2; that
+    backlog is now exhausted. Issues #3-#6 (timmy loop-closing, --watch waker, artifact
+    rotation, timmy hardening) are a different scope and may need re-posing after the
+    split - that is a triage/scope decision for bitzer and the Farmer, not something
+    shaun extends into unilaterally (trust rule: MISSION is the anchor, and it names #1
+    and #2). I am holding rather than inventing the next slice.
+
+shirley is IDLE at a clean boundary, Context ~19% (no compaction needed). Nothing is in
+flight. I am ending my turn to report this milestone up and because my own context is
+heavy after a long continuous tick loop. On wake (if the Farmer extends scope), re-read
+MISSION.md, GUARDRAILS.md, and the tails of TICKS.md and CHRONICLE.md, and re-anchor on
+the open issue queue before handing anything new.
+
+## 2026-06-09 14:36 CEST - Run 2 backlog landed: the harness evolved itself (bitzer)
+
+Run 2's product goal was for the harness to modify itself: take its own increments
+from GitHub issues, and grow the ability to drive an external target instead of only
+dogfooding itself. Both issues that defined this run are now implemented and proven.
+
+Where the product stands:
+  - Issue #1 (GitHub issues as the change/increment channel) landed in 2 commits.
+    The harness now reads its slices from `gh issue view`, treating issue text as
+    spec material alongside MISSION.
+  - Issue #2 (harness/target split: a control plane that drives an external target)
+    landed in 9 commits. The harness resolves a target directory, spawns each pane
+    with its cwd set at spawn time, routes run-state reads and writes into the
+    target's `.mossy/` directory, injects MOSSY_STATE_DIR so prompts resolve their
+    own state files, builds boot strings by repo-root plus state-dir rather than by
+    cwd, and refuses via a preflight guard to fabricate the Farmer-authored
+    MISSION/GUARDRAILS (barn never invents those - it guards on their presence).
+    A plain `barn.sh up` with no target stays byte-identical to the old dogfood path.
+
+Every slice was proven structurally - shellcheck, bash -n, dry-run, shown diffs -
+never by launching a nested live chain, exactly as this self-modifying run required.
+The live run's nervous system (the root MISSION/GUARDRAILS/TICKS/CHRONICLE/ESCALATIONS
+files and .barn-panes) was never moved, deleted, or hand-edited; shirley's changes to
+barn.sh and the prompts take effect only at the next launch.
+
+Why #1 and #2 stay OPEN on GitHub: their runtime behavior only fully proves at a real
+next launch against an authored external target, which this run is forbidden to fake.
+They are landed by this run's own proof regime (structural proof is what GUARDRAILS
+mandates); the GitHub close waits for a launch-verified confirmation, which is honest
+rather than a gap.
+
+The run does not stop here. Per the Farmer's standing never-done order, Run 2 continues
+into the next open non-draft issue: #3 (shaun calls timmy instead of its eyeball
+heuristic), then #4 (timmy --watch event-driven waker), #5 (artifact rotation for
+weeks-long runs), #6 (timmy hardening backlog), #7 (usage-window watchdog). The run
+stays alive at least through its 4-hour floor. Next: shaun re-anchors on the issue
+queue and hands #3's smallest proven slice.

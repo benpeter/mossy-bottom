@@ -38,3 +38,44 @@ State is one of: working, idle, asking, claiming-done, errored, stuck, illegible
 09:46 | working | - (settled-frame question-cut hardening; RED-first)
 09:52 | claiming-done->steered | accepted 566ed67 (12/12, timer-gone guards); re-anchored to minimal watch mode (--watch, emit-on-change), RED-first, pacing-guarded for ~35m close
 10:03 | close | Farmer called run 1; landed watch-mode core 02cb59e (emit-on-change, 13/13, stable 3/3, shellcheck clean); signal-exit+classify-error OPEN; stopped, no new scope
+
+--- run 2 (shaun driving; harness evolves itself; issues #1 and #2) ---
+13:03 | kickoff | sent opening directive (smallest proven slice of issue #1, structural proof only, never touch root state files); shirley working
+13:05 | working | -
+13:06 | working | - (slice: shaun re-anchors from gh issue queue; staged only prompts/shaun.md, committing)
+13:08 | claiming-done->steered | verified 8ef93e3 (only prompts/shaun.md, 14+/9-, gh list grounds it); shaun.md half of #1 proven; re-anchored and handed bitzer.md half of #1 (intake/triage role, single-voiced chronicle)
+13:09 | working | - (bitzer.md half of #1; structural proof + diff, committing only bitzer.md)
+13:10 | claiming-done->steered | verified b760594 (only prompts/bitzer.md, 21+/7-); issue #1 both halves proven, left open for bitzer triage; handed issue #2 foundation (barn.sh target arg + absolute .mossy resolution, default preserved, dry-run proof, no live chains)
+13:13 | working | - (issue #2 foundation; planning barn.sh target arg + .mossy resolution)
+13:14 | working | - (barn.sh: resolve_target + state_dir, surfaced as resolution-only; matches scope)
+13:15 | working | - (barn.sh resolve subcmd + bash -n/shellcheck/dry-run all branches; correctly excluded ledger files; committing only bin/barn.sh)
+13:17 | claiming-done->steered | verified 5f04adf (only bin/barn.sh, 51+/3-, dry-run proof holds); handed STATE_DIR-wiring slice (mkdir -p + route per-run state writes to $STATE_DIR by absolute path, no-target byte-identical to today, pane-cwd rewire deferred, dry-run proof, no launch)
+13:19 | working | - (STATE_DIR-wiring slice; reading/planning barn.sh state writes)
+13:20 | working | - (routed panes_file to STATE_DIR; proving no-target dest == live .barn-panes path, sha unchanged, relaunch read path untouched; committing only bin/barn.sh)
+13:22 | claiming-done->steered | verified afebb2a (only bin/barn.sh, 12+/7-); accepted panes_file routing slice (no-target dest==live .barn-panes, sha unchanged, honest deferred relaunch-read gap); compacting shirley at clean idle boundary before the hard pane-cwd slice
+13:24 | working | - (shirley compacting, in progress)
+13:26 | idle(post-compact)->steered | shirley rehydrated (re-read barn.sh+prompts+MISSION); handed read-path symmetry slice (pane_id_for/relaunch resolve STATE_DIR like the write path; no-target byte-identical; pane-cwd-at-spawn deferred; dry-run proof, no launch)
+13:27 | working | - (read-path symmetry: relaunch <role> [<target>] reads <target>/.mossy; bash -n/shellcheck/dry-run + live sha check)
+13:29 | claiming-done->steered | verified 44b1032 (only bin/barn.sh, 19+/10-, read/write symmetry, awk returns %215, sha untouched); handed final core slice - pane-cwd-at-spawn rewiring with strict launch-free dry-run/plan proof (no-target byte-identical, target cwd=target for all 3 panes; stop+report if a branch needs launching)
+13:30 | working | - (pane-cwd slice: --plan dry-run surface prints per-pane -c cwds with no spawn; wiring resolved cwds into real spawns)
+13:32 | working | - (proving pane-cwd: baseline vs after --plan, both modes + relaunch; dogfood preserves REPO_ROOT+timmy, target=all 3; asserting no spawn)
+13:34 | claiming-done->steered | verified ed88c31 (only bin/barn.sh, 74+/17-, launch-free --plan proof exact); handed MOSSY_STATE_DIR injection slice (env=absolute STATE_DIR into 3 spawns, dogfood=REPO_ROOT, surfaced in --plan; prompts consume it NEXT slice; launch-free proof)
+13:36 | working | - (launch_cmd injects MOSSY_STATE_DIR; added to --plan output; dogfood=repo root, no consumer yet per scope)
+13:37 | working | - (proving MOSSY_STATE_DIR: plan output both modes + launch_cmd string exports correctly; asserting no spawn/side-effects)
+13:39 | claiming-done->accepted | verified 3ad35f3 (only bin/barn.sh, 28+/8-, --plan shows MOSSY_STATE_DIR both modes, no spawn, sha untouched); env-var bridge landed. Issue #2 core mechanics complete (5 commits). Clean boundary -> STANDBY(context)
+14:11 | idle(post-standby wake)->steered | rehydrated (MISSION/GUARDRAILS/shaun.md + TICKS/CHRONICLE tails, gh #2 re-read); shirley idle Context 12%, live .barn-panes sha 73f753e untouched; handed issue #2 prompt-half (prompts/*.md resolve state via $MOSSY_STATE_DIR, dogfood=REPO_ROOT correct, reference-not-edit GUARDRAILS.md, no barn.sh, launch-free text proof)
+14:12 | working | -
+14:13 | working | -
+14:14 | working | -
+14:15 | working | -
+14:16 | working | -
+14:18 | claiming-done->accepted | verified 09d336f (only prompts/shaun.md+bitzer.md, 56+/19-; root state untouched, GUARDRAILS.md referenced-not-edited, ledger unstaged, 6 dogfood paths resolve); diagnosed .barn-panes hash scare = git-hash-object(075975d) vs sha1sum(73f753e), same 36-byte file, mtime 13:01 untouched; accepted prompt-half. Handed boot-path slice (barn.sh SHAUN_BOOT/BITZER_BOOT resolve prompts->REPO_ROOT, state->STATE_DIR; dogfood byte-identical; launch-free proof; only bin/barn.sh)
+14:20 | working | -
+14:21 | working | -
+14:22 | working(committing) | -
+14:27 | claiming-done->accepted | verified d2927d3 (bin/barn.sh only, 18+/7-; root state untouched, .barn-panes sha1sum 73f753e intact, SHAUN_BOOT/BITZER_BOOT constants gone); boot path now cwd-independent. Settled bootstrap fork: MISSION/GUARDRAILS are Farmer-authored, barn must not fabricate. Handed preflight-guard slice (up <target> tests STATE_DIR has authored MISSION+GUARDRAILS, else message+exit non-zero, no spawn; dogfood passes silently byte-identical; read-only test -f; only bin/barn.sh; launch-free proof)
+14:26 | working | -
+14:27 | working | -
+14:36 | claiming-done->accepted | verified 4136e37 (bin/barn.sh only +38; root MISSION/GUARDRAILS mtimes 13:00/13:01 predate run, untouched; .barn-panes 73f753e; no stray .mossy); preflight guard landed, --plan stays non-blocking. Handed final #2 slice: gitignore .mossy/ escape hatch + docs/target-split.md ownership doc (root state stays tracked, prove via check-ignore; only doc+.gitignore staged; launch-free text proof)
+14:30 | working | -
+14:46 | claiming-done->accepted | verified ef75265 (.gitignore +7, docs/target-split.md +61 only; check-ignore: .mossy/ ignored, all 5 root state files tracked-ok; .barn-panes 73f753e; doc ASCII-clean no dashes); escape-hatch+docs landed. Issue #2 checklist complete (8 mechanic slices + docs). Run-2 backlog (#1+#2) mechanically exhausted -> reporting milestone up to bitzer, not inventing #3+ scope
