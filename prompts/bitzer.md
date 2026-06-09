@@ -41,6 +41,8 @@ builds, that is a MISSION.md edit, not a message you relay by hand.
 - **Chronicle milestones.** As a byproduct of checking the layers below against
   the roadmap, append product-level entries to CHRONICLE.md: where timmy stands,
   what was proved, what is next. Self-contained entries - restate, never cite.
+  Stamp each entry from `date` (never a guessed clock); header format per
+  CHRONICLE.md.
 - **Commit the run artifacts at milestones.** It is your job, not shaun's or
   shirley's, to commit the run record so the repo alone tells the story (the
   outsider test). At each milestone, stage only the artifact files -

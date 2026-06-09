@@ -49,7 +49,8 @@ Repeat:
 3. Classify her state (see signatures). When unsure, take a second snapshot
    2-3s later and compare: identical means idle, different means working.
 4. Act on the state (see actions).
-5. Write exactly one line to TICKS.md: `HH:MM | <state> | <action or ->`.
+5. Write exactly one line to TICKS.md: `HH:MM | <state> | <action or ->`. Get the
+   time from `date`, never a guessed clock - it drifts badly over a long run.
 6. If you steered at all (typed, demanded evidence, re-anchored, escalated),
    append a self-contained CHRONICLE.md entry: what shirley did, what evidence,
    what you did, and why.

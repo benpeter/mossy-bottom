@@ -6,6 +6,8 @@ every steering moment) and bitzer (milestone entries at product level).
 ## Rules
 
 - Append-only. Never edit or delete a past entry.
+- Each entry header is `## YYYY-MM-DD HH:MM TZ - <title> (<author>)`, stamped from
+  the actual system clock (run `date`), never a guessed time.
 - Every entry is self-contained. Never cite a discussion or another entry by
   reference - restate the conclusion and the why.
 - The test: a reader with only this repo can retell how the run unfolded, step by
@@ -15,9 +17,14 @@ Entry shape (shaun, per steering moment): what shirley did, what evidence backed
 it, what action shaun took, and why. Entry shape (bitzer, per milestone): where
 the product stands against the roadmap, and why that matters.
 
+_Note: on 2026-06-09 the existing entry timestamps below were normalized to this
+format and corrected against git commit times - shaun's clock had drifted several
+hours overnight. A one-time edit to past entries, authorized by the Farmer; see
+docs/build-journal.md._
+
 ---
 
-## 21:10 - Run kickoff (shaun)
+## 2026-06-07 21:10 CEST - Run kickoff (shaun)
 
 bitzer gave the go signal ("Begin the run."). shirley's pane (%5) showed a fresh
 empty Claude Code session in ~/github/benpeter/mossy-bottom/timmy, no prompt -
@@ -33,7 +40,7 @@ Evidence the directive landed: the snapshot showed the full directive echoed as 
 submitted message and a "Flibbertigibbeting..." spinner - shirley is working. No
 steering needed yet; entering the tick loop.
 
-## 21:14 - First slice proven; re-anchored to complete v1 (shaun)
+## 2026-06-07 21:14 CEST - First slice proven; re-anchored to complete v1 (shaun)
 
 shirley reported a proven idle-vs-busy classifier. Evidence in her pane: a test
 run showing "2 passed, 0 failed" (a static tmux pane read idle, an advancing pane
@@ -59,7 +66,7 @@ waiting-input via the numbered-menu + Enter-to-confirm signature with its reserv
 exit code - each driven RED-first, proven with visible test output and a --json
 sample, committed separately. This matched shirley's own recommendation.
 
-## 21:20 - Spinner + waiting-input proven; handed the question slice (shaun)
+## 2026-06-07 21:20 CEST - Spinner + waiting-input proven; handed the question slice (shaun)
 
 shirley reported two more proven cues. Evidence in her pane: ok lines reading
 "advancing pane classified busy (exit 10)", "stalled frame with spinner
@@ -85,7 +92,7 @@ and a --json sample, separate legible commits. Noted that reliable question
 detection (never-done backlog item 1) is a later hardening; this slice is the
 mechanical first cut that completes the v1 word-set.
 
-## 21:30 - v1 four-word contract met; handed real-pane validation (shaun)
+## 2026-06-07 21:30 CEST - v1 four-word contract met; handed real-pane validation (shaun)
 
 Milestone. shirley reported that all four v1 states now emit - busy|idle|
 waiting-input|question - each with its documented exit code (0/10/20/30) and each
@@ -111,7 +118,7 @@ if a live session cannot be spawned cleanly (auth/headless/nesting), report the
 obstacle rather than dress a synthetic pass as real. An honest obstacle is worth
 more than a false live-pass.
 
-## 21:42 - Live validation passed for idle+busy; handed hardening slice, then STANDBY (shaun)
+## 2026-06-07 21:42 CEST - Live validation passed for idle+busy; handed hardening slice, then STANDBY (shaun)
 
 shirley proved timmy against a real Claude Code pane for the first time, not just
 synthetic glyphs. Evidence: she spawned a throwaway claude session in a detached
@@ -140,7 +147,7 @@ STANDBY - shirley is working the narrow-pane suffix-truncation test (then live
 waiting-input); next step is to verify her evidence and re-anchor per the
 never-done backlog when she next reports.
 
-## 08:25 - Woke for guardrail-4 amendment; cleared shadows, re-anchored to question-live (shaun)
+## 2026-06-08 03:36 CEST - Woke for guardrail-4 amendment; cleared shadows, re-anchored to question-live (shaun)
 
 bitzer woke me: GUARDRAILS rule 4 was amended (commit 4b1e4ca "feat(guardrails):
 forbid shadowing run artifacts inside timmy/") to forbid creating CHRONICLE.md,
@@ -169,7 +176,7 @@ Note: shirley's own context is heavy (~197k tokens shown in her pane). That is h
 capacity concern, not mine to act on, but worth watching - if her legibility
 degrades I demand clearer reports, I do not dive into her source.
 
-## 03:40 (2026-06-08) - Product at v1; run artifacts repaired after a path mishap (bitzer)
+## 2026-06-08 03:41 CEST - Product at v1; run artifacts repaired after a path mishap (bitzer)
 
 Product status against the roadmap: timmy v1's four-word contract is met and
 partly hardened. All four states (busy|idle|waiting-input|question) emit with their
@@ -200,7 +207,7 @@ addressed by steering, not by another guardrail. One cosmetic residue: shaun's
 wake entry above is stamped 08:25, but the real clock and his own tick read 03:38
 - left as written, since the chronicle is append-only.
 
-## 08:50 - Shadow-file race corrected; question proven live, multi-line limit exposed (shaun)
+## 2026-06-08 03:43 CEST - Shadow-file race corrected; question proven live, multi-line limit exposed (shaun)
 
 Two threads this wake. First, a self-inflicted scare worth recording. When bitzer
 told me GUARDRAILS rule 4 was amended to forbid run-artifact filenames inside
@@ -236,7 +243,7 @@ idle box still reads idle - no false positive; the footer must not mask the real
 last line), then a live re-run confirming both cases read question. This matched
 shirley's own recommendation.
 
-## 2026-06-08 - multi-line question slice accepted; shirley compacted
+## 2026-06-08 04:05 CEST - Multi-line question slice accepted; shirley compacted (shaun)
 
 Post-compaction wake. Adopted two policy changes confirmed in the files:
 (1) shaun now manages compaction for shirley as well as himself (prompts/shaun.md
@@ -270,7 +277,7 @@ question-detection algorithm and its known timer-cut gap, and the proven status;
 drop exploration) before handing the next slice. Re-anchor goes out next tick once
 she settles from compaction.
 
-## 2026-06-08 - settled-frame gap closed; re-anchored to watch mode
+## 2026-06-08 09:50 CEST - Settled-frame gap closed; re-anchored to watch mode (shaun)
 
 shirley closed the timer-cut gap she had surfaced. Verified by evidence: commit
 566ed67 surfaces "12/12 green" with the two guards I mandated (timer-gone +
@@ -296,7 +303,7 @@ proven result, stop at the largest proven sub-slice (the emit-on-change decision
 unit-tested without the live loop) and report - a clean proven boundary beats a
 bigger half-built one.
 
-## 10:04 (2026-06-08) - Run 1 closed (bitzer)
+## 2026-06-08 10:05 CEST - Run 1 closed (bitzer)
 
 The Farmer called time on run 1. timmy stands as a working, vanilla,
 single-purpose CLI, closed at a clean proven boundary with no half-built work left

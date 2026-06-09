@@ -199,3 +199,47 @@ transparent and trackable).**
   earn their keep once steering-without-attaching is needed (for example filing a
   change from a phone, which shaun would pick up via `gh` at each re-anchor without
   a local pull). Kept on the roadmap, not built now.
+
+---
+
+## 2026-06-09 12:31 CEST - Chronicle timestamps normalized; GH issues adopted; rotation is a first-class need
+
+Three things settled after run 1, in the discuss-then-capture spirit.
+
+**1. Chronicle timestamps normalized (a one-time append-only override).** shaun's
+clock drifted badly overnight during run 1 - it stamped entries 08:25 and 08:50
+when git commit times put the real events near 03:36 and 03:43. With the Farmer's
+authorization, the existing CHRONICLE.md headers were normalized to one format,
+`## YYYY-MM-DD HH:MM TZ - <title> (<author>)`, and the times corrected against git
+as ground truth. The durable fix: entries are now stamped from the actual `date`
+output, never a guessed clock (added to CHRONICLE.md's rules and to shaun.md /
+bitzer.md). TICKS.md carries the same drift and is the next cleanup.
+
+**2. GH issues adopted as the change / increment channel.** This replaces the
+in-MISSION never-done backlog and the idea of a BACKLOG.md. The split: issues are
+the work-queue and the human's async intake (file from anywhere); MISSION.md and
+GUARDRAILS.md stay the constitution (files, re-read every tick, current truth,
+edited in place); git plus CHRONICLE stay the ledger. Crucially, humans never
+hand-write CHRONICLE entries - they file issues, and the processing agent authors
+the chronicle, so the narrative stays single-voiced. A `draft` label means
+"staged, do not process." Issues live on the target repo (for the dogfood, on
+mossy-bottom itself).
+
+**3. Per-run rotation is not YAGNI - it is a near-term need.** The intent is
+autonomous product evolution that may run for weeks, so a single run's append-only
+artifacts grow without bound - CHRONICLE.md by steering moments and milestones,
+TICKS.md by one line per tick (thousands per day). Left alone they eventually
+exceed any context window. The design: bitzer rotates the artifacts on a cadence
+(per day, or per N entries), sealing the current chapter into a dated archive
+(`chronicle/archive/YYYY-MM-DD.md`, `ticks/archive/...`) and starting a fresh live
+file, while maintaining a compact running synopsis (the milestone arc) so the
+outsider test and agent rehydration never need the full archive. This pairs with
+the event-driven waker (timmy `--watch` wakes shaun on state change), which cuts
+the tick volume at the source.
+
+So the **long-running architecture** is four pieces working together: the
+event-driven waker (slow the growth and the token burn), artifact rotation plus a
+running synopsis (bound the live re-readable files), GH issues as async intake
+(steer over weeks without attaching), and the harness/target split (multiple
+long-running projects side by side). Run 1 proved the chain; these four make it
+sustainable at the intended timescale. All four are filed as issues.
