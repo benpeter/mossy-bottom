@@ -13,8 +13,9 @@
 #   bin/barn.sh relaunch <role>       respawn one pane (bitzer|shaun|shirley)
 #
 # Config via env:
-#   MOSSY_SESSION   target tmux session (default: attached session, else "mossy")
-#   MOSSY_CLAUDE    path to the claude binary (default: resolved from PATH)
+#   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
+#   MOSSY_CLAUDE        path to the claude binary (default: resolved from PATH)
+#   MOSSY_SHIRLEY_DIR   shirley's working directory (default: <repo>/timmy)
 #
 # tva
 set -euo pipefail
@@ -22,6 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TIMMY_DIR="${REPO_ROOT}/timmy"
+SHIRLEY_DIR="${MOSSY_SHIRLEY_DIR:-${TIMMY_DIR}}"
 PANES_FILE="${REPO_ROOT}/.barn-panes"
 WINDOW="mossy"
 
@@ -121,14 +123,14 @@ cmd_up() {
     exit 1
   fi
 
-  mkdir -p "${TIMMY_DIR}"
+  mkdir -p "${SHIRLEY_DIR}"
 
   # Create the window detached so the Farmer's current view is not stolen.
   # Pane creation order is left to right after even-horizontal: bitzer, shaun, shirley.
   local bitzer shaun shirley
   bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${REPO_ROOT}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
   shaun="$(tmux split-window -d -t "${bitzer}" -c "${REPO_ROOT}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
-  shirley="$(tmux split-window -d -t "${shaun}" -c "${TIMMY_DIR}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
+  shirley="$(tmux split-window -d -t "${shaun}" -c "${SHIRLEY_DIR}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
 
   tmux select-layout -t "${session}:${WINDOW}" even-horizontal
   tmux set-option -w -t "${session}:${WINDOW}" remain-on-exit on
@@ -171,7 +173,7 @@ cmd_relaunch() {
   local id dir
   id="$(pane_id_for "${role}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${PANES_FILE}" >&2; exit 1; }
-  if [ "${role}" = shirley ]; then dir="${TIMMY_DIR}"; else dir="${REPO_ROOT}"; fi
+  if [ "${role}" = shirley ]; then dir="${SHIRLEY_DIR}"; else dir="${REPO_ROOT}"; fi
 
   tmux respawn-pane -k -t "${id}" -c "${dir}" "${CLAUDE_CMD}"
   boot_pane "${id}" "${role}" || true
