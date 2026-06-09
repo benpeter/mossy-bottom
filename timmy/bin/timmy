@@ -231,10 +231,17 @@ classify_once() {
 }
 
 # --watch: poll the pane and print one line per state CHANGE. Emit the first
-# read, then stay silent while the state holds. A SIGINT/SIGTERM is a clean stop
-# (exit 0); a failed snapshot is an error (exit EXIT_WATCH_ERR).
+# read, then stay silent while the state holds. SIGINT/SIGTERM is a clean stop
+# (exit 0) - the same trap/exit run_await uses. SIGPIPE is folded into that same
+# trap: when a consumer closes the pipe, the next write would otherwise kill the
+# process by signal 13 (the linger-then-die mode hit during the #4 gate); the trap
+# turns it into a clean exit 0 instead. A failed snapshot - a pane that went away
+# mid-watch - makes classify_once return nonzero, and we exit EXIT_WATCH_ERR, the
+# same constant single-shot and --await use, so the modes cannot drift. (A silent
+# watcher cannot notice a dead reader until its next write; for a consumer that must
+# never linger, use --await, which self-terminates.)
 run_watch() {
-  trap 'exit 0' INT TERM
+  trap 'exit 0' INT TERM PIPE
   local last="" tick=0
   while :; do
     if ! classify_once; then
