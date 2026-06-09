@@ -1293,3 +1293,202 @@ Issues #1 through #6 are now all landed and left OPEN for a launch-verified clos
 issue remains: #7 (usage-window watchdog: pause and auto-resume around rate-limit
 windows). After it lands the defined queue is drained; per the standing policy shaun
 will not invent scope beyond it. The 4-hour floor lands at 18:08 CEST.
+
+16:00 - Woke (post-STANDBY-context), re-anchored: MISSION/GUARDRAILS unchanged;
+TICKS/CHRONICLE-tail fallback (SYNOPSIS.md still absent); bitzer swept my prior
+lines into 85486d3 (docs(run): chronicle issue #6 landed; one issue left), tree
+clean; #1-#6 landed. shirley idle at a clean boundary, Context 42% (noted - will
+compact her before a later slice if it crosses ~70%).
+
+Read issue #7 fresh (gh issue view 7): the usage-window watchdog - pause work
+when a usage window crosses a configurable threshold and auto-resume when a new
+window starts and usage drops back under. Defaults 80% (5-hour) / 85% (weekly),
+per-window tunable (not a global toggle), pause must surface an observable signal
+(which window, current %, threshold), zero-config defaults work. Scope IN: read
+5h+weekly usage, threshold comparison, pause action, auto-resume, config surface;
+OUT: forecasting, dollar cost, notification channels beyond the pause/resume
+signal. The meatiest issue, so I decomposed it: the usage READER (where the real
+5h/weekly numbers come from) is the risky unknown - its own later slice with
+research; the pause/resume WIRING into bitzer/shaun prompts is a later prompt-duty
+slice; and the DECISION + CONFIG + SIGNAL tool is cleanly provable launch-free
+over fixtures and self-contained, so it is the smallest first slice (mirrors #5
+starting from the rotate.sh mechanism before wiring duties).
+
+Handed slice 1 of #7, a new standalone control-plane tool only (her call on
+name/location, e.g. bin/watchdog.sh, justified against KISS like rotate.sh,
+invocable by absolute path under ${MOSSY_REPO_DIR} like timmy/rotate). Contract:
+input = current usage for the two windows as plain numbers (her choice of
+args/stdin/env - the simple seam the reader slice fills later); config = two
+independently tunable thresholds, shipped defaults 80 (5h) / 85 (weekly),
+overridable via env/flags, zero-config works, not a single toggle; output = a
+clear-vs-pause decision with a distinct exit code per outcome plus an observable
+signal line naming which window tripped, the current %, and the threshold. Proof
+launch-free over FIXTURE values only (no real usage source, no chains): under
+both -> clear; 5h at/over -> pause naming 5h with %+threshold; weekly at/over ->
+pause naming weekly; a custom override moves the boundary; zero-config uses 80/85;
+shellcheck + bash -n clean; stage only the new tool file. I also explicitly set
+aside shirley's standing "close out the run" suggestion again (trust rule - she
+reports proof/blockers; direction and run lifecycle are mine/bitzer's). She began
+reading the issue. After this, #7's remaining slices: the usage reader, then the
+pause/resume wiring; once those land, the #1-#7 queue is drained pending
+launch-verified closes and I flag that to bitzer rather than inventing scope.
+
+16:05 - Issue #7 slice 1 landed. shirley built bin/watchdog.sh (commit 644844b,
+110-line standalone control-plane tool). Interface: required --5h <pct> / --weekly
+<pct> (current usage), optional --5h-threshold / --weekly-threshold overriding the
+defaults from $MOSSY_WD_5H / $MOSSY_WD_WEEKLY or the shipped 80 / 85; two
+independent per-window knobs, not a global toggle; zero-config applies 80/85.
+Outcomes: CLEAR exit 0 (both under), PAUSE exit 10 (a window reached >= its
+threshold) with an observable signal line naming the binding window(s) + current %
++ threshold, usage error exit 64; decimals compared via awk. Exit-code convention
+matches timmy (10) and rotate (64) - consistent control-plane surface. Verified
+independently, not on her word: HEAD is bin/watchdog.sh only (110+); shellcheck
+clean; bash -n OK; and I re-ran 8 fixtures myself (after catching that my first
+guess of a positional interface was wrong - the real seam is the named flags,
+which are better: no window ambiguity): 50/60 and 79/84 -> CLEAR 0; 80 -> PAUSE
+naming 5h at 80% >= 80% (the reaches=>= boundary); 90 -> PAUSE naming weekly; 82/88
+-> PAUSE naming both; --5h-threshold 90 -> CLEAR (boundary moved); MOSSY_WD_5H=70
+with 75 -> PAUSE (env override); 79.9 -> CLEAR (float compare). Observable signal
+satisfied. Only my own TICKS/CHRONICLE unstaged.
+
+Handed the next slice as a REPORT-ONLY investigation (no files changed), because
+the usage reader is the riskiest unknown and I will not have either of us guess
+how Claude usage is exposed (verify-before-claiming). Asked shirley to enumerate
+the real, confirmed candidate sources for the current 5-hour and weekly usage
+percentages - a claude CLI subcommand/status, a local state/config file, an API
+rate-limit-header endpoint, an env signal, the TUI footer - stating for each how
+she confirmed it exists and pasting its real emitted shape (no assumptions); then
+recommend the smallest/most-vanilla source yielding the two percentages and sketch
+how a reader would parse it into watchdog's --5h/--weekly inputs. Explicitly told
+her: do NOT fabricate a source; if a source cannot be confirmed from outside
+without a live chain or spending real usage, report that as a constraint/blocker
+(a valid finding) and note for each candidate whether a reader on it could be
+proven LAUNCH-FREE (parse a captured fixture) or would inherently need a live
+session. Vanilla only. I rule on the reader's direction from what she finds. After
+the reader is settled and built, the final #7 slice is the pause/resume wiring
+into bitzer/shaun prompts (act on CLEAR/PAUSE exit 0/10 + auto-resume when a new
+window starts and usage drops under). Once that lands, the #1-#7 queue is drained
+pending launch-verified closes and I flag that to bitzer rather than inventing
+scope. She began investigating.
+
+16:11 - Issue #7 reader investigation (report-only, no commit - git clean of her
+work). shirley confirmed the usage source entirely OFFLINE (no network, no chain):
+the claude binary contains the endpoint /api/oauth/usage (host
+https://api.anthropic.com), the field names five_hour / seven_day / weekly each
+with utilization (a 0..1 fraction) + resets_at, the CLI's own
+used_percentage = utilization*100, the anthropic-ratelimit-unified-* headers, and
+the OAuth token at ~/.claude/.credentials.json (claudeAiOauth.accessToken +
+rateLimitTier, with an expiresAt). She split the reader into a PARSER (JSON -> two
+percentages: pure transform, fully launch-free / fixture-testable) and a FETCHER
+(the live authenticated GET: not offline, outward-facing - sends Ben's OAuth token
+to Anthropic - though it spends no model usage and launches no chain), and asked
+me to rule on (1) how to capture a real fixture and (2) the fail-safe policy when
+usage cannot be read, plus flagged a token-refresh/401 caveat.
+
+My rulings (recorded so they are not lost to a compaction):
+- CAPTURE: NO live GET this run, and do NOT send Ben's OAuth token over the
+  network. I will not unilaterally authorize an outward-facing call with his
+  credentials, and it is unnecessary - the response shape is already confirmed
+  from the binary, so the parser is proven against a SYNTHETIC fixture matching
+  that shape (five_hour/seven_day/weekly with utilization + resets_at). Fully
+  launch-free, no token, no network. This also sidesteps any need to escalate the
+  credential question.
+- FETCHER built as code (curl to /api/oauth/usage with the bearer + confirmed
+  headers) but proven STRUCTURALLY only (shellcheck/bash -n + well-formed request);
+  NOT executed live - it runs at the next launch like every other change.
+- weekly window = seven_day.utilization*100, with a documented comment-level
+  assumption that seven_day is the weekly key (both strings exist in the binary),
+  to confirm at first real fetch; parser tolerant of a missing key.
+- Vanilla parse: prefer jq if reliably present, else minimal POSIX/awk/sed; do NOT
+  add python3 as a dep even though present (guardrail 4). She justifies the choice.
+- On ANY fetch/parse failure (network, 401/expired token, malformed JSON): reader
+  exits nonzero + emits a clear "usage unavailable" signal. The CLEAR-vs-PAUSE
+  fail-safe on reader failure is the NEXT (wiring) slice and my call - the reader
+  only reports success+values or failure, it does not decide.
+
+Handed the reader-build slice on those rulings: one new standalone file (e.g.
+bin/usage-read.sh under ${MOSSY_REPO_DIR}, justified like rotate/watchdog),
+parser + fetcher as above; launch-free proof = parser over synthetic fixtures
+(normal, boundary, malformed/missing-key) emitting the right two percentages and
+the failure path, fetcher shown structurally and never executed; stage only the
+new file. After the reader lands, the final #7 slice is the pause/resume WIRING
+into bitzer/shaun prompts (act on watchdog CLEAR/PAUSE exit 0/10 + auto-resume
+when a new window starts and usage drops under, and the reader-failure fail-safe
+policy - I lean fail-open + loud signal for an autonomous never-done run, since a
+fail-closed reader that cannot read usage would never auto-resume and would stall
+the run; decide at wiring time). Once wiring lands, #1-#7 is drained pending
+launch-verified closes and I flag that to bitzer rather than inventing scope.
+shirley's context 46%, under the 70% compaction line. She began building.
+
+16:18 - Issue #7 reader slice landed. shirley built bin/usage-read.sh (commit
+0590e8b, 107 lines) honoring every ruling. Two parts: PARSER (--parse [<f>], reads
+usage JSON from file/stdin, prints "--5h <pct> --weekly <pct>", launch-free) and
+FETCHER (bare invocation: curl GET https://api.anthropic.com/api/oauth/usage with
+the OAuth bearer from ~/.claude/.credentials.json + anthropic-beta: oauth-2025-04-20
+and anthropic-version: 2023-06-01, NOT executed this turn - runs at next launch).
+She chose jq and treats jq-absence as just another "usage unavailable" failure (not
+a brittle hard dep); python3 excluded per the ruling. weekly = seven_day.utilization
+with a documented fallback to a weekly key; any fetch/parse failure -> "usage
+unavailable" on stderr + nonzero exit, never deciding clear-vs-pause.
+
+Verified independently, not on her word: HEAD is bin/usage-read.sh only (107+);
+shellcheck CLEAN; bash -n OK. I ran the parser myself via --parse over synthetic
+fixtures (no network, no token): normal 0.42/0.61 -> --5h 42 --weekly 61; boundary
+0.80/0.85 -> --5h 80 --weekly 85 (clean, no IEEE noise); decimal 0.825/0.9009 ->
+--5h 82.5 --weekly 90.09; missing five_hour -> usage unavailable exit 1; malformed
+-> exit 1. End-to-end in an explicit bash subshell: boundary fixture -> parser ->
+watchdog = PAUSE exit 10 naming both windows; clear fixture -> CLEAR exit 0. The
+"unknown argument" both she and I first hit is purely a zsh outer-shell artifact
+(this Bash tool runs zsh, whose word-splitting/read -a differ; the scripts are
+#!/usr/bin/env bash and split their args correctly, proven in bash). I did NOT
+execute the fetcher - no network call, no token sent, honoring the capture ruling.
+Only my own TICKS/CHRONICLE unstaged.
+
+STANDBY (context). Very long, decision-dense turn since the post-compaction wake:
+re-anchored, accepted #7 slice 1 (watchdog decision tool 644844b, 8 fixtures
+re-run by me), ran and ruled on the report-only usage-reader investigation (the
+offline source discovery + the no-live-GET / synthetic-fixture / fetcher-structural
+ruling), then handed/monitored/accepted the reader build (0590e8b, parser re-proven
+by me + end-to-end coupling proven in bash). I dogfooded timmy --await throughout;
+the fixture-based slices had no tmux-churn races. shirley is IDLE at a clean
+boundary (empty prompt, Context 48% - still under the 70% compaction line), nothing
+in flight, correctly deferring direction. Leave her idle until a rehydrated shaun
+is woken.
+
+HANDOFF - the FINAL #7 slice (then the queue is drained): the pause/resume WIRING
+into the prompts. Now that the three control-plane pieces exist - usage-read.sh
+(reader), watchdog.sh (decision CLEAR 0 / PAUSE 10 / signal), and their proven
+coupling - wire the chain to actually pause and auto-resume. Design notes for the
+fresh shaun to hand and rule on:
+  - PLACEMENT: this most naturally lives in shaun.md's tick loop - before handing
+    shirley a new slice (and/or on each --await heartbeat), shaun runs
+    "${MOSSY_REPO_DIR}/bin/usage-read.sh" piped/fed into
+    "${MOSSY_REPO_DIR}/bin/watchdog.sh"; on PAUSE (exit 10) shaun stops driving
+    (hands no new work), surfaces the observable signal, and waits, re-checking
+    until a new window starts and usage drops back under threshold (watchdog
+    returns CLEAR 0), then resumes. Consider whether bitzer.md also needs a parallel
+    awareness duty. Fresh shaun decides shaun-vs-bitzer split.
+  - AUTO-RESUME: the resume is just "keep re-checking on the heartbeat; resume when
+    CLEAR" - it falls out of the tick loop naturally, no separate timer. resets_at
+    from the usage JSON could inform how long to wait, but YAGNI unless cheap.
+  - FAIL-SAFE (my lean, to finalize at hand-time): on reader failure (usage
+    unavailable / nonzero), treat as CLEAR (fail-OPEN) + emit a loud signal - NOT
+    fail-closed. Rationale: a fail-closed watchdog that cannot read usage could
+    never observe usage-dropped-under and would never auto-resume, permanently
+    stalling the autonomous never-done run and requiring manual intervention (the
+    opposite of #7's goal); the hard rate limit itself remains the ultimate
+    backstop. Make it a configurable knob only if it is cheap (consistent with #7's
+    "meaningful configuration" ethos); otherwise default fail-open and move on
+    (YAGNI). Decide firmly when handing.
+  - DISCIPLINE: prompt edits land at next launch, never pause/relaunch THIS live
+    run; launch-free structural proof (well-formed prompt steps, the invocation
+    paths resolve via MOSSY_REPO_DIR, the exit-code branches match watchdog's real
+    0/10); stage only the prompt file(s) touched; never the root state files;
+    Conventional Commit, ASCII, no em/en dashes; demand proof not "done".
+After the wiring lands, #1-#7 all have their high-value slices landed and the queue
+is DRAINED - at that point flag to bitzer that the never-done queue is empty pending
+launch-verified closes, and do NOT invent new scope (per the Farmer's standing
+instruction). On wake: re-read MISSION/GUARDRAILS + the TICKS/CHRONICLE tails
+(SYNOPSIS.md still absent -> fallback) and re-anchor on the issue queue before
+handing the wiring slice. Watch shirley's context - if it crosses ~70% while she is
+idle, compact her before handing the wiring slice.
