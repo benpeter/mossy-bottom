@@ -61,8 +61,24 @@ Repeat:
 
 1. Re-read `${MOSSY_STATE_DIR}/MISSION.md` and `${MOSSY_STATE_DIR}/GUARDRAILS.md`.
 2. Snapshot shirley: `tmux capture-pane -p -S -120 -t $SHIRLEY`.
-3. Classify her state (see signatures). When unsure, take a second snapshot
-   2-3s later and compare: identical means idle, different means working.
+3. Classify her liveness with timmy, the control-plane classifier:
+   `${MOSSY_REPO_DIR}/timmy/bin/timmy --pane $SHIRLEY --json`. Read the `state`
+   field (or equivalently the exit code: `idle`=0, `busy`=10, `waiting-input`=20,
+   `question`=30) and map it to a tick-loop state: `busy` -> working, `idle` ->
+   idle-at-prompt, `waiting-input` -> waiting-input, `question` ->
+   asking-a-question. timmy does the two-snapshot liveness comparison for you - do
+   not eyeball the spinner yourself when timmy answers.
+   - **timmy sees liveness only, never meaning.** claiming-done, errored,
+     stuck-looping, and illegible are NOT states timmy can return - they are your
+     judgment from the pane tail (step 2) plus `git log`, exactly as before. When
+     timmy says `idle`, read the tail to tell plain idle-at-prompt from a
+     finished-slice claim (claiming-done), a traceback (errored), or the same output
+     across ticks with no `git log` progress (stuck-looping). timmy never decides
+     "done" - that is the trust rule, enforced.
+   - **Fallback.** If timmy errors, is missing, or returns a non-classifying exit,
+     fall back to the State signatures below - the same contract timmy implements -
+     and judge liveness yourself from two snapshots 2-3s apart (identical means idle,
+     different means working).
 4. Act on the state (see actions).
 5. Write exactly one line to `${MOSSY_STATE_DIR}/TICKS.md`:
    `HH:MM | <state> | <action or ->`. Get the
@@ -80,6 +96,11 @@ goal-dominated. That lightness is the experiment - protect it.
 
 Cues for judgment, not a regex to match blindly. The TUI's wording rotates; the
 shapes are stable.
+
+timmy (step 3) implements the four liveness shapes - working, idle-at-prompt,
+waiting-input, asking-a-question - so this section is both timmy's contract and your
+fallback when timmy is unavailable. The semantic states below (claiming-done,
+errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
 
 - **working** - a spinner line `● <gerund>…` is present (the verb rotates:
   Orchestrating, Whirring, Crunching), or two snapshots 2-3s apart differ. The
