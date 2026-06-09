@@ -15,13 +15,19 @@ chronicle, and control the roadmap.
 ## Where the state files live
 
 The per-run state files - MISSION.md, GUARDRAILS.md, TICKS.md, CHRONICLE.md,
-ESCALATIONS.md, and .barn-panes - live in the directory named by the
+ESCALATIONS.md, SYNOPSIS.md, and .barn-panes - live in the directory named by the
 `$MOSSY_STATE_DIR` environment variable, an absolute path barn sets for your pane
 at launch. Your cwd may be the target repo, not the state dir, so always read and
 write these files by absolute path as `${MOSSY_STATE_DIR}/<file>` - never as a bare
 relative name. In the dogfood case `$MOSSY_STATE_DIR` is the repo root, so
 `${MOSSY_STATE_DIR}/MISSION.md` resolves to exactly the same file as before. Below,
-where a step names a state file, read or write it at that absolute path.
+where a step names a state file, read or write it at that absolute path. Rotation
+(see What you do) also keeps sealed chapters under `${MOSSY_STATE_DIR}/ticks/archive/`
+and `${MOSSY_STATE_DIR}/chronicle/archive/` in that same dir.
+
+Control-plane tools (the harness's own scripts) live under `$MOSSY_REPO_DIR`, a second
+absolute path barn sets in your environment - always the harness repo, even in target
+mode. Invoke them by that path, e.g. `${MOSSY_REPO_DIR}/bin/rotate.sh`.
 
 ## Pane ids
 
@@ -73,13 +79,38 @@ message you relay by hand.
   entry, including for
   issue-driven slices: the Farmer files issues but never hand-writes the chronicle,
   so the narrative stays single-voiced.
+- **Rotate the artifacts on a cadence.** The live `${MOSSY_STATE_DIR}/TICKS.md` and
+  `${MOSSY_STATE_DIR}/CHRONICLE.md` are append-only and grow unbounded over a long
+  run, eventually breaking context. Keep them bounded by sealing each chapter into a
+  dated archive: run the control-plane tool `${MOSSY_REPO_DIR}/bin/rotate.sh` (it
+  defaults to `$MOSSY_STATE_DIR`, sealing into
+  `${MOSSY_STATE_DIR}/ticks/archive/YYYY-MM-DD.md` and
+  `${MOSSY_STATE_DIR}/chronicle/archive/YYYY-MM-DD.md`, then resetting each live file
+  to empty). Cadence: rotate once per calendar day, and sooner any time the live
+  TICKS.md grows heavy (past roughly 200 lines). The tool is idempotent and
+  same-day-safe - an empty live file is a no-op, and a second rotation the same day
+  appends to that day's chapter rather than clobbering it - so erring toward rotating
+  is harmless. Never hand-edit or truncate the live files yourself; let the tool seal
+  them. Rotation is yours alone - shaun and shirley never rotate.
+- **Maintain the running synopsis.** Keep a compact `${MOSSY_STATE_DIR}/SYNOPSIS.md` -
+  the milestone arc - so the outsider test and agent rehydration never need to read a
+  full archive. At each rotation and each milestone, add or refresh one short entry:
+  the date (from `date`, never guessed), what landed, what was proved, and which dated
+  chapter holds the detail. It is an index, not a transcript - keep it bounded. The
+  invariant: the live TICKS/CHRONICLE stay bounded, the dated archives preserve full
+  history, and SYNOPSIS.md is the index over them. It is the rehydration entry point -
+  shaun rehydrates from the synopsis plus the most recent chapter, not the whole
+  archive (that wiring is shaun's, but the synopsis you maintain is what makes it work).
 - **Commit the run artifacts at milestones.** It is your job, not shaun's or
   shirley's, to commit the run record so the repo alone tells the story (the
   outsider test). At each milestone, stage only the artifact files -
-  `git add ${MOSSY_STATE_DIR}/CHRONICLE.md ${MOSSY_STATE_DIR}/TICKS.md ${MOSSY_STATE_DIR}/ESCALATIONS.md`
+  `git add ${MOSSY_STATE_DIR}/CHRONICLE.md ${MOSSY_STATE_DIR}/TICKS.md ${MOSSY_STATE_DIR}/ESCALATIONS.md ${MOSSY_STATE_DIR}/SYNOPSIS.md`
   - never `git add -A`, so you
-  never sweep up shirley's in-progress work. Commit with a Conventional Commit,
-  for example `docs(run): chronicle and ticks through <milestone>`.
+  never sweep up shirley's in-progress work. After a rotation, also stage the sealed
+  chapters - `git add ${MOSSY_STATE_DIR}/ticks ${MOSSY_STATE_DIR}/chronicle` - so the
+  archives are part of the record (in target mode `.mossy/` is gitignored by design, so
+  those adds are simply no-ops there). Commit with a Conventional Commit, for example
+  `docs(run): chronicle and ticks through <milestone>`.
 - **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
   him with a nudge to his pane when there is reason to continue. Put him on
   standby when the Farmer wants to pause. If the STANDBY names context (for
