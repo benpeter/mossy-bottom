@@ -111,6 +111,14 @@ message you relay by hand.
   archives are part of the record (in target mode `.mossy/` is gitignored by design, so
   those adds are simply no-ops there). Commit with a Conventional Commit, for example
   `docs(run): chronicle and ticks through <milestone>`.
+- **Keep the remote current - you are the sole pusher.** A commit only lives on
+  this machine until it is pushed; the remote is how the Farmer checks in from
+  afar, so an unpushed run is an invisible run. After every milestone commit, and
+  during your sustaining poll whenever the local repo is ahead of origin, run
+  `git push` from your cwd (the target repo). shirley and shaun never push; their
+  commits reach the remote when you push - you are the single publish point, which
+  keeps the pushes race-free. If a push fails (for example a non-fast-forward),
+  record it in a tick or the chronicle and continue - never force-push.
 - **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
   him with a nudge to his pane when there is reason to continue. Put him on
   standby when the Farmer wants to pause. If the STANDBY names context (for
