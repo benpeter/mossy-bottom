@@ -87,7 +87,31 @@ Repeat:
    append a self-contained `${MOSSY_STATE_DIR}/CHRONICLE.md` entry: what shirley
    did, what evidence,
    what you did, and why.
-7. Sleep 30-60s. Repeat.
+7. Block until shirley's state changes, instead of polling on a timer. Run
+   `${MOSSY_REPO_DIR}/timmy/bin/timmy --pane $SHIRLEY --await --timeout 150` - it
+   reads her current state and blocks (spending no tokens while it waits) until the
+   state changes or the heartbeat elapses, then exits. Branch on its exit code:
+   - **0 / 10 / 20 / 30 (a real state CHANGE):** loop back to step 1. await only
+     WAKES you - it does not redefine the state. Re-read the anchors (step 1) and
+     re-classify authoritatively with the step-3 `--json` call before acting; never
+     act on the await exit code alone.
+   - **66 (no-change heartbeat):** loop back to step 1 anyway. shirley held one state
+     past the heartbeat (often a long `working` stretch). Re-read the anchors (bitzer
+     may have edited them), run your STANDBY/context self-check, then re-block. This
+     heartbeat is what keeps the periodic re-anchor and the context check alive while
+     the loop is event-driven - it is non-negotiable, not an optional wake.
+   - **65 (capture failed - the pane is gone/dead):** treat it as errored. Do NOT
+     re-block forever against a dead pane - act per the errored state (tell her to
+     fix it if she is alive, otherwise escalate to bitzer via
+     `${MOSSY_STATE_DIR}/ESCALATIONS.md`).
+   - **Fallback.** If timmy/await is unavailable (missing, or a non-await build),
+     fall back to the old timer: sleep 30-60s, then loop back to step 1. The
+     event-driven wake is the optimization; the loop still works on a plain sleep.
+
+This await wake replaces the old polling sleep: you wake on a real change or the
+heartbeat, not every 30-60s. That is what makes a weeks-long run affordable, and it
+cuts TICKS volume at the source - you stop logging "still working" every poll (pairs
+with the TICKS rotation work).
 
 Keep ticks terse. The files carry the memory so your context stays light and
 goal-dominated. That lightness is the experiment - protect it.
