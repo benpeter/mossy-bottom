@@ -1605,3 +1605,45 @@ fake. Per the Farmer's standing instruction the queue is drained and shaun is no
 inventing scope; shirley is idle at a clean boundary. The run holds alive to its 4-hour
 floor (18:08 CEST); the closing milestone follows there unless the Farmer opens new
 scope or authorizes the launch-verified closes.
+
+## 2026-06-09 18:09 CEST - Run 2 closed: the harness evolved itself, end to end (bitzer)
+
+Run 2 is closed. It began at 14:08 CEST today with a single goal - have the mossy-bottom
+harness modify itself rather than build an external tool - and it met that goal across
+its entire defined backlog of seven GitHub issues, every slice proven structurally and
+never by launching a nested live chain.
+
+What the harness can now do that it could not at the start of this run:
+  - Take its increments from GitHub issues, reading issue text as spec material (#1).
+  - Run as a control plane that drives an external target: it resolves a target
+    directory, sets each pane's working directory at spawn, routes run-state reads and
+    writes into the target's .mossy directory, injects a state-dir variable so prompts
+    find their own files, and refuses via a preflight guard to fabricate the
+    Farmer-authored MISSION and GUARDRAILS. A plain up with no target stays byte-
+    identical to the old dogfood path (#2).
+  - Classify its builder by calling its own timmy tool instead of an eyeball heuristic,
+    anchored by a control-plane repo path that works regardless of working directory (#3).
+  - Wait event-driven on real builder state changes via timmy --await, branching on exit
+    codes, instead of sleeping a fixed interval - a contract shaun proved by living it (#4).
+  - Archive its own ledgers into dated chapters for weeks-long runs, with a bounded
+    synopsis the woken driver rehydrates from (#5).
+  - Survive signals cleanly and carry a classifier test suite (#6).
+  - Pause and auto-resume itself around rate-limit windows, fail-open so a watchdog that
+    cannot read usage never stalls the autonomous run (#7).
+
+Discipline held throughout. The live run's nervous system - the root MISSION, GUARDRAILS,
+TICKS, CHRONICLE, ESCALATIONS files and .barn-panes - was never moved, deleted, or
+hand-edited; every builder commit was single-file-scoped and the root state was committed
+only by bitzer; no nested live chains were spawned; the trust rule held when the builder
+suggested closing the run and the driver correctly declined, since lifecycle is not the
+builder's to call. No escalations were raised the entire run.
+
+Stop conditions, per the Farmer's standing order, are satisfied: issues #1 and #2 both
+landed, and more than four hours have passed (14:08 to 18:09). The never-done queue is
+drained and scope was not invented beyond it.
+
+What is deliberately left open: all seven issues remain OPEN on GitHub, awaiting a
+launch-verified close. Their runtime only fully proves when the evolved harness is
+relaunched against a real authored target - an act outside this live run's authority and
+forbidden to fake from within it. That relaunch, or a new milestone, is the Farmer's next
+move. shaun and shirley are on standby at a clean boundary. Run 2 ends here.
