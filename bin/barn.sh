@@ -9,8 +9,13 @@
 # experiment.
 #
 # Usage:
-#   bin/barn.sh [up]                  raise the chain
+#   bin/barn.sh [up [<target-repo>]]  raise the chain (no target = dogfood self)
+#   bin/barn.sh resolve [<target>]    dry-run: print resolved target + state dir
 #   bin/barn.sh relaunch <role>       respawn one pane (bitzer|shaun|shirley)
+#
+# Target resolution (Issue #2 foundation):
+#   With a target, state lives in <target>/.mossy (absolute). With no target, the
+#   dogfood default holds: repo root, with the root state files in place.
 #
 # Config via env:
 #   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
@@ -111,7 +116,41 @@ pane_id_for() {
   awk -F= -v r="${role}" '$1==r{print $2}' "${PANES_FILE}"
 }
 
+# resolve_target [<target>] - echo "TARGET<TAB>STATE_DIR", both absolute.
+# With a target: TARGET is its absolute path, STATE_DIR is <target>/.mossy - the
+# fix for run-1's cwd-relative misfiling. With no target: the dogfood default -
+# TARGET is the repo root and STATE_DIR is the repo root itself, where the root
+# state files (MISSION.md, GUARDRAILS.md, ...) already live.
+resolve_target() {
+  local arg="${1:-}" target state_dir
+  if [ -n "${arg}" ]; then
+    if [ ! -d "${arg}" ]; then
+      echo "barn: target '${arg}' is not a directory" >&2
+      return 1
+    fi
+    target="$(cd "${arg}" && pwd)"
+    state_dir="${target}/.mossy"
+  else
+    target="${REPO_ROOT}"
+    state_dir="${REPO_ROOT}"
+  fi
+  printf '%s\t%s\n' "${target}" "${state_dir}"
+}
+
+# cmd_resolve [<target>] - dry-run: print resolution and launch nothing.
+cmd_resolve() {
+  local resolved target state_dir
+  resolved="$(resolve_target "${1:-}")" || exit 1
+  IFS=$'\t' read -r target state_dir <<<"${resolved}"
+  printf 'barn: target    = %s\n' "${target}"
+  printf 'barn: state_dir = %s\n' "${state_dir}"
+}
+
 cmd_up() {
+  local resolved target state_dir
+  resolved="$(resolve_target "${1:-}")" || exit 1
+  IFS=$'\t' read -r target state_dir <<<"${resolved}"
+
   local session
   session="$(resolve_session)"
   ensure_session "${session}"
@@ -160,6 +199,8 @@ cmd_up() {
 barn: up in session '${session}', window '${WINDOW}'.
   attach:        tmux select-window -t ${session}:${WINDOW}; tmux attach -t ${session}
   panes:         bitzer=${bitzer}  shaun=${shaun}  shirley=${shirley}
+  target:        ${target}
+  state dir:     ${state_dir}  (resolved; cwds not yet rewired)
   relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley>
 EOF
 }
@@ -188,12 +229,19 @@ cmd_relaunch() {
 main() {
   local sub="${1:-up}"
   case "${sub}" in
-    up) cmd_up ;;
+    up)
+      shift || true
+      cmd_up "${1:-}"
+      ;;
+    resolve)
+      shift || true
+      cmd_resolve "${1:-}"
+      ;;
     relaunch)
       shift
       cmd_relaunch "${1:-}"
       ;;
-    *) echo "barn: usage: bin/barn.sh [up | relaunch <role>]" >&2; exit 1 ;;
+    *) echo "barn: usage: bin/barn.sh [up [<target-repo>] | resolve [<target>] | relaunch <role>]" >&2; exit 1 ;;
   esac
 }
 
