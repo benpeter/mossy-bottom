@@ -13,8 +13,13 @@
 #   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
 #   bin/barn.sh relaunch [--plan] <role> [<target>]  respawn one pane
 #
-# --plan prints the exact spawn plan (the -c <cwd> each pane would get) and exits
-# without creating or launching anything - a launch-free preview of up/relaunch.
+# --plan prints the exact spawn plan (the -c <cwd> and injected MOSSY_STATE_DIR each
+# pane would get) and exits without creating or launching anything - a launch-free
+# preview of up/relaunch.
+#
+# Each pane is launched with MOSSY_STATE_DIR=<absolute state dir> in its environment,
+# so a role can find its state files regardless of cwd. No role consumes it yet - the
+# prompts that read it are a later slice; this injects and surfaces it only.
 #
 # Target resolution (Issue #2 foundation):
 #   With a target, per-run state lives in <target>/.mossy (absolute) - .barn-panes
@@ -158,6 +163,16 @@ pane_cwds() {
   fi
 }
 
+# launch_cmd <state_dir> - the claude command with MOSSY_STATE_DIR injected, so each
+# role has an absolute path to its state files regardless of its cwd. The env prefix
+# is applied by the same shell tmux already uses to split CLAUDE_CMD into argv, so it
+# exports to claude. Single-quoted to survive spaces in the path. Dogfood passes the
+# repo root (where the state files live today), so the launch stays behaviorally the
+# same - the var is injected but no role consumes it yet (the prompts are a later slice).
+launch_cmd() {
+  printf "MOSSY_STATE_DIR='%s' %s" "$1" "${CLAUDE_CMD}"
+}
+
 # cmd_resolve [<target>] - dry-run: print resolution and launch nothing.
 cmd_resolve() {
   local resolved target state_dir
@@ -187,6 +202,7 @@ cmd_up() {
     printf '  bitzer   -c %s\n' "${bitzer_cwd}"
     printf '  shaun    -c %s\n' "${shaun_cwd}"
     printf '  shirley  -c %s\n' "${shirley_cwd}"
+    printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
     printf '  panes    %s\n' "${panes_file}"
     return 0
   fi
@@ -209,10 +225,12 @@ cmd_up() {
   # Create the window detached so the Farmer's current view is not stolen.
   # Pane creation order is left to right after even-horizontal: bitzer, shaun, shirley.
   # cwds come from pane_cwds: repo root / SHIRLEY_DIR in dogfood, the target otherwise.
-  local bitzer shaun shirley
-  bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${bitzer_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
-  shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
-  shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
+  # All three carry the same MOSSY_STATE_DIR (the run's absolute state dir).
+  local launch bitzer shaun shirley
+  launch="$(launch_cmd "${state_dir}")"
+  bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${bitzer_cwd}" -PF '#{pane_id}' "${launch}")"
+  shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${launch}")"
+  shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${launch}")"
 
   tmux select-layout -t "${session}:${WINDOW}" even-horizontal
   tmux set-option -w -t "${session}:${WINDOW}" remain-on-exit on
@@ -246,6 +264,7 @@ barn: up in session '${session}', window '${WINDOW}'.
   state dir:     ${state_dir}
   panes file:    ${panes_file}
   pane cwds:     bitzer=${bitzer_cwd}  shaun=${shaun_cwd}  shirley=${shirley_cwd}
+  state env:     MOSSY_STATE_DIR=${state_dir}  (all three panes)
   relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley> [<target>]
 EOF
 }
@@ -279,7 +298,8 @@ cmd_relaunch() {
 
   # --plan: print this pane's spawn plan and exit. No panes read, no tmux, no claude.
   if [ "${plan}" -eq 1 ]; then
-    printf 'barn: plan (no spawn) - relaunch %s -c %s (panes %s)\n' "${role}" "${dir}" "${panes_file}"
+    printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s (panes %s)\n' \
+      "${role}" "${dir}" "${state_dir}" "${panes_file}"
     return 0
   fi
 
@@ -287,7 +307,7 @@ cmd_relaunch() {
   id="$(pane_id_for "${role}" "${panes_file}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }
 
-  tmux respawn-pane -k -t "${id}" -c "${dir}" "${CLAUDE_CMD}"
+  tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
   boot_pane "${id}" "${role}" || true
   case "${role}" in
     bitzer) send_prompt "${id}" "${BITZER_BOOT}" ;;
