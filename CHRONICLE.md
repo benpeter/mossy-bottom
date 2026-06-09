@@ -949,3 +949,192 @@ non-viable on this machine (no timeout/gtimeout binary; the watch pipe lingers a
 hangs command substitution), so a small self-contained --await was the evidence-backed
 choice over a clever one-liner. Next: slice 2 rewires shaun's own poll loop to block
 on timmy --await instead of sleeping. The run stays alive through its 4-hour floor.
+
+15:20 - Rehydrated shaun (post-STANDBY-context wake). Re-read MISSION,
+GUARDRAILS, prompts/shaun.md, and the TICKS/CHRONICLE tails; confirmed in
+git log that #3 landed (1b65270 MOSSY_REPO_DIR prereq + 7eeb8f1 shaun.md
+timmy wiring) and #4 slice 1 landed (d006748 timmy --await). shirley was
+idle at a clean boundary (empty prompt, Context 29%, "Cooked for 11m 23s"),
+nothing in flight. Handed her slice 2 of 2 for #4 per the standing HANDOFF:
+rewire prompts/shaun.md step 7 (currently "Sleep 30-60s. Repeat") to block
+on "${MOSSY_REPO_DIR}/timmy/bin/timmy" --pane $SHIRLEY --await --timeout <N>
+with a heartbeat N around 120-180s, branching on the exit code - 0/10/20/30
+(real state change) loops back to step 1 and re-classifies via the step-3
+--json call (await only wakes shaun; step 3 reads the true state); 66
+(EXIT_TIMEOUT heartbeat) loops back to re-anchor + run the context
+self-check + re-block (the heartbeat keeps the periodic re-anchor and
+STANDBY check alive - non-negotiable); 65 (EXIT_WATCH_ERR dead pane)
+escalates per the errored action rather than re-blocking forever. Eyeball/
+sleep fallback retained for when timmy/await is unavailable (parallels the
+#3 fallback). Folded in the discipline from GUARDRAILS: launch-free proof
+(show diff, confirm the invocation resolves via MOSSY_REPO_DIR from 1b65270
+and the branches match timmy's real codes 0/10/20/30/65/66), stage only
+prompts/shaun.md, never the root state files, Conventional Commit, ASCII, no
+em/en dashes. She picked it up and began reading shaun.md to edit precisely.
+After slice 2 lands and is proven, #4 is complete (left OPEN for a
+launch-verified close like #1/#2/#3); never-done then continues to #5
+(artifact rotation), #6 (timmy hardening), #7 (usage-window watchdog).
+
+15:22 - Issue #4 complete. shirley landed slice 2 (commit 7ec1a8f,
+"feat(prompts): shaun blocks on timmy --await, retiring the polling sleep").
+Verified fresh: prompts/shaun.md only (25+/1-); targeted grep confirmed the
+--await invocation, the 66 (heartbeat) and 65 (dead-pane) branches, the
+fallback (x3), and the MOSSY_REPO_DIR/timmy invocation (x2, step-3 classify +
+new step-7 await); the old "Sleep 30-60s. Repeat" polling line is gone (grep
+0). Her pane surfaced the proof: diff shown, a grep of timmy/bin/timmy showing
+the constants EXIT_IDLE=0/BUSY=10/WAITING=20/QUESTION=30/WATCH_ERR=65/
+TIMEOUT=66 mapping 1:1 to the step-7 branches, and the invocation resolving via
+MOSSY_REPO_DIR. Working tree showed only my own unstaged TICKS/CHRONICLE lines -
+she swept no root state file. Notably I dogfooded the just-landed tool to drive
+my own wait: blocked on "${MOSSY_REPO_DIR}/timmy/bin/timmy" --pane %216 --await
+--timeout 150 and it returned idle exit 0 the moment she finished, then I
+re-classified authoritatively via --json (the exact step-7 contract she just
+wrote). #4 left OPEN for a launch-verified close like #1/#2/#3.
+
+Re-anchored on the issue queue and picked #5 (artifact rotation + running
+synopsis for weeks-long runs) - shaun's call; shirley correctly deferred ("your
+pick"). Per the issue, rotation is bitzer's cadence duty (seal CHRONICLE/TICKS
+into dated archives, start fresh live files, maintain a compact synopsis);
+shirley builds the mechanism + prompt edits (bitzer.md rotation/synopsis duty,
+shaun.md rehydrate-from-synopsis) that land at the next launch. She must NEVER
+run rotation against this run's live root state files - the hard safety bound.
+Handed the smallest proven slice (slice 1 of #5): the rotation MECHANISM only,
+prompt wiring held. It seals TICKS.md/CHRONICLE.md into chronicle/archive/
+YYYY-MM-DD.md and ticks/archive/YYYY-MM-DD.md UNDER ${MOSSY_STATE_DIR} (dogfood=
+REPO_ROOT, target=<target>/.mossy by absolute path per the #2 split) and starts
+fresh live files, idempotent. I left the mechanism to her judgment but asked her
+to justify it against KISS/fewer-moving-parts (standalone bin/rotate.sh vs a
+non-launch "barn.sh rotate" subcommand reusing the #2 state-dir resolution
+rather than duplicating it - pick the leaner). Proof must be launch-free against
+a throwaway fixture state dir (mktemp -d, dummy TICKS/CHRONICLE) with before/
+after + idempotency assertions, shellcheck/bash -n clean, never against the live
+root files; stage only the slice file(s). She is reading #5 + barn.sh to decide
+the mechanism. Slice 2 (the synopsis) and prompt wiring follow after this lands.
+
+15:26 - Issue #5 slice 1 landed. shirley built bin/rotate.sh (commit 5290bf3,
+standalone script, 63 lines). Verified: bin/rotate.sh only; shellcheck clean;
+correct shebang; and the critical safety check held - no ticks/archive or
+chronicle/archive dirs at the repo root, so rotation never ran against this
+run's live state. Working tree showed only my own unstaged TICKS/CHRONICLE
+lines. Her surfaced fixture proof: seeded a mktemp -d state dir with dummy
+TICKS/CHRONICLE, proved seal (content lands in ticks/archive/YYYY-MM-DD.md +
+chronicle/archive/YYYY-MM-DD.md, live files emptied), idempotent re-run
+("nothing to seal", archive sha unchanged), same-day append (re-seals into the
+same dated chapter without clobbering), env-default (MOSSY_STATE_DIR with no
+arg), and live-root git-blob hashes identical before/after every fixture run.
+She justified standalone bin/rotate.sh over a "barn.sh rotate" subcommand on
+KISS/system-wide grounds: barn.sh exits at top-level if no claude binary exists,
+which would absurdly make a pure file-seal op refuse to run - so the maintenance
+verb stays out of the launch tool. Sound. Contract: rotate.sh [<state-dir>]
+(default $MOSSY_STATE_DIR), date from `date +%F`, only ever truncates the live
+file (never deletes a file or archive), idempotent.
+
+Handed slice 2 of #5, prompts/bitzer.md only: give bitzer the rotation-cadence
+duty (pick a concrete trigger - per calendar day or per N TICKS entries) invoking
+the tool as a control-plane tool by absolute path (${MOSSY_REPO_DIR}/bin/rotate.sh
+operating on ${MOSSY_STATE_DIR}, same pattern as timmy), and the running-synopsis
+duty (maintain a compact bounded synopsis - the milestone arc - under
+${MOSSY_STATE_DIR}, updated at each rotation/milestone, as the index over the
+dated archives so the outsider test and rehydration never need the full archive;
+invariant: live files bounded, archives full history, synopsis the index). It is
+a prompt-duty DEFINITION landing at next launch - she does NOT create a synopsis
+file live or run rotation now (hard bound: never touch this run's root state).
+Launch-free proof: well-formed .md, rotate.sh path/cadence stated correctly and
+consistent with bitzer.md's existing tool-invocation style; stage only
+prompts/bitzer.md. shaun.md rehydrate-from-synopsis is slice 3, held for my go.
+She began reading bitzer.md to wire it consistently.
+
+15:29 - Issue #5 slice 2 landed. shirley edited prompts/bitzer.md (commit
+d2d5ce4, 36+/5-): bitzer now (1) rotates on cadence - once per calendar day, and
+sooner any time the live file grows large - invoking ${MOSSY_REPO_DIR}/bin/rotate.sh
+(control-plane anchor, same form as shaun's timmy invocation, verified injected
+into bitzer's pane by 1b65270), with rotation bitzer's alone (shaun/shirley never
+rotate, bitzer never hand-truncates); (2) maintains a bounded
+${MOSSY_STATE_DIR}/SYNOPSIS.md milestone arc, refreshed at each rotation/milestone
+with one short entry (date, what landed, what proved, which chapter holds detail);
+(3) registered SYNOPSIS.md + the archive dirs in "Where the state files live",
+introduced MOSSY_REPO_DIR to bitzer.md, and extended the commit bullet to stage
+SYNOPSIS.md and sealed archives (no-ops in target mode where .mossy is gitignored).
+Verified: prompts/bitzer.md only; rotate.sh invocation x2, SYNOPSIS x4, archive
+paths x4, all matching rotate.sh's real output paths; root state untouched.
+Invariant stated: live TICKS/CHRONICLE bounded, dated archives = full history,
+SYNOPSIS.md = index + rehydration entry point.
+
+Handed slice 3 of #5 (the last), prompts/shaun.md only: the consumer side -
+shaun rehydrates from SYNOPSIS.md + the most recent (now-bounded) chapter instead
+of the whole archive. Change shaun's STANDBY/wake rehydrate step (currently
+"re-read MISSION, GUARDRAILS, and the tails of TICKS.md and CHRONICLE.md") so the
+historical-context read is SYNOPSIS.md (index/milestone arc) + the recent live
+TICKS/CHRONICLE tails; MISSION/GUARDRAILS always read in full (they do not rotate);
+if older detail is needed, the synopsis names which dated archive chapter holds it.
+Fallback documented: if SYNOPSIS.md does not exist yet (pre-first-rotation), the
+current TICKS/CHRONICLE-tail behavior still works, so an early wake is not broken.
+Prompt edit lands at next launch; no SYNOPSIS.md created live; root state untouched.
+Launch-free proof: well-formed .md, SYNOPSIS.md path + rehydrate change present and
+consistent with bitzer.md's definition. After this lands, #5 is complete; never-done
+continues to #6 (timmy hardening backlog), then #7 (usage-window watchdog). She
+began editing shaun.md.
+
+15:31 - Issue #5 complete. shirley landed slice 3 (commit fd358be,
+"feat(prompts): shaun rehydrates from SYNOPSIS + recent chapter, not the
+archive"). Verified: prompts/shaun.md only (20+/6-); SYNOPSIS referenced (x3),
+archive (x4); the rehydrate step is now a sub-list under "Context management and
+STANDBY" reading ${MOSSY_STATE_DIR}/SYNOPSIS.md + the recent (bounded) chapter,
+with MISSION/GUARDRAILS always read in full and a pre-first-rotation fallback to
+the TICKS/CHRONICLE tails; producer/consumer paths consistent with bitzer.md;
+root state untouched. #5 now lands across three commits - 5290bf3 (rotate.sh
+mechanism), d2d5ce4 (bitzer producer: cadence + synopsis), fd358be (shaun
+consumer: rehydrate). The full loop: bitzer rotates daily and maintains
+SYNOPSIS.md; live artifacts stay bounded; archives keep full history; shaun
+rehydrates from synopsis + recent chapter. The whole arc stayed off this run's
+live root state, proven structurally. Left OPEN for a launch-verified close like
+#1-#4.
+
+STANDBY (context). This was a long, decision-dense turn since the post-compaction
+wake: re-anchor, then accept #4 slice 2 (7ec1a8f) and drive all three #5 slices
+(5290bf3, d2d5ce4, fd358be) to completion, each verified fresh in git and each
+proven off the live root state. I dogfooded timmy --await throughout to block on
+shirley's state changes (the exact step-7 contract #4 landed) - it returned
+"idle" exit 0 cleanly on every transition. shirley is IDLE at a clean boundary
+(empty prompt, Context 34%, no work in flight), correctly deferring direction
+("your pick on what's next"). Leave her idle until a rehydrated shaun is woken.
+
+HANDOFF - next slice for the woken shaun: issue #6 (timmy: remaining hardening
+and never-done backlog, labelled enhancement). It is a BACKLOG issue, not a
+single change - read it fresh with `gh issue view 6`, see what hardening items it
+lists, and decompose to the SMALLEST proven slice (one hardening item at a time,
+smallest first), the same way #3/#4 were sliced. timmy is shirley's control-plane
+tool (timmy/bin/timmy); hardening changes scope to timmy only and prove
+launch-free against an existing/plain-bash pane (running timmy spawns no chain),
+exactly as slice 1 of #4 was proven. Same discipline: shellcheck + bash -n clean,
+stage only the touched file(s), never the root state files, Conventional Commit,
+ASCII, no em/en dashes, demand proof not "done". After #6, never-done continues to
+#7 (usage-window watchdog: pause/auto-resume around rate-limit windows). On wake:
+re-read MISSION/GUARDRAILS + the TICKS/CHRONICLE tails (SYNOPSIS.md does not exist
+this run - no rotation happened - so the fallback applies) and re-anchor on the
+issue queue before handing the #6 slice.
+
+## 2026-06-09 15:33 CEST - Issues #4 and #5 landed; harness now self-paces and self-archives (bitzer)
+
+Two more issues off the never-done queue, both structurally proven, root state files
+untouched. Issue #4 (event-driven waker) is complete: shaun's own poll loop no longer
+sleeps a fixed interval - step 7 of his prompt now blocks on timmy --await against
+shirley's pane and branches on the exit codes (real change re-anchors and re-classifies;
+heartbeat-timeout re-anchors and re-checks standby; dead pane escalates), with the old
+eyeball/sleep retained as a fallback. shaun proved the contract by living it: he drove
+this very turn by blocking on timmy --await and it returned cleanly on every transition.
+
+Issue #5 (artifact rotation for weeks-long runs) is complete across three slices: a
+standalone bin/rotate.sh that seals TICKS and CHRONICLE into dated archives under the
+run's state directory (idempotent, fixture-proven, never run against live root state,
+kept standalone over a barn.sh subcommand on simplicity grounds); a new bitzer duty to
+rotate on a daily cadence and maintain a bounded SYNOPSIS.md milestone arc; and a shaun
+consumer that rehydrates from the synopsis plus the most recent chapter rather than the
+whole archive. These prompt duties take effect at the next launch; this run keeps using
+the unrotated root files, with a documented fallback to the TICKS/CHRONICLE tails since
+SYNOPSIS.md does not exist yet.
+
+Issues #1 through #5 are now all landed and left OPEN for a launch-verified close. Two
+issues remain in the queue: #6 (timmy hardening and never-done backlog, to be decomposed
+to its smallest slice) and #7 (usage-window watchdog). The run continues; the 4-hour
+floor lands at 18:08 CEST.
