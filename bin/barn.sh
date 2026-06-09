@@ -9,9 +9,12 @@
 # experiment.
 #
 # Usage:
-#   bin/barn.sh [up [<target-repo>]]  raise the chain (no target = dogfood self)
-#   bin/barn.sh resolve [<target>]    dry-run: print resolved target + state dir
-#   bin/barn.sh relaunch <role> [<target>]  respawn one pane (reads <target>/.mossy)
+#   bin/barn.sh up [--plan] [<target-repo>]   raise the chain (no target = dogfood)
+#   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
+#   bin/barn.sh relaunch [--plan] <role> [<target>]  respawn one pane
+#
+# --plan prints the exact spawn plan (the -c <cwd> each pane would get) and exits
+# without creating or launching anything - a launch-free preview of up/relaunch.
 #
 # Target resolution (Issue #2 foundation):
 #   With a target, per-run state lives in <target>/.mossy (absolute) - .barn-panes
@@ -140,6 +143,21 @@ resolve_target() {
   printf '%s\t%s\n' "${target}" "${state_dir}"
 }
 
+# pane_cwds <target> <state_dir> - echo "BITZER<TAB>SHAUN<TAB>SHIRLEY" spawn cwds.
+# This is the single source for the -c <cwd> values both the real spawn and the
+# --plan preview read, so the plan cannot drift from what up/relaunch actually do.
+# Dogfood (state_dir == REPO_ROOT): byte-identical to the original spawn - bitzer
+# and shaun in the repo root, shirley in SHIRLEY_DIR (MOSSY_SHIRLEY_DIR override).
+# Target mode: all three run in the target, per issue #2 (each target self-contained).
+pane_cwds() {
+  local target="$1" state_dir="$2"
+  if [ "${state_dir}" = "${REPO_ROOT}" ]; then
+    printf '%s\t%s\t%s\n' "${REPO_ROOT}" "${REPO_ROOT}" "${SHIRLEY_DIR}"
+  else
+    printf '%s\t%s\t%s\n' "${target}" "${target}" "${target}"
+  fi
+}
+
 # cmd_resolve [<target>] - dry-run: print resolution and launch nothing.
 cmd_resolve() {
   local resolved target state_dir
@@ -151,11 +169,29 @@ cmd_resolve() {
 }
 
 cmd_up() {
+  local plan=0
+  if [ "${1:-}" = "--plan" ]; then plan=1; shift; fi
   local resolved target state_dir panes_file
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
-  mkdir -p "${state_dir}"
   panes_file="${state_dir}/.barn-panes"
+
+  local bitzer_cwd shaun_cwd shirley_cwd cwds
+  cwds="$(pane_cwds "${target}" "${state_dir}")"
+  IFS=$'\t' read -r bitzer_cwd shaun_cwd shirley_cwd <<<"${cwds}"
+
+  # --plan: print the exact spawn plan and exit. No mkdir, no tmux, no claude -
+  # nothing is created or launched, so the live run is untouched by a plan call.
+  if [ "${plan}" -eq 1 ]; then
+    printf 'barn: plan (no spawn) for target %s\n' "${target}"
+    printf '  bitzer   -c %s\n' "${bitzer_cwd}"
+    printf '  shaun    -c %s\n' "${shaun_cwd}"
+    printf '  shirley  -c %s\n' "${shirley_cwd}"
+    printf '  panes    %s\n' "${panes_file}"
+    return 0
+  fi
+
+  mkdir -p "${state_dir}"
 
   local session
   session="$(resolve_session)"
@@ -168,14 +204,15 @@ cmd_up() {
     exit 1
   fi
 
-  mkdir -p "${SHIRLEY_DIR}"
+  mkdir -p "${shirley_cwd}"
 
   # Create the window detached so the Farmer's current view is not stolen.
   # Pane creation order is left to right after even-horizontal: bitzer, shaun, shirley.
+  # cwds come from pane_cwds: repo root / SHIRLEY_DIR in dogfood, the target otherwise.
   local bitzer shaun shirley
-  bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${REPO_ROOT}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
-  shaun="$(tmux split-window -d -t "${bitzer}" -c "${REPO_ROOT}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
-  shirley="$(tmux split-window -d -t "${shaun}" -c "${SHIRLEY_DIR}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
+  bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${bitzer_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
+  shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
+  shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${CLAUDE_CMD}")"
 
   tmux select-layout -t "${session}:${WINDOW}" even-horizontal
   tmux set-option -w -t "${session}:${WINDOW}" remain-on-exit on
@@ -207,16 +244,19 @@ barn: up in session '${session}', window '${WINDOW}'.
   panes:         bitzer=${bitzer}  shaun=${shaun}  shirley=${shirley}
   target:        ${target}
   state dir:     ${state_dir}
-  panes file:    ${panes_file}  (pane cwds not yet rewired)
-  relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley>
+  panes file:    ${panes_file}
+  pane cwds:     bitzer=${bitzer_cwd}  shaun=${shaun_cwd}  shirley=${shirley_cwd}
+  relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley> [<target>]
 EOF
 }
 
 cmd_relaunch() {
+  local plan=0
+  if [ "${1:-}" = "--plan" ]; then plan=1; shift; fi
   local role="${1:-}"
   case "${role}" in
     bitzer | shaun | shirley) ;;
-    *) echo "barn: usage: bin/barn.sh relaunch <bitzer|shaun|shirley> [<target-repo>]" >&2; exit 1 ;;
+    *) echo "barn: usage: bin/barn.sh relaunch [--plan] <bitzer|shaun|shirley> [<target-repo>]" >&2; exit 1 ;;
   esac
   # Resolve the panes file from STATE_DIR exactly as cmd_up writes it, so relaunch
   # reads back from the same place. No target = dogfood default (repo root), so the
@@ -225,10 +265,27 @@ cmd_relaunch() {
   resolved="$(resolve_target "${2:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
   panes_file="${state_dir}/.barn-panes"
-  local id dir
+
+  # This role's spawn cwd comes from the same pane_cwds source as up, so a relaunch
+  # lands in the same directory up would have spawned the pane in.
+  local bitzer_cwd shaun_cwd shirley_cwd cwds dir
+  cwds="$(pane_cwds "${target}" "${state_dir}")"
+  IFS=$'\t' read -r bitzer_cwd shaun_cwd shirley_cwd <<<"${cwds}"
+  case "${role}" in
+    bitzer) dir="${bitzer_cwd}" ;;
+    shaun) dir="${shaun_cwd}" ;;
+    shirley) dir="${shirley_cwd}" ;;
+  esac
+
+  # --plan: print this pane's spawn plan and exit. No panes read, no tmux, no claude.
+  if [ "${plan}" -eq 1 ]; then
+    printf 'barn: plan (no spawn) - relaunch %s -c %s (panes %s)\n' "${role}" "${dir}" "${panes_file}"
+    return 0
+  fi
+
+  local id
   id="$(pane_id_for "${role}" "${panes_file}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }
-  if [ "${role}" = shirley ]; then dir="${SHIRLEY_DIR}"; else dir="${REPO_ROOT}"; fi
 
   tmux respawn-pane -k -t "${id}" -c "${dir}" "${CLAUDE_CMD}"
   boot_pane "${id}" "${role}" || true
@@ -245,17 +302,17 @@ main() {
   case "${sub}" in
     up)
       shift || true
-      cmd_up "${1:-}"
+      cmd_up "$@"
       ;;
     resolve)
       shift || true
       cmd_resolve "${1:-}"
       ;;
     relaunch)
-      shift
-      cmd_relaunch "${1:-}" "${2:-}"
+      shift || true
+      cmd_relaunch "$@"
       ;;
-    *) echo "barn: usage: bin/barn.sh [up [<target-repo>] | resolve [<target>] | relaunch <role> [<target>]]" >&2; exit 1 ;;
+    *) echo "barn: usage: bin/barn.sh [up [--plan] [<target>] | resolve [<target>] | relaunch [--plan] <role> [<target>]]" >&2; exit 1 ;;
   esac
 }
 
