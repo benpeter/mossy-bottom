@@ -21,9 +21,13 @@
 # or no jq) it prints a "usage unavailable" line to stderr and exits nonzero. It never
 # decides clear-vs-pause - that fail-safe policy belongs to the wiring slice.
 #
-# Source confirmed from the CLI binary (v2.1.169), not assumed: endpoint
-# /api/oauth/usage on api.anthropic.com; the response carries five_hour / seven_day /
-# weekly objects, each with `utilization` as a 0..1 fraction (x100 = percent).
+# Source: endpoint /api/oauth/usage on api.anthropic.com; the response carries
+# five_hour / seven_day / weekly objects, each with `utilization` + resets_at.
+# SCALE corrected at first live boot (#8): the live `utilization` is ALREADY a 0..100
+# percentage, not a 0..1 fraction. Run 2's "0..1, x100=percent" reading came from static
+# binary-string inspection, never a real response; the first boot emitted `--5h 900
+# --weekly 300` from a x100 of util 9.0 / 3.0 - impossible for a fraction. So percent IS
+# the utilization value; we round it, we do not rescale it.
 #
 # tva
 set -uo pipefail
@@ -44,8 +48,9 @@ EOF
 }
 
 # parse_usage - read a /api/oauth/usage JSON on stdin, print "--5h <pct> --weekly <pct>".
-# utilization is a 0..1 fraction, so x100 gives the percent watchdog expects. The 5-hour
-# window is five_hour.utilization; the weekly window is seven_day.utilization.
+# utilization is ALREADY a 0..100 percentage (see SCALE note above), so we round it as-is
+# rather than rescaling. The 5-hour window is five_hour.utilization; the weekly window is
+# seven_day.utilization.
 #
 # RESIDUAL ASSUMPTION: that seven_day (not the separate "weekly" key) is the all-models
 # weekly window. Both keys exist in the CLI binary; confirm at the first real fetch. To
@@ -54,7 +59,7 @@ EOF
 parse_usage() {
   local args
   args="$(jq -er '
-    def pct: (. * 100 * 1000 | round) / 1000;
+    def pct: (. * 1000 | round) / 1000;
     (.five_hour.utilization) as $a |
     (.seven_day.utilization // .weekly.utilization) as $b |
     if ($a | type) == "number" and ($b | type) == "number"
