@@ -12,72 +12,57 @@ which chapter holds the detail.
 
 ## 2026-06-10 - Run 3: self-evolving harness (engine + steering overlay)
 
-- **Frontier #9 (timmy classifier robustness) - CLOSED.** All four of timmy's
-  state cues (spinner, menu, idle-box, question) hardened from content-matching
-  to shape-based and pinned in both directions; hermetic suite grew 16 -> 28.
-  Two defects were caught live by the running chain. Commits 05b09ae, c08421d,
-  f476c95. Detail: live CHRONICLE/TICKS (2026-06-10).
-- **Frontier #8 (launch-verify) - landed substantially, kept open as tracker.**
-  First live boot caught and fixed two launch defects: usage-gate x100 scaling
-  (5216777) and external-target .mossy/ git-exclude escape (62970f1); target-mode
-  path resolution verified; mechanism documented (640c381).
-- **The never-stop hole - found and fixed at the bitzer layer.** Run stalled ~4h
-  (15:01 -> 19:02): shaun ended on a legitimate STANDBY but nothing poked
-  bitzer's pane, so the sustain-poll never fired - autonomy duration failing at
-  the layer meant to enforce it. Stopgap: a durable heartbeat cron firing every
-  5 min while bitzer is idle (wake/queue/push/rotate + self-compact). Lasting
-  fix filed as frontiers #13 and #14. Detail: CHRONICLE 2026-06-10 19:09.
-- **Frontier #12 (close-vs-push alignment) - operational half landed.** Issue
-  could read CLOSED while its proving commit was still local-only. Operational
-  fix: gate issue-close on the proving commit being on origin (85e0607). The
-  binding-invariant half is escalated to the Farmer (GUARDRAILS sequencing),
-  pending decision (ESCALATIONS 2026-06-10 19:09).
-- **Frontier #13 (durable autonomous heartbeat) - CLOSED.** Replaced the
-  session-cron stopgap with a harness-native heartbeat: standalone timmy-gated
-  trigger bin/heartbeat.sh (64ca23f) raised by `barn.sh up` in a background
-  window (741aaa7), no silent expiry, survives a bitzer REPL restart. Proven
-  launch-free via --plan.
-- **Frontier #14 (bitzer self-compaction) - CLOSED.** Bakes the self-compact
-  stopgap into the prompt: position/shape-anchored pane-context detector
-  (970990e) plus a curated self-compact wired into bitzer.md, gated on that
-  detector and fail-closed (c5af4b3). A future bitzer inherits it at next launch.
-- **Frontier #15 (LaunchAgent heartbeat variant) - PARKED (draft).** Farmer-filed
-  alternative mechanism (OS-level LaunchAgent vs #13's tmux window, which shaun
-  reasoned against). Held as `draft` pending the Farmer's mechanism call.
-- **Frontier #10 (position-anchor timmy's cues) - CLOSED.** All four cues
-  bottom-anchored so scrollback content cannot shadow a real state: spinner
-  (structural prompt-anchor replacing fragile K=6: a97ba1d, d3643bd), idle-box
-  (0dc302e), menu (31c154e), question + footer-chrome hardening (9fafbe2).
-  Hermetic suite grew through 36+ fixtures. A deferred residual (idle box vs
-  working input box are not yet discriminated) was filed as frontier #17.
-- **Frontier #17 (idle-vs-working discrimination) - CLOSED.** Added a
-  wide-pane-only settled-idle suffix override with precedence over the spinner,
-  so a decoy spinner above a settled idle box reads idle (7a7f6ba); suite 43->45.
-  The narrow-pane case is left as a documented residual (the safe direction),
-  tracked under #8.
-- **Frontier #19 (usage gate skip when not on a plan) - CLOSED.** Farmer-
-  directed. usage-read.sh gained --plan-check, which exits 3 only on a valid
-  creds file positively showing no subscription (f822dc0); the gate in shaun.md
-  skips the watchdog on that signal, and anything ambiguous falls to the normal
-  fail-open path so an on-plan account is never mis-skipped (ed52a4a). Takes
-  effect at next launch. The undocumented API-only creds shape rides in a fixture,
-  to be confirmed at #8 launch-verify against a real account.
-- **Frontier #16 (context-hygiene policy) - COMPLETE (close pending).** Farmer-
-  directed, built in three layers and dogfooded end to end: shirley compacted at
-  every slice boundary, threshold demoted to backstop (5ee5cd2); bitzer proactive
-  self-compact at concern boundaries + 80% hard ceiling (137aa18); shaun
-  between-slice self-compaction via STANDBY-after-hand (41afa7f). Lands for the
-  whole chain at next launch (prompt edits are next-launch per inv.1). Close
-  deferred to a fresh shaun now that the proving commits are on origin.
+Detail sealed in chapter `ticks/archive/2026-06-10.md` +
+`chronicle/archive/2026-06-10.md` (rotated 23:50).
 
-- **Frontier #18 (barn.sh launch configurability) - COMPLETE (close pending).**
-  Generality. Made the harness safe to launch more than once on a host - the
-  exact friction that had forced a parallel boot script in the wild: configurable
-  primary window name (--window > MOSSY_WINDOW > mossy; heartbeat derived
-  <window>-hb, 99050a6), collision-safe creation that auto-suffixes instead of
-  aborting (4711daf), and a pre-role-prompt injection hook for global lines
-  (--inject / MOSSY_INJECT, live-path only, 86aff06). Close deferred to a fresh
-  shaun now that the proving commits are on origin.
+**The arc.** A mid-run ~4h stall (15:01->19:02) exposed the never-stop hole at
+the bitzer layer: shaun sat on a legitimate STANDBY but nothing poked bitzer, so
+the sustain-poll never fired - autonomy duration failing at the layer meant to
+enforce it. That triggered the day's spine: make the harness sustain itself, then
+harden everything the sustain loop leans on.
 
-Detail for all of the above lives in the live CHRONICLE.md and TICKS.md dated
-2026-06-10 (no rotation has occurred yet, so there is no dated archive chapter).
+**CLOSED this chapter (proof on origin before each close):**
+- #9 - timmy's four state cues (spinner/menu/idle-box/question) made shape-based,
+  pinned both directions; suite 16->28.
+- #10 - those cues bottom-anchored so scrollback content cannot shadow a real
+  state; suite ->36+. Exposed the idle-vs-working gap (-> #17).
+- #13 - durable autonomous heartbeat: bin/heartbeat.sh raised by `barn.sh up` in
+  a background window, no silent expiry, survives a bitzer restart. Replaced the
+  session-cron stopgap.
+- #14 - bitzer self-compaction baked into the prompt: shape-anchored pane-context
+  detector + curated fail-closed self-compact.
+- #16 - Farmer-directed context-hygiene policy, three layers: shirley compacted
+  every slice, bitzer proactive self-compact + 80% ceiling, shaun
+  STANDBY-after-hand. Dogfooded end to end.
+- #17 - settled-idle suffix override (wide-pane) so a decoy spinner above an idle
+  box reads idle; narrow-pane case is a documented residual under #8.
+- #18 - Generality: launch configurability - configurable window name,
+  collision-safe creation, pre-role-prompt injection hook. Safe to launch more
+  than once on a host.
+- #19 - Farmer-directed: usage gate skips on a positively-detected no-plan account
+  (--plan-check), ambiguity falls to fail-open so an on-plan account is never
+  mis-skipped.
+
+**#8 (launch-verify) - structural verification COMPLETE, open as tracker.** Early
+fixes: usage-gate x100 scaling (5216777), external-target .mossy/ git-exclude
+escape (62970f1). Hermetic bin/barn.test.sh (31 green) covers target-mode path
+resolution, the gitignore escape, and the up --plan layout. The one edge a chain
+cannot self-verify (a live 3-pane target-mode boot) is escalated as a
+Farmer-operated step (ESCALATIONS 23:43); the #17 narrow-pane, #19 API-only-creds,
+and #18 deferred bits get checked during that boot.
+
+**Open / parked / pending the Farmer:**
+- #12 - close-vs-push: operational half landed (gate close on proving-commit-on-
+  origin, 85e0607); binding GUARDRAILS-sequencing half escalated, Option A
+  recommended (ESCALATIONS 19:09). #11 (up-chain signals) is coupled and
+  Farmer-blocked behind it.
+- #15 - LaunchAgent heartbeat variant: parked `draft` pending the Farmer's
+  mechanism call (vs #13's tmux window, which shaun reasoned against).
+- #20 - sustain loop should structurally detect+recover a stuck shaun turn (no
+  STANDBY, no spinner, pane stable across two ticks); seen twice this chapter,
+  recovered each time by a bitzer nudge.
+- #21 - heartbeat-window collision-safety (the #18.2 residual); the next workable
+  structural frontier.
+
+**Standing note.** Prompt edits (#16, #19, and any bin/ edits) take effect only at
+the NEXT launch - this session still runs the booted prompts.

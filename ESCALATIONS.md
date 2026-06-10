@@ -42,3 +42,29 @@ Entry format:
   are in shirley's audit if you prefer a different shape. Note the overlap with
   #11 (event-driven up-chain signals): Option B would also seed #11's
   shaun->bitzer "ready to close" signal.
+
+## 23:43 - #8: the live target-mode boot needs a Farmer-operated launch
+- What happened: #8's launch-free verification is now COMPLETE and on origin.
+  Dogfood mode is dogfooded by this running chain itself (it booted and drove
+  #16/#17/#19/#18 end to end). Target mode is fully covered by a new hermetic
+  suite (bin/barn.test.sh, 31 green): resolution to absolute paths, the .mossy/
+  gitignore escape (seed_target_exclude with idempotency + both skip cases), and
+  the up --plan path/env layout (STATE_DIR/REPO_DIR/panes + per-pane cwds, with a
+  dogfood contrast). The one edge no launch-free test can reach is the actual
+  live target-mode boot: real claude in three real panes against an external
+  scratch repo, the chain driving one real slice there.
+- Why shaun cannot resolve it: a full target-mode boot is a three-pane chain.
+  Launching it from inside the running chain is a nested live chain - forbidden by
+  the opening directive ("never launch nested live chains") and inv.1 ("never
+  break the live run"). inv.3 sanctions ONE throwaway verification pane, not a
+  whole second chain. So the chain structurally cannot self-verify a live boot.
+- What is needed to unblock: the Farmer (or bitzer, out-of-band) runs
+  `bin/barn.sh up <scratch-target-repo>` on a host, confirms the evolved prompts
+  boot and $MOSSY_STATE_DIR/$MOSSY_REPO_DIR resolve in every pane, and the chain
+  drives one real slice in the target; then reports back. The residuals parked
+  under #8 get checked during that boot: the #19 API-only creds shape (no-plan
+  gate-skip against a real keys-only account), the #17 narrow-pane idle case, and
+  #18's two deferred bits (per-role MOSSY_INJECT_<ROLE> variants and the
+  heartbeat-window 'index in use' collision). #8 stays open as the tracker for
+  this Farmer-operated step. Meanwhile the chain keeps working the structural
+  frontier filed alongside this (heartbeat-window collision-safety).
