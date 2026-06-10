@@ -2,11 +2,12 @@
 #
 # barn.sh - raise the Mossy Bottom deference chain in one tmux window.
 #
-# Creates a primary window (default `mossy`, override with --window or MOSSY_WINDOW)
-# with three panes - bitzer | shaun | shirley, left to right - boots an interactive
-# Claude Code session in each, records the immutable pane ids in .barn-panes, and
-# delivers role prompts to shaun and bitzer. shirley gets NOTHING: her first prompt
-# comes from shaun. That asymmetry is the experiment.
+# Creates a primary window (default `mossy`, override with --window or MOSSY_WINDOW; if
+# that name is already taken in the session it auto-suffixes to <window>-2, <window>-3,
+# ... rather than aborting) with three panes - bitzer | shaun | shirley, left to right -
+# boots an interactive Claude Code session in each, records the immutable pane ids in
+# .barn-panes, and delivers role prompts to shaun and bitzer. shirley gets NOTHING: her
+# first prompt comes from shaun. That asymmetry is the experiment.
 #
 # It also raises a separate background window (`<window>-hb`, default `mossy-hb`) running
 # bin/heartbeat.sh, the
@@ -114,6 +115,31 @@ ensure_session() {
   if ! tmux has-session -t "${session}" 2>/dev/null; then
     tmux new-session -d -s "${session}" -c "${REPO_ROOT}"
   fi
+}
+
+# resolve_free_window <session> <base> - echo a primary window name not already in the
+# session (#18.2). If <base> is free, echo it unchanged; otherwise advance <base>-2,
+# <base>-3, ... and echo the first free one. A name collision is NEVER fatal here - only
+# an unusable session is: if the window list cannot be read (the session is gone), return
+# nonzero so the caller can hard-fail on THAT, not on a mere clash. Names are matched
+# whole-line and literal (grep -xF), so a window whose name contains regex metacharacters
+# still compares correctly.
+resolve_free_window() {
+  local session="$1" base="$2" names cand n
+  names="$(tmux list-windows -t "${session}" -F '#{window_name}' 2>/dev/null)" || return 1
+  if ! printf '%s\n' "${names}" | grep -qxF -- "${base}"; then
+    printf '%s' "${base}"
+    return 0
+  fi
+  n=2
+  while :; do
+    cand="${base}-${n}"
+    if ! printf '%s\n' "${names}" | grep -qxF -- "${cand}"; then
+      printf '%s' "${cand}"
+      return 0
+    fi
+    n=$((n + 1))
+  done
 }
 
 # wait_for <pane> <pattern> <timeout_s> - poll capture-pane until pattern shows.
@@ -342,11 +368,16 @@ cmd_up() {
   session="$(resolve_session)"
   ensure_session "${session}"
 
-  if tmux list-windows -t "${session}" -F '#{window_name}' 2>/dev/null | grep -qx "${WINDOW}"; then
-    echo "barn: a '${WINDOW}' window already exists in session '${session}'." >&2
-    echo "      use 'bin/barn.sh relaunch <role>' to respawn one pane, or kill it:" >&2
-    echo "      tmux kill-window -t ${session}:${WINDOW}" >&2
-    exit 1
+  # Collision-safe primary window (#18.2): if the resolved name is taken, advance to
+  # <window>-2, <window>-3, ... instead of hard-aborting, and re-derive HB_WINDOW from the
+  # free name (apply_window). A bare name clash never blocks a run; only an unusable session
+  # does (resolve_free_window returns nonzero -> the session is gone).
+  local free
+  free="$(resolve_free_window "${session}" "${WINDOW}")" \
+    || { echo "barn: session '${session}' is unusable - cannot list its windows" >&2; exit 1; }
+  if [ "${free}" != "${WINDOW}" ]; then
+    echo "barn: window '${WINDOW}' already exists in session '${session}' - using '${free}' instead." >&2
+    apply_window "${free}"
   fi
 
   mkdir -p "${shirley_cwd}"
