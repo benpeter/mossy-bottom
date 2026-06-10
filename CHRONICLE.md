@@ -2195,3 +2195,47 @@ diff-based double-capture), with acceptance that forbids working-pane
 false-negatives. The queue stays non-empty: #16 (Farmer's new context-hygiene
 policy - the systematic form of shaun/shirley between-slice compaction, pairing
 with closed #14), #17, #11 (coupled to escalated #12), #8, #12.
+
+## 2026-06-10 (post-compaction shaun, evening) - #16 COMPLETE: context-hygiene policy across all three agents
+
+Frontier #16 (Farmer-directed, bitzer-labeled next) landed in three atomic prompt
+slices, making proactive context hygiene a standing cadence at every layer of the
+chain so none drifts toward the auto-compaction wall or carries stale detail over an
+indefinite never-done run. Quality served: Economy (compass #2) and Autonomy
+duration (compass #1).
+
+- Layer 1 - shirley between-slice compaction (5ee5cd2). shaun now compacts shirley at
+  every slice boundary, not only when her context crosses ~70%. The focus string was
+  rewritten frontier-agnostic (no longer timmy-specific) and first-person, preserving
+  her load-bearing state - worker role, slice discipline, structural/test proof, atomic
+  touched-files-only commits, never-root-state, never-push, vanilla, dogfood repo,
+  MISSION/GUARDRAILS anchors - while dropping spent-slice detail. The ~70% threshold
+  became a backstop.
+
+- Layer 2 - bitzer proactive self-compact + 80% ceiling (137aa18). bitzer's #14
+  self-compact was reactive-at-threshold only; layer 2 split it into two composing modes
+  - proactive at concern boundaries (before a new Farmer request, escalation, or poll
+  part) plus the preserved reactive backstop - and named 80% as a hard ceiling. Ordering
+  70 (reactive) < 80 (ceiling) < ~85-90 (uncurated auto). A robustness bonus fell out:
+  the proactive path is not gated on context-read, so it bounds bitzer even when the
+  reader is unavailable, covering the reactive path's fail-safe-skip blind spot.
+
+- Layer 3 - shaun STANDBY-after-hand (41afa7f). The trickiest layer, taken report-first.
+  shaun cannot self-compact (one long turn) or self-resume, so its compaction must route
+  through STANDBY + bitzer-wake. The worker characterized three seams; the chain chose
+  Option B - shaun STANDBYs AFTER handing the next slice, so the unavoidable bitzer-wake
+  latency overlaps shirley's productive work instead of stalling her. Between-slice
+  STANDBY is now the cadence, with STANDBY-when-heavy as the backstop, mirroring layers 1
+  and 2. A monitor-not-rehand guard (stated three times) keeps a rehydrated shaun from
+  double-handing a slice shirley already holds.
+
+The three layers share one shape: between-slice compaction is the standing cadence, the
+old threshold is the backstop. The policy is self-consistent across worker, driver, and
+sustainer. Like #10, layer 3 used report-first and the worker's characterization
+sharpened the design - the stall-window analysis that settled Option B over A.
+
+The issue-close was DEFERRED at the milestone: 41afa7f (the layer-3 proving commit) had
+not yet reached origin when the work completed, so per the #12 discipline the close waits
+for bitzer's push. The work is done; the public close follows the push.
+
+Detail in TICKS.md 2026-06-10 21:38-21:54.

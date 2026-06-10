@@ -52,9 +52,13 @@ which chapter holds the detail.
   working input box are not yet discriminated) was filed as frontier #17.
 - **Frontier #17 (idle-vs-working discrimination) - open.** timmy cannot yet
   tell a settled idle box from a working input box; the #10 anchoring exposed it.
-- **Frontier #16 (context-hygiene policy) - open, next.** Farmer-directed:
-  compact shaun + shirley between slices, bitzer self-compacts often (80%
-  ceiling). Front of queue.
+- **Frontier #16 (context-hygiene policy) - COMPLETE (close pending).** Farmer-
+  directed, built in three layers and dogfooded end to end: shirley compacted at
+  every slice boundary, threshold demoted to backstop (5ee5cd2); bitzer proactive
+  self-compact at concern boundaries + 80% hard ceiling (137aa18); shaun
+  between-slice self-compaction via STANDBY-after-hand (41afa7f). Lands for the
+  whole chain at next launch (prompt edits are next-launch per inv.1). Close
+  deferred to a fresh shaun now that the proving commits are on origin.
 
 Detail for all of the above lives in the live CHRONICLE.md and TICKS.md dated
 2026-06-10 (no rotation has occurred yet, so there is no dated archive chapter).
