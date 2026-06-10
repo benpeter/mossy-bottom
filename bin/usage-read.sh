@@ -16,10 +16,24 @@
 # Usage:
 #   usage-read.sh                 fetch live usage, print "--5h <pct> --weekly <pct>"
 #   usage-read.sh --parse [<f>]   parse usage JSON from <f> (or stdin) - launch-free
+#   usage-read.sh --plan-check [<f>]  is this account on a plan? verdict by EXIT CODE only
 #
 # On ANY failure (no creds, network, 401/expired token, malformed JSON, missing keys,
 # or no jq) it prints a "usage unavailable" line to stderr and exits nonzero. It never
 # decides clear-vs-pause - that fail-safe policy belongs to the wiring slice.
+#
+# --plan-check (#19): some accounts have NO rolling usage window to wait out (API key /
+# pay-as-you-go - no OAuth subscription). For those the usage gate is meaningless and a
+# live fetch would only return junk to misread. This mode answers "is there a plan?" from
+# the LOCAL creds file - no network, no token spend - by EXIT CODE only (it prints no
+# stdout; at most one non-secret stderr reason):
+#   exit 3 (EXIT_NO_PLAN)  POSITIVELY no subscription: the creds file exists, is valid JSON,
+#                          is a NON-EMPTY object, and has NO .claudeAiOauth block at all.
+#   exit 0                 on a plan (the .claudeAiOauth block is present in any form), OR
+#                          AMBIGUOUS (file missing/unreadable/invalid JSON/empty object).
+# The skip is POSITIVE and one-directional: exit 3 ONLY on a populated non-subscription
+# shape. Every ambiguous or odd on-plan state returns 0, so the normal gate runs and
+# fail-opens on its own - a transient creds state can NEVER be mis-read as "no plan".
 #
 # Source: endpoint /api/oauth/usage on api.anthropic.com; the response carries
 # five_hour / seven_day / weekly objects, each with `utilization` + resets_at.
@@ -35,15 +49,26 @@ set -uo pipefail
 readonly USAGE_ENDPOINT="https://api.anthropic.com/api/oauth/usage"
 readonly CRED_FILE="${HOME}/.claude/.credentials.json"
 
+# --plan-check verdict: a populated creds file that positively carries NO OAuth
+# subscription block. Distinct from the existing 0 (ok) and 1 (unavailable), and from
+# watchdog's 0/10/64, so the wiring slice can branch on it unambiguously.
+readonly EXIT_NO_PLAN=3
+
 unavailable() { printf 'usage-read: usage unavailable - %s\n' "$1" >&2; }
 
 usage() {
   cat <<'EOF'
-Usage: usage-read.sh                 fetch live usage, print "--5h <pct> --weekly <pct>"
-       usage-read.sh --parse [<f>]   parse usage JSON from <f> (or stdin); launch-free
+Usage: usage-read.sh                     fetch live usage, print "--5h <pct> --weekly <pct>"
+       usage-read.sh --parse [<f>]       parse usage JSON from <f> (or stdin); launch-free
+       usage-read.sh --plan-check [<f>]  on a plan? verdict by EXIT CODE only; launch-free
 
 Prints watchdog args on success (exit 0). On any failure prints a "usage unavailable"
 line to stderr and exits nonzero - it never decides clear vs pause.
+
+--plan-check reads the creds file (<f>, else ~/.claude/.credentials.json) and answers by
+exit code only (no stdout): exit 3 = positively no plan (valid non-empty creds JSON with
+no .claudeAiOauth subscription block); exit 0 = on a plan, OR ambiguous (file missing,
+unreadable, invalid JSON, or empty object) - the safe direction.
 EOF
 }
 
@@ -70,6 +95,40 @@ parse_usage() {
     return 1
   }
   printf '%s\n' "${args}"
+}
+
+# plan_check - decide, from the LOCAL creds file alone (no network), whether this account
+# is on a plan. Verdict by EXIT CODE only: it prints NOTHING to stdout and at most one
+# non-secret reason to stderr - never a token, never the subscriptionType value, never the
+# creds JSON (inv.7; pane output is committed verbatim).
+#
+# The predicate is deliberately POSITIVE and one-directional. We return EXIT_NO_PLAN (3)
+# ONLY when the file exists, parses as a JSON OBJECT, is NON-EMPTY, and has NO
+# ".claudeAiOauth" subscription block at all - a populated, structurally non-subscription
+# creds shape (API key / pay-as-you-go). The observed plan creds file is exactly
+# {"claudeAiOauth": {...}} (a single subscription block), so:
+#   - .claudeAiOauth present in ANY form  -> on a plan (or an odd on-plan state)  -> exit 0
+#   - empty object {}                      -> a degraded/transient creds state      -> exit 0
+#   - not a JSON object / invalid / missing-> ambiguous                            -> exit 0
+#   - populated object, NO .claudeAiOauth  -> positively no subscription           -> exit 3
+# Every ambiguous or odd-on-plan case falls to exit 0 so the normal gate runs and
+# fail-opens itself; a transient creds state can never be mis-read as "no plan".
+plan_check() {
+  local file="${1:-${CRED_FILE}}"
+  [ -f "${file}" ] || return 0   # missing/unreadable -> ambiguous -> normal path
+  local verdict
+  verdict="$(jq -er '
+    if type != "object" then "ambiguous"
+    elif has("claudeAiOauth") then "plan"
+    elif (keys | length) == 0 then "ambiguous"
+    else "noplan"
+    end
+  ' "${file}" 2>/dev/null)" || return 0   # invalid JSON / jq error -> ambiguous -> normal path
+  if [ "${verdict}" = "noplan" ]; then
+    printf 'usage-read: no plan - no OAuth subscription block in credentials\n' >&2
+    return "${EXIT_NO_PLAN}"
+  fi
+  return 0
 }
 
 # fetch_usage - GET the live usage endpoint and print its raw JSON. NETWORK + AUTH: the
@@ -100,6 +159,11 @@ case "${1:-}" in
     else
       parse_usage || exit 1
     fi
+    ;;
+  --plan-check)
+    # Verdict by exit code only (0 = on a plan / ambiguous; 3 = positively no plan).
+    plan_check "${2:-}"
+    exit $?
     ;;
   "")
     json="$(fetch_usage)" || exit 1
