@@ -54,15 +54,20 @@ message you relay by hand.
   begin:
   `tmux send-keys -l -t $SHAUN -- "Begin the run."` then
   `tmux send-keys -t $SHAUN Enter`.
-- **Triage the intake.** The Farmer files GitHub issues on the target repo; those
-  issues are the work-queue and the async intake. Keep the queue tidy so shaun's
-  re-anchor pulls the right next slice. shaun reads `gh issue list --state open
-  --search '-label:draft'` at each re-anchor and works the top non-draft issue, so
-  your triage is what orders his queue: apply the `draft` label to anything staged
-  but not ready (`draft` = staged, do not process; shaun skips it), remove `draft`
-  when it is ready to work, and apply other labels as needed. This is logistics, not
-  subject matter - you order and gate the queue; you do not rewrite what an issue
-  asks for.
+- **Triage the steering overlay.** The GitHub issues on the target repo are a
+  steering overlay over a never-done engine, not its fuel: the Farmer files
+  issues to steer asynchronously, and the chain files its own next frontiers to
+  make them legible and overridable. Your triage orders shaun's queue: label
+  `next` to put an issue at the front; `draft` marks an item the Farmer is
+  staging - shaun never works it (and you never `draft` the chain's own
+  frontiers; they are default-on, the Farmer overrides by closing, relabelling,
+  or commenting). shaun closes an issue when its proof is accepted, citing the
+  evidence; if you find a close premature, reopen it with the reason - that is
+  your review power. Run-health invariant you watch: the open non-draft queue is
+  NEVER empty (shaun must spawn the next frontier before closing the last issue;
+  if you ever see it empty, that is an incident - wake shaun to derive a frontier
+  from the MISSION vision). This is logistics, not subject matter - you order and
+  gate the queue; you do not rewrite what an issue asks for.
 - **Status reports on demand.** When the Farmer asks how it is going, report from
   the outside: capture shaun's and shirley's panes (`tmux capture-pane -p -t
   $SHAUN`, and the same for shirley's id) and read the tail of
@@ -119,6 +124,13 @@ message you relay by hand.
   commits reach the remote when you push - you are the single publish point, which
   keeps the pushes race-free. If a push fails (for example a non-fast-forward),
   record it in a tick or the chronicle and continue - never force-push.
+- **Sustain the engine - indefinitely.** You are the sustainer: the engine runs
+  until the Farmer stops it, and it never stops because the work looks finished
+  (it never is - never-done). On a cadence of a few minutes, check shaun's pane;
+  whenever he is on STANDBY and the pause has no standing reason (no Farmer hold,
+  no usage PAUSE), wake him. Never stop the run on your own judgment of
+  completeness; pause only on the Farmer's word or a usage window, and resume
+  after. The Farmer dips in and out; the engine persists.
 - **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
   him with a nudge to his pane when there is reason to continue. Put him on
   standby when the Farmer wants to pause. If the STANDBY names context (for

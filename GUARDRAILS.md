@@ -4,27 +4,31 @@
 > shirley and shaun never edit this file and never argue with it. shaun folds
 > these invariants into the prompts he gives shirley.
 
-Run 2 invariants - shirley is evolving the harness itself:
+Standing invariants for the self-evolving harness:
 
-1. **Do not break the live run.** Never move, delete, or hand-edit the root state
-   files (MISSION.md, GUARDRAILS.md, TICKS.md, CHRONICLE.md, ESCALATIONS.md). You
-   may edit `bin/barn.sh` and `prompts/*.md` and add new files; those apply at the
-   next launch, not live.
-2. **Keep the default working.** A plain `barn.sh up` with no target must still
-   raise a working chain after your changes. Never remove the ability to relaunch.
-3. **Prove structurally, not with nested live chains.** shellcheck and `bash -n`
-   clean; dry-run or unit-style checks for new barn.sh behavior; show new prompt
-   steps are present and well-formed. Do not spawn nested live Claude chains to
-   "test" - resource blowup, and it collides with this run.
-4. **Vanilla only.** No new dependencies without the Farmer's allowance (`gh` is
-   already present and allowed).
-5. **Proof required; never claim done.** Every accepted change is backed by visible
-   proof in your pane (shellcheck output, a dry-run, a diff). Report what you proved
-   and what is next.
-6. **Conventional Commits**, subjects speak to the diff. Stage only the files your
-   slice changes; never `git add -A` - the root run-state files must never be swept
-   into your commits (those are bitzer's).
-7. **Hygiene.** shellcheck-clean; no secrets or private data; English; ASCII
-   diagrams; no em or en dashes - use " - ".
-8. **Direction is shaun's.** Report proof and blockers; shaun picks the next slice
-   from the issues.
+1. **Never break the live run.** The root state files (MISSION.md, GUARDRAILS.md,
+   TICKS.md, CHRONICLE.md, ESCALATIONS.md, SYNOPSIS.md) are never moved, deleted,
+   or hand-edited by shirley. Edits to `bin/` and `prompts/` apply at the next
+   launch, never to the running chain.
+2. **Stay relaunchable.** A plain `bin/barn.sh up` must raise a working chain
+   after every change.
+3. **Proof is structural by default.** shellcheck and `bash -n` clean; hermetic
+   tests; barn.sh proven via its launch-free `--plan` mode. Live Claude sessions
+   for verification only when the issue being worked explicitly calls for it -
+   one at a time, in a throwaway pane outside the chain's window, torn down
+   afterward.
+4. **Vanilla only.** No new runtime dependency without the Farmer's allowance
+   (`tmux`, `git`, `gh`, `jq` are present and allowed).
+5. **Evidence, never "done".** Every claim is backed by fresh visible output in
+   the pane. Accepting a proven slice triggers close-and-spawn
+   (prompts/shaun.md), never a stop.
+6. **Git discipline.** Conventional Commits, subjects speak to the diff. Stage
+   only the files your slice touched - never `git add -A`. The root run
+   artifacts are bitzer's to commit, and bitzer is the sole pusher.
+7. **Public hygiene.** No secrets or private data anywhere - pane output gets
+   committed verbatim in run artifacts.
+8. **Style.** English; ASCII-only diagrams, every line the same width; no em or
+   en dashes - use " - ".
+9. **Direction is shaun's, within the MISSION vision.** shirley reports proof
+   and blockers; she does not pick the next slice. Frontiers outside the vision
+   need a Farmer-filed issue or an escalation.

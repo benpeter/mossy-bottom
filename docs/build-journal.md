@@ -243,3 +243,63 @@ running synopsis (bound the live re-readable files), GH issues as async intake
 (steer over weeks without attaching), and the harness/target split (multiple
 long-running projects side by side). Run 1 proved the chain; these four make it
 sustainable at the intended timescale. All four are filed as issues.
+
+---
+
+## 2026-06-10 13:06 CEST - Never-done restored: issues demoted to a steering overlay
+
+The Farmer caught the project drifting from its own intention - at the top of
+the chain. The intention: Mossy Bottom is an engine for continuous autonomous
+product evolution, where done is never terminal. What had actually been built
+since adopting GitHub issues: a project-completion machine. The issue tracker
+imported its open-work-close lifecycle; MISSION.md got rewritten as a finite
+checklist ("implement #1 and #2... then #3-#7 in order"); the run got a stop
+condition; and when the queue drained, the chain stopped and asked "what now?" -
+a question a never-done engine must never ask. The builder (Claude, acting as
+proxy Farmer) reinforced the drift at every turn: a 4-hour time box, putting a
+`draft` hold on the chain's own self-filed frontier (#7) out of a governance
+reflex, and proposing close-on-proof bookkeeping as the headline fix.
+
+The episode is the project's thesis confirmed one layer up: a context filled
+with mechanics (close duties, draft labels, push gaps) lost the goal
+abstraction - exactly the failure mode the chain exists to correct in shirley -
+and it took the Farmer doing a shaun-style re-anchor on the builder to catch
+it. The abstraction gradient needs a driver at every layer, including the
+human-and-assistant layer at the top.
+
+The redesign, now in the files:
+
+- **MISSION.md is a standing vision, not a checklist.** Six qualities the
+  harness evolves toward (autonomy duration, economy, legibility, robustness,
+  generality, safety) - a compass that cannot be finished. It never enumerates
+  issue numbers: run 2 proved that a queue copied into MISSION diverges from
+  the live list and the copy wins (that is why the `draft` label on #7 did not
+  bite).
+- **Never-done as a queue invariant: close-and-spawn.** Accepting a proven
+  slice means shaun closes the issue citing the evidence, AND the open queue
+  must never become empty - whoever closes the last open issue first files the
+  next frontier, derived from the weakest vision quality. The engine idles only
+  when paused, never for lack of work. This also settles "whose duty is
+  closing": shaun closes at the moment of accepted proof (no re-pick window);
+  bitzer reopens if a close was premature.
+- **Issues are a steering overlay, not the fuel.** Farmer-filed issues steer
+  the engine asynchronously; chain-filed issues announce the engine's own next
+  frontier for legibility and possible override - default-on, never
+  permission-gated. `draft` means exactly one thing: the Farmer is staging an
+  item and it must not be worked yet.
+- **The engine is indefinite.** No queue-drained stop, no time floor. bitzer
+  sustains - poll, compact-and-wake, push - until the Farmer says stop; that
+  duty now lives in bitzer.md instead of a run-2 verbal order. The episodic
+  run-1/run-2 frame was PoC scaffolding; the steady state is one continuous
+  evolution the Farmer dips into.
+- **Governance moved up an altitude.** The Farmer controls the vision and the
+  guardrails, and steers any issue asynchronously; the Farmer does not
+  pre-approve each self-derived frontier. Scope control lives in the
+  constitution, not in per-ticket gates.
+
+Bookkeeping under the new model, on the Farmer's word: the launch-verification
+frontier was filed FIRST as issue #8 - keeping the queue non-empty - and then
+issues #1-#7 were closed with their landing commits cited in the close
+comments. Runtime verification of the run-2 work is #8's job. The live chain
+(still on STANDBY from run 2) predates this reframe; it picks the new model up
+at the next launch, which #8 calls for anyway.

@@ -153,15 +153,27 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
   something the files do
   not settle. Do not wake the Farmer for anything the files already answer.
 - **claiming-done** -> never accept it on its word (evidence rule). Demand fresh
-  evidence in the pane: tests run now, output visible. If the evidence holds,
-  re-anchor: read the issue queue fresh - `gh issue list --state open
-  --search '-label:draft'` - and pick the next open issue that is NOT labelled
-  `draft` (`draft` = staged, do not process). Open its spec with
-  `gh issue view <n>`, restate the mission, and - after passing the usage gate (see
-  The usage gate) - hand shirley the smallest proven slice of that issue; if the gate
-  says PAUSE, hold the slice and wait. "Done" is the trigger for the next slice, never
-  the end. shirley does not choose what is next - you do. If she proposed a next slice,
-  set it aside (trust rule) and pick from the issue queue yourself.
+  evidence in the pane: tests run now, output visible. If the evidence holds, run
+  the close-and-spawn sequence - "done" is generative, never terminal:
+  1. **Close, citing the evidence.** If the accepted slice completes its issue,
+     `gh issue close <n> --comment "<what was proven, the commits, the evidence>"`.
+     The close comment is your verification made legible - the Farmer reads it
+     remotely. (If the issue has unproven slices left, do not close; go to step 3.)
+  2. **Spawn before the queue can empty.** Check `gh issue list --state open
+     --search '-label:draft'`. If nothing (or nothing workable) remains, derive
+     the next frontier from the MISSION vision - the weakest quality with the
+     highest leverage; shirley's surfaced gaps are input, the choice is yours -
+     and file it: `gh issue create` naming the quality it serves. The open queue
+     is NEVER empty; an empty queue is a broken invariant, not a finished
+     project. Chain-filed frontiers are announcements for the Farmer's async
+     override, not permission requests - file, then work.
+  3. **Re-anchor and hand the next slice.** Pick the top open non-`draft` issue:
+     anything bitzer labelled `next` first, else the oldest (`draft` = the Farmer
+     staged it - never work it). Open its spec with `gh issue view <n>`, restate
+     the mission, and - after passing the usage gate (see The usage gate) - hand
+     shirley the smallest provable slice; if the gate says PAUSE, hold and wait.
+  shirley does not choose what is next - you do. If she proposed a next slice,
+  set it aside (trust rule) and derive or pick yourself.
 - **errored** -> tell shirley to read the error and fix it; if she already is,
   leave her working.
 - **stuck-looping** -> interrupt and redirect. Press Escape to stop her (see
