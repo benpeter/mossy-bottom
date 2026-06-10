@@ -156,12 +156,15 @@ has_menu() {
 }
 
 # A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line
-# plus the "⏵⏵ ... (shift+tab to cycle)" mode line. We key on the "⏵⏵" marker,
-# NOT the trailing "← for agents" suffix: that suffix is the FIRST thing to
-# truncate on a narrow pane (verified live - at width 50 the mode line ends
-# "...(shift+tab to cycle ·" with the suffix gone), whereas "⏵⏵" and "❯" are
-# left-aligned and survive. The spinner check (above) already separates busy,
-# so a settled "⏵⏵" box with no spinner is idle/question at any width.
+# fenced by "─" rules, with a "⏵⏵ ... (shift+tab to cycle)" mode line below. The
+# empty "❯" prompt is the MOST stable cue, but it is not enough alone (a bare "❯"
+# also appears as plain content), so we corroborate it. We do NOT corroborate on the
+# "⏵⏵" marker ALONE (GAP-6): that marker is version- and permission-mode-specific, and
+# keying question detection solely on it means a changed marker silently degrades a
+# real question to idle. Instead any ONE of three box cues suffices - the "⏵⏵" marker,
+# a "───" rule fence, or the "shift+tab" mode hint - so the box (and the question state
+# that rides on it) survives a changed/absent "⏵⏵". The "←  for agents" suffix is NOT
+# used: it truncates first on a narrow pane.
 is_idle_box() {
   # Claude renders the empty input line as "❯" + a U+00A0 NO-BREAK SPACE, which
   # grep's [[:space:]] does NOT reliably match (verified live). Normalise the
@@ -169,58 +172,68 @@ is_idle_box() {
   local nbsp=$'\xc2\xa0' text
   text="${1//$nbsp/ }"
   printf '%s\n' "$text" | LC_ALL=C grep -qE '^❯[[:space:]]*$' \
-    && printf '%s\n' "$text" | LC_ALL=C grep -q '⏵⏵'
+    && printf '%s\n' "$text" | LC_ALL=C grep -qE '⏵⏵|───|shift\+tab'
 }
 
-# Does the assistant's final message end in a question? Multi-line turns only
-# prefix their FIRST line with "⏺"; the real closing line is often an indented
-# CONTINUATION. So find the last non-blank CONTENT line, not the last "⏺" line.
-# First drop the input box and status tail (everything from the empty "❯" down),
-# then locate the closing content line two ways depending on the post-turn chrome:
+# Does the assistant's final message end in a question? Multi-line turns only prefix
+# their FIRST line with "⏺"; the real closing line is often an indented CONTINUATION.
+# We anchor on the SHAPE of a turn, not on the post-turn timer's exact glyph/wording:
 #
-#   TIMER PRESENT: cut above the "✻ ... for Ns" post-turn timer. The timer is a
-#     reliable anchor - everything at or below it is chrome (the timer plus any
-#     tip footer rendered beneath it), so the closing content line is the last
-#     non-blank line ABOVE the timer.
+#   1. Find the input box (the empty "❯" line). Everything at/below it is box chrome.
+#   2. Find the last "⏺" above the box - the start of the last assistant turn.
+#   3. Scan DOWN from that "⏺", stopping at the first CHROME line; the closing content
+#      line is the last non-blank line before it. Chrome is matched by SHAPE, so this
+#      survives timer drift and narrow-pane wrap:
+#        - a "───" rule fence
+#        - a "Tip:" footer
+#        - a key-hint footer (esc to interrupt / shift+tab / ctrl+ / to show todos /
+#          to cycle / for agents)
+#        - a post-turn TIMER/STATUS line: a glyph-led line (leading non-ASCII glyph
+#          that is NOT the "⏺" content prefix) carrying an elapsed token [0-9][smh].
+#          This is glyph-agnostic (GAP-5: a changed "✻" still matches) and NOT anchored
+#          to the line end (GAP-4: a wrapped trailing hint after "for Ns" still matches).
+#      A line is NOT chrome merely because it contains a "·" (GAP-8): a genuine closing
+#      question may use "·", so we strip only by the signatures above, never by "·".
+#   4. If there is no "⏺" (turn scrolled off), fall back to: walk UP from the box,
+#      skip blanks and chrome, take the first content line.
 #
-#   TIMER GONE (turn fully settled): the timer vanishes but a tip/hint footer can
-#     still linger directly above the box. With no anchor, walk up from the box
-#     and STRIP footer chrome by its own signature - a "Tip:" line, or a hint
-#     line carrying the " · " separator - rather than mistaking it for content.
-#     Stop at the first non-chrome, non-blank line: that is the closing line.
-#
-# Then test whether THAT line ends in '?'. ("✻" = e2 9c bb, "·" = c2 b7.) The
-# no-break space is normalised so the empty-box match is reliable. The timer
-# regex is intentionally NOT widened here - unseen verb/format variants are a
-# separate concern; this change only handles the timer's ABSENCE.
+# Then test whether the closing line ends in "?". The no-break space is normalised so
+# the empty-box match is reliable. Adversarial chrome (a "Tip: ...?" footer, a hint
+# line) is stripped by signature and so never fabricates a question.
 ends_in_question() {
   local nbsp=$'\xc2\xa0'
   printf '%s\n' "${1//$nbsp/ }" | LC_ALL=C awk '
     { line[NR] = $0 }
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function ischrome(s,   t) {
+      t = trim(s)
+      if (t ~ /^───/) return 1
+      if (t ~ /^Tip:/) return 1
+      if (t ~ /esc to interrupt|shift\+tab|ctrl\+|to show todos|to cycle|for agents/) return 1
+      if (t ~ /^[^ -~]/ && t !~ /^⏺/ && t ~ /[0-9][smh]/) return 1
+      return 0
+    }
     END {
       box = 0
       for (i = NR; i >= 1; i--) if (line[i] ~ /^❯ *$/) { box = i; break }
-      hi = (box > 0) ? box - 2 : NR
+      hi = (box > 0) ? box - 1 : NR
 
-      timer = 0
-      for (i = hi; i >= 1; i--) if (line[i] ~ /✻.*for [0-9]+s *$/) { timer = i; break }
+      turn = 0
+      for (i = hi; i >= 1; i--) if (line[i] ~ /^[ \t]*⏺/) { turn = i; break }
 
       last = ""
-      if (timer > 0) {
-        for (i = timer - 1; i >= 1; i--) {
-          s = line[i]; sub(/[ \t]+$/, "", s)
-          if (s != "") { last = s; break }
-        }
+      if (turn > 0) {
+        end = hi
+        for (i = turn; i <= hi; i++) if (ischrome(line[i])) { end = i - 1; break }
+        for (i = end; i >= turn; i--) if (trim(line[i]) != "") { last = line[i]; break }
       } else {
         for (i = hi; i >= 1; i--) {
-          s = line[i]; sub(/[ \t]+$/, "", s)
-          t = s; sub(/^[ \t]+/, "", t)
-          if (t == "") continue
-          if (t ~ /^Tip:/) continue
-          if (t ~ / · /) continue
-          last = s; break
+          if (trim(line[i]) == "") continue
+          if (ischrome(line[i])) continue
+          last = line[i]; break
         }
       }
+      sub(/[ \t]+$/, "", last)
       exit (last ~ /\?$/) ? 0 : 1
     }
   '

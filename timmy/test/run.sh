@@ -272,6 +272,73 @@ assert_state "$nts_sess" idle 0 "settled frame, timer gone, adversarial '?' tip 
 
 tmux kill-session -t "$nts_sess" 2>/dev/null
 
+# --- GAP-4 (#9): a NARROW pane (width 50) where the post-turn timer's trailing hint
+# WRAPS, so "for Ns" is no longer at the line end. The old end-anchored timer regex
+# (✻.*for [0-9]+s *$) missed the timer here and could mislocate the closing line; the
+# shape-based timer chrome (glyph-led + elapsed token, not end-anchored) still stops
+# the scan, so the real question survives. '✻' = e2 9c bb. ---
+g4_sess="timmy_t_g4_$$"
+tmux new-session -d -s "$g4_sess" -x 50 -y 24 \
+  "printf '\xe2\x8f\xba Here is the tradeoff you asked about.\n  Which option should I take?\n\xe2\x9c\xbb Sauteed for 5s (esc to interrupt \xc2\xb7 ctrl+t to show todos)\n${narrow_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g4_sess" question 30 "GAP-4 narrow pane, timer trailing hint wraps, question survives"
+
+tmux kill-session -t "$g4_sess" 2>/dev/null
+
+# --- GAP-5 (#9): a post-turn timer with a CHANGED glyph and wording - "✦ Cooked (5s)"
+# instead of "✻ Cooked for 5s". The old timer regex keyed on "✻" and "for Ns" and would
+# miss this, then mistake the timer line for the closing content and degrade to idle. The
+# glyph-agnostic shape (any non-⏺ glyph + elapsed token) still strips it. '✦' = e2 9c a6. ---
+g5_sess="timmy_t_g5_$$"
+tmux new-session -d -s "$g5_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Two approaches are possible here.\n  Which approach do you prefer?\n\xe2\x9c\xa6 Cooked (5s)\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g5_sess" question 30 "GAP-5 alt timer glyph and wording, question survives"
+
+tmux kill-session -t "$g5_sess" 2>/dev/null
+
+# --- GAP-6 (#9): a real idle box WITHOUT the "⏵⏵" mode marker (and no "shift+tab") -
+# only the "─" rule fence and the empty "❯". Question detection used to require "⏵⏵", so
+# a changed/absent marker silently degraded a real question to idle. is_idle_box now
+# corroborates on any one box cue (here the rules), so the box - and the question - hold.
+# '─' = e2 94 80, '❯' = e2 9d af; '%%' -> literal '%'. ---
+g6_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/proj | Opus 4.8 | Context: 9%%\n'
+g6_sess="timmy_t_g6_$$"
+tmux new-session -d -s "$g6_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba I need a decision before continuing.\n  Should I proceed with the deploy?\n${g6_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g6_sess" question 30 "GAP-6 idle box WITHOUT the ⏵⏵ marker, question survives"
+
+tmux kill-session -t "$g6_sess" 2>/dev/null
+
+# --- GAP-8 (#9): a genuine CLOSING QUESTION that itself contains "·". The old timer-gone
+# branch stripped ANY line containing " · " as chrome, deleting such a question and
+# degrading to idle. Chrome is now matched by signature, never by "·", so the question
+# survives. '·' = c2 b7. ---
+g8_sess="timmy_t_g8_$$"
+tmux new-session -d -s "$g8_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba A few routing options exist.\n  Use route A \xc2\xb7 route B \xc2\xb7 route C?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g8_sess" question 30 "GAP-8 closing question containing '·' classified question, not stripped"
+
+tmux kill-session -t "$g8_sess" 2>/dev/null
+
+# --- GAP-8 guard (#9), inverse: a "·"-bearing line that IS chrome (a key-hint footer)
+# above a STATEMENT must still be stripped, and must not fabricate a question - stays
+# idle. Proves the signature-based strip still removes real "·" chrome. ---
+g8g_sess="timmy_t_g8g_$$"
+tmux new-session -d -s "$g8g_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba All checks are complete now.\n  esc to interrupt \xc2\xb7 ctrl+t to show todos\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g8g_sess" idle 0 "GAP-8 guard: '·' key-hint chrome stripped, statement stays idle"
+
+tmux kill-session -t "$g8g_sess" 2>/dev/null
+
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
 # lines in that order, with NO duplicate while a state is held. The pane holds
