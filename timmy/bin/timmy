@@ -125,9 +125,30 @@ snapshot() { tmux capture-pane -p -t "$pane"; }
 #                    no immediate ellipsis and no parens, so it reads idle (GAP-7).
 #
 # LC_ALL=C keeps the match on literal UTF-8 bytes regardless of the caller's locale.
+#
+# BOTTOM-ANCHOR (#10): the live spinner renders in the bottom region of the pane, so the
+# SHAPE match above (unchanged) runs over ONLY the last SPINNER_TAIL_ROWS non-blank rows.
+# A spinner-shaped line higher in scrollback - a displayed report or diff that quotes a
+# glyph - then cannot SHADOW a real bottom state (reproduced live: a content "● Churning…
+# (esc…)" over a real idle box read busy). This constrains WHERE the cue looks, never
+# WHAT it matches, so the #9 shape gains (alt glyph, ASCII ellipsis, past-tense verb,
+# narrow wrap) are preserved by construction. K=6 covers a live spinner sitting just above
+# a standard 5-line input box while excluding a decoy separated from the bottom by content.
+# Residuals for later slices (no fixture exercises either): a decoy IMMEDIATELY above the
+# box (within K, no content between) is structurally identical to a real spinner and still
+# fires; an extreme narrow-wrapped box could push a real spinner past K rows from the
+# bottom (a false negative).
+readonly SPINNER_TAIL_ROWS=6
 has_spinner() {
-  printf '%s\n' "$1" | LC_ALL=C grep -qE \
-    '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
+  printf '%s\n' "$1" \
+    | LC_ALL=C awk -v K="${SPINNER_TAIL_ROWS}" '
+        { line[NR] = $0 }
+        END {
+          last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+          lo = last - (K - 1); if (lo < 1) lo = 1
+          for (i = lo; i <= last; i++) print line[i]
+        }' \
+    | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 }
 
 # A selection menu (smoke-test.md sections 1 and 9) is a NUMBERED OPTION LIST with a

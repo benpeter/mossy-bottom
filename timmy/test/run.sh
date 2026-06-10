@@ -86,6 +86,19 @@ assert_state "$glyph_sess" busy 10 "GAP-1b spinner with alt glyph + past-tense v
 
 tmux kill-session -t "$glyph_sess" 2>/dev/null
 
+# --- #10 NOT-REGRESSED: a REAL spinner at the very bottom, with report content scrolled
+# ABOVE it. The bottom spinner must still fire (busy) even though content precedes it -
+# bottom-anchoring keeps the real live spinner, it only rejects content above. (No idle
+# box here, so this can sit with the other spinner fixtures, before idle_box is defined.) ---
+realspin_sess="timmy_t_realspin_$$"
+tmux new-session -d -s "$realspin_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Here is a lot of report content from the last turn.\n  more content.\n  even more content.\n\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$realspin_sess" busy 10 "#10 real bottom spinner with content above it -> busy"
+
+tmux kill-session -t "$realspin_sess" 2>/dev/null
+
 # --- fixture: a selection menu (the trust gate shape, smoke-test.md section 9).
 # Numbered options with a cursor plus an "Enter to confirm" affordance line.
 menu_sess="timmy_t_menu_$$"
@@ -338,6 +351,30 @@ sleep 0.5
 assert_state "$g8g_sess" idle 0 "GAP-8 guard: '·' key-hint chrome stripped, statement stays idle"
 
 tmux kill-session -t "$g8g_sess" 2>/dev/null
+
+# --- #10 SHADOW-REJECTION: a spinner-shaped line sits in CONTENT above a real IDLE box
+# at the very bottom. Before bottom-anchoring the spinner fired on the content glyph and
+# read busy (reproduced live); now the spinner cue reads only the bottom region, so the
+# content spinner cannot shadow the real idle box. Must read idle, not busy. ---
+shspin_idle_sess="timmy_t_shspin_idle_$$"
+tmux new-session -d -s "$shspin_idle_sess" -x 80 -y 24 \
+  "printf '\xe2\x97\x8f Churning\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n  my report quotes that captured spinner line above; I am actually idle.\n  another line of the report.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$shspin_idle_sess" idle 0 "#10 content spinner above a real idle box -> idle, not busy"
+
+tmux kill-session -t "$shspin_idle_sess" 2>/dev/null
+
+# --- #10 SHADOW-REJECTION: a content spinner above a real QUESTION at the bottom. The
+# real bottom state (an idle box whose closing line is a question) must win. ---
+shspin_q_sess="timmy_t_shspin_q_$$"
+tmux new-session -d -s "$shspin_q_sess" -x 80 -y 24 \
+  "printf '\xe2\x97\x8f Propagating\xe2\x80\xa6 (esc to interrupt)\n\xe2\x8f\xba Should I proceed with the merge?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$shspin_q_sess" question 30 "#10 content spinner above a real question -> question, not busy"
+
+tmux kill-session -t "$shspin_q_sess" 2>/dev/null
 
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
