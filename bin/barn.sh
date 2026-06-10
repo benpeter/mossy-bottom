@@ -16,9 +16,9 @@
 # so it is reaped by kill-session with the chain and survives a bitzer relaunch.
 #
 # Usage:
-#   bin/barn.sh up [--plan] [--window <name>] [<target-repo>]   raise the chain (no target = dogfood)
+#   bin/barn.sh up [--plan] [--window <name>] [--inject "<text>"]... [<target-repo>]   raise the chain
 #   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
-#   bin/barn.sh relaunch [--plan] [--window <name>] <role> [<target>]  respawn one pane
+#   bin/barn.sh relaunch [--plan] [--window <name>] [--inject "<text>"]... <role> [<target>]  respawn one pane
 #
 # --plan prints the exact spawn plan (the -c <cwd> and injected MOSSY_STATE_DIR each
 # pane would get) and exits without creating or launching anything - a launch-free
@@ -44,6 +44,11 @@
 #   MOSSY_SHIRLEY_DIR   shirley's working directory (default: <repo>/timmy)
 #   MOSSY_WINDOW        primary tmux window name (default: "mossy"); --window overrides it.
 #                       The heartbeat window is always derived as <window>-hb.
+#   MOSSY_INJECT        newline-separated lines sent into each pane AFTER its input box is
+#                       up and BEFORE its role prompt - e.g. "/model default" then "/fast on".
+#                       Repeatable --inject "<text>" appends more lines AFTER the env's.
+#                       In 'up' every line goes to all three panes (bitzer, shaun, shirley);
+#                       in 'relaunch' to the one respawned pane. --plan lists them, sends none.
 #
 # tva
 set -euo pipefail
@@ -184,6 +189,28 @@ send_prompt() {
   tmux send-keys -t "${pane}" Enter
 }
 
+# resolve_inject [<flag-line>...] - echo the ordered pre-role injection list, one line each:
+# the newline-separated MOSSY_INJECT env lines FIRST, then the --inject flag lines (passed
+# as args) in order. Empty lines are left for the consumer to skip. Pure - reads only env
+# and args, sends nothing - so both the --plan preview and the live path resolve identically
+# and cannot drift. The global list (#18.3); per-role variants are a deferred follow-up.
+resolve_inject() {
+  if [ -n "${MOSSY_INJECT:-}" ]; then printf '%s\n' "${MOSSY_INJECT}"; fi
+  local l
+  for l in "$@"; do printf '%s\n' "${l}"; done
+}
+
+# inject_into <pane> <list> - send each NON-EMPTY line of a newline-separated list into one
+# pane via send_prompt (literal text + Enter), in order. Used only on the live path; --plan
+# never calls it. Empty lines are skipped so a trailing/blank env line sends nothing.
+inject_into() {
+  local pane="$1" list="$2" line
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    send_prompt "${pane}" "${line}"
+  done <<<"${list}"
+}
+
 # pane_id_for <role> <panes_file> - read one pane id from a resolved panes file.
 # The panes file is passed in (resolved from STATE_DIR), so read and write target
 # the same <target>/.mossy/.barn-panes - symmetric with cmd_up.
@@ -315,13 +342,17 @@ cmd_resolve() {
 
 cmd_up() {
   local plan=0
+  local -a inject_flags=()
   while [ $# -gt 0 ]; do
     case "${1:-}" in
       --plan) plan=1; shift ;;
       --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
+      --inject) shift; [ $# -gt 0 ] || { echo "barn: --inject needs a value" >&2; exit 1; }; inject_flags+=("$1"); shift ;;
       *) break ;;
     esac
   done
+  local inject_plan
+  inject_plan="$(resolve_inject ${inject_flags[@]+"${inject_flags[@]}"})"
   local resolved target state_dir panes_file
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
@@ -347,6 +378,17 @@ cmd_up() {
       printf '  preflight MISSION.md + GUARDRAILS.md present - up would boot\n'
     else
       printf '  preflight MISSION.md/GUARDRAILS.md missing - up would refuse (author them first)\n'
+    fi
+    if [ -n "${inject_plan}" ]; then
+      local _p _l
+      for _p in bitzer shaun shirley; do
+        while IFS= read -r _l; do
+          [ -n "${_l}" ] || continue
+          printf '  inject   %-7s <- %s\n' "${_p}" "${_l}"
+        done <<<"${inject_plan}"
+      done
+    else
+      printf '  inject   (none)\n'
     fi
     return 0
   fi
@@ -420,6 +462,15 @@ cmd_up() {
   boot_pane "${shaun}" shaun || true
   boot_pane "${shirley}" shirley || true
 
+  # Pre-role-prompt injection (#18.3): send the resolved global inject list into ALL THREE
+  # panes before any role boot - slash commands like /model and /fast apply to shirley too.
+  if [ -n "${inject_plan}" ]; then
+    echo "barn: injecting global lines into all three panes..."
+    inject_into "${bitzer}" "${inject_plan}"
+    inject_into "${shaun}" "${inject_plan}"
+    inject_into "${shirley}" "${inject_plan}"
+  fi
+
   echo "barn: delivering role prompts (shirley gets none)..."
   send_prompt "${bitzer}" "$(bitzer_boot "${state_dir}")"
   send_prompt "${shaun}" "$(shaun_boot "${state_dir}")"
@@ -442,13 +493,17 @@ EOF
 
 cmd_relaunch() {
   local plan=0
+  local -a inject_flags=()
   while [ $# -gt 0 ]; do
     case "${1:-}" in
       --plan) plan=1; shift ;;
       --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
+      --inject) shift; [ $# -gt 0 ] || { echo "barn: --inject needs a value" >&2; exit 1; }; inject_flags+=("$1"); shift ;;
       *) break ;;
     esac
   done
+  local inject_plan
+  inject_plan="$(resolve_inject ${inject_flags[@]+"${inject_flags[@]}"})"
   local role="${1:-}"
   case "${role}" in
     bitzer | shaun | shirley) ;;
@@ -477,6 +532,13 @@ cmd_relaunch() {
   if [ "${plan}" -eq 1 ]; then
     printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s MOSSY_REPO_DIR=%s (panes %s)\n' \
       "${role}" "${dir}" "${state_dir}" "${REPO_ROOT}" "${panes_file}"
+    if [ -n "${inject_plan}" ]; then
+      local _l
+      while IFS= read -r _l; do
+        [ -n "${_l}" ] || continue
+        printf '  inject   %-7s <- %s\n' "${role}" "${_l}"
+      done <<<"${inject_plan}"
+    fi
     return 0
   fi
 
@@ -486,6 +548,10 @@ cmd_relaunch() {
 
   tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
   boot_pane "${id}" "${role}" || true
+  # Pre-role-prompt injection (#18.3): same seam as up, for the one respawned pane.
+  if [ -n "${inject_plan}" ]; then
+    inject_into "${id}" "${inject_plan}"
+  fi
   case "${role}" in
     bitzer) send_prompt "${id}" "$(bitzer_boot "${state_dir}")" ;;
     shaun) send_prompt "${id}" "$(shaun_boot "${state_dir}")" ;;
