@@ -270,6 +270,55 @@ is_idle_box() {
     }'
 }
 
+# A SETTLED-idle box, distinguished from a WORKING one (#17). is_idle_box fires true for
+# BOTH an idle pane and a mid-turn working pane - both render the same rule-fenced empty
+# "❯" box - so its only discriminator is the spinner. That fails the decoy case: a real
+# idle box with a stale/decoy spinner-shaped line just above its top fence reads BUSY
+# (false-positive busy -> shaun never hands work -> the chain stalls).
+#
+# The discriminator is the mode-line suffix "← for agents" (smoke-test.md sections 2/3/8):
+# it is PRESENT when the pane is settled-idle and ABSENT while working. Because it is
+# structurally absent during work, "suffix present => settled idle" can NEVER false-negative
+# a working pane (the binding safety criterion) - the dangerous direction is not introduced.
+#
+# POSITION-ANCHORED exactly like is_idle_box (the #10 discipline): the suffix is required in
+# the box-chrome BELOW the bottom-most rule-fenced empty "❯" box, so a "← for agents" sitting
+# in a SCROLLBACK-quoted idle box (whose "❯" is indented, not "^❯", and which has real content
+# below it) cannot trigger it. This is is_idle_box's structure PLUS one requirement: the
+# footer carries the suffix - so a true result implies is_idle_box is also true.
+#
+# WIDE-PANE-ONLY by nature: the suffix is the first thing to truncate on a narrow pane
+# (verified: "...(shift+tab to cycle ·"). When it is absent - working OR narrow-truncated -
+# this returns false and the caller falls through to the existing spinner/precedence logic
+# unchanged. The narrow decoy thus stays false-positive-busy, the SAFE direction (a stall,
+# never a working pane mislabeled idle); there is no criterion-safe narrow signal in the
+# capture today, so narrow is left as the open question rather than risk the dangerous miss.
+has_idle_suffix() {
+  local nbsp=$'\xc2\xa0' text
+  text="${1//$nbsp/ }"
+  printf '%s\n' "$text" | LC_ALL=C awk '
+    { line[NR] = $0 }
+    function isboxchrome(s) {
+      return (s ~ /^[ \t]*$/ || s ~ /───/ \
+        || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| /)
+    }
+    END {
+      last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+      if (last == 0) exit 1
+      box = 0
+      for (i = last; i >= 1; i--) if (line[i] ~ /^❯[ \t]*$/) { box = i; break }
+      if (box == 0) exit 1
+      j = box - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
+      if (j < 1 || line[j] !~ /───/) exit 1
+      found = 0
+      for (k = box + 1; k <= last; k++) {
+        if (!isboxchrome(line[k])) exit 1
+        if (line[k] ~ /← for agents/) found = 1
+      }
+      exit (found ? 0 : 1)
+    }'
+}
+
 # Does the assistant's final message end in a question? Multi-line turns only prefix
 # their FIRST line with "⏺"; the real closing line is often an indented CONTINUATION.
 # We anchor on the SHAPE of a turn, not on the post-turn timer's exact glyph/wording:
@@ -346,6 +395,13 @@ ends_in_question() {
 #
 # Precedence (liveness is decided BEFORE the menu shape, which is how menu-like text in
 # displayed content is kept from firing - GAP-2/3 false-positive, hit live at 14:17):
+#   0. a SETTLED-idle box (#17): the bottom input box's mode line carries the "← for agents"
+#      suffix, which is present only when idle and absent while working. This is decided
+#      BEFORE the spinner, so a decoy/stale spinner-shaped line above a real idle box no
+#      longer reads busy. It can never false-negative a working pane, because a working
+#      pane never renders the suffix; when the suffix is absent (working OR narrow-pane
+#      truncated) this is skipped and the spinner/precedence below decides unchanged.
+#      Inside it, a trailing "?" means question, else idle.
 #   1. a spinner is present                -> busy. A working pane is never a menu, so
 #      this is checked first; it vetoes a menu shape sitting in the working pane's text.
 #   2. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for the
@@ -370,9 +426,19 @@ classify_once() {
   if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
   if has_menu "$snap2"; then menu="true"; else menu="false"; fi
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
+  if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
   if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
 
-  if [ "$spinner" = "true" ]; then
+  if [ "$idle_suffix" = "true" ]; then
+    # settled-idle box confirmed by the "← for agents" suffix: beats the spinner, closing
+    # the decoy-above-the-box case. A working pane never shows the suffix, so this branch
+    # cannot mislabel a working pane idle.
+    if [ "$ends_q" = "true" ]; then
+      state="question"; code="$EXIT_QUESTION"
+    else
+      state="idle"; code="$EXIT_IDLE"
+    fi
+  elif [ "$spinner" = "true" ]; then
     state="busy"; code="$EXIT_BUSY"
   elif [ "$idle_box" = "true" ]; then
     if [ "$ends_q" = "true" ]; then
@@ -454,8 +520,8 @@ fi
 classify_once || die "capture-pane failed for pane '$pane'"
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"ends_in_question":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$ends_q" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"ends_in_question":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$idle_suffix" "$ends_q" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi

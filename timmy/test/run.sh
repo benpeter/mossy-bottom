@@ -103,10 +103,12 @@ tmux kill-session -t "$realspin_sess" 2>/dev/null
 # bottom renders 6 rows BELOW the spinner - spinner / blank / rule / prompt / rule / footer
 # A / footer B - so the spinner sits 7 rows from the bottom. The structural prompt-anchor
 # must find it (skip the rule above the prompt and the blank, land on the spinner) and read
-# busy. A fixed K=6 tail excluded row 7 and read this live busy pane as IDLE. ---
+# busy. A fixed K=6 tail excluded row 7 and read this live busy pane as IDLE.
+# Footer B carries NO "← for agents" suffix: a working footer never does (smoke-test.md
+# section 3), so the #17 settled-idle override does not fire and the spinner decides. ---
 reallayout_sess="timmy_t_reallayout_$$"
 tmux new-session -d -s "$reallayout_sess" -x 80 -y 24 \
-  "printf '\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+  "printf '\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
 sleep 0.5
 
 assert_state "$reallayout_sess" busy 10 "#10 real production busy layout (spinner 7 rows up) -> busy"
@@ -191,6 +193,34 @@ sleep 0.5
 assert_state "$ib_sess" idle 0 "genuine idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ib_sess" 2>/dev/null
+
+# --- #17 the decoy gap: a SETTLED idle box (mode line carries the "← for agents" suffix)
+# with a DECOY spinner-shaped line immediately above its top fence, no content between.
+# Pre-#17 the spinner's structural anchor picked the decoy and read BUSY (false-positive
+# busy -> shaun never hands work -> the chain stalls). The suffix now certifies the box
+# settled and takes precedence OVER the spinner -> idle. Proves the override beats the
+# spinner; this is the exact gap #17 closes. ---
+decoy_sess="timmy_t_decoy_$$"
+tmux new-session -d -s "$decoy_sess" -x 80 -y 24 \
+  "printf '\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$decoy_sess" idle 0 "#17 decoy spinner immediately above a settled idle box (suffix present) -> idle, not busy"
+
+tmux kill-session -t "$decoy_sess" 2>/dev/null
+
+# --- #17 the binding criterion: a WORKING pane - active spinner, full box layout, but NO
+# "← for agents" suffix (a working footer never carries it, smoke-test.md section 3).
+# has_idle_suffix must NOT fire, so the spinner decides -> busy. Proves the override never
+# false-negatives a working pane (mislabeling working as idle is the forbidden direction). ---
+work_sess="timmy_t_work_$$"
+tmux new-session -d -s "$work_sess" -x 80 -y 24 \
+  "printf '\xe2\x97\x8f Processing\xe2\x80\xa6 (6m 24s \xc2\xb7 esc to interrupt)\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$work_sess" busy 10 "#17 working pane, spinner active, NO suffix -> busy (never false-negative working)"
+
+tmux kill-session -t "$work_sess" 2>/dev/null
 
 # --- GAP-7 (#9): an idle pane whose CONTENT mentions a "●" bullet and a "…"
 # ellipsis on one line, plus a "✻ Cooked for 5s" summary - the exact shapes that a
@@ -425,7 +455,7 @@ tmux kill-session -t "$ibmenu_sess" 2>/dev/null
 # layout: spinner/blank/rule/prompt/rule/footerA/footerB). Must read busy. ---
 ibspin_sess="timmy_t_ibspin_$$"
 tmux new-session -d -s "$ibspin_sess" -x 80 -y 24 \
-  "printf '${quoted_box}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+  "printf '${quoted_box}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
 sleep 0.5
 
 assert_state "$ibspin_sess" busy 10 "#10 quoted idle box above a real busy spinner -> busy"
@@ -463,7 +493,7 @@ tmux kill-session -t "$mqi_sess" 2>/dev/null
 # spinner (full working layout). Must read busy. ---
 mqs_sess="timmy_t_mqs_$$"
 tmux new-session -d -s "$mqs_sess" -x 80 -y 24 \
-  "printf '${quoted_menu}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+  "printf '${quoted_menu}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
 sleep 0.5
 
 assert_state "$mqs_sess" busy 10 "#10 frozen numbered list above a real busy spinner -> busy"
