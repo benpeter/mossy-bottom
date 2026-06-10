@@ -99,6 +99,20 @@ assert_state "$realspin_sess" busy 10 "#10 real bottom spinner with content abov
 
 tmux kill-session -t "$realspin_sess" 2>/dev/null
 
+# --- #10 REAL-LAYOUT busy (the gap that defeated fixed-K=6): the PRODUCTION busy-pane
+# bottom renders 6 rows BELOW the spinner - spinner / blank / rule / prompt / rule / footer
+# A / footer B - so the spinner sits 7 rows from the bottom. The structural prompt-anchor
+# must find it (skip the rule above the prompt and the blank, land on the spinner) and read
+# busy. A fixed K=6 tail excluded row 7 and read this live busy pane as IDLE. ---
+reallayout_sess="timmy_t_reallayout_$$"
+tmux new-session -d -s "$reallayout_sess" -x 80 -y 24 \
+  "printf '\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$reallayout_sess" busy 10 "#10 real production busy layout (spinner 7 rows up) -> busy"
+
+tmux kill-session -t "$reallayout_sess" 2>/dev/null
+
 # --- fixture: a selection menu (the trust gate shape, smoke-test.md section 9).
 # Numbered options with a cursor plus an "Enter to confirm" affordance line.
 menu_sess="timmy_t_menu_$$"

@@ -126,27 +126,56 @@ snapshot() { tmux capture-pane -p -t "$pane"; }
 #
 # LC_ALL=C keeps the match on literal UTF-8 bytes regardless of the caller's locale.
 #
-# BOTTOM-ANCHOR (#10): the live spinner renders in the bottom region of the pane, so the
-# SHAPE match above (unchanged) runs over ONLY the last SPINNER_TAIL_ROWS non-blank rows.
-# A spinner-shaped line higher in scrollback - a displayed report or diff that quotes a
-# glyph - then cannot SHADOW a real bottom state (reproduced live: a content "● Churning…
-# (esc…)" over a real idle box read busy). This constrains WHERE the cue looks, never
-# WHAT it matches, so the #9 shape gains (alt glyph, ASCII ellipsis, past-tense verb,
-# narrow wrap) are preserved by construction. K=6 covers a live spinner sitting just above
-# a standard 5-line input box while excluding a decoy separated from the bottom by content.
-# Residuals for later slices (no fixture exercises either): a decoy IMMEDIATELY above the
-# box (within K, no content between) is structurally identical to a real spinner and still
-# fires; an extreme narrow-wrapped box could push a real spinner past K rows from the
-# bottom (a false negative).
-readonly SPINNER_TAIL_ROWS=6
+# BOTTOM-ANCHOR (#10): the live spinner renders just above the input box, so we run the
+# SHAPE match above (unchanged) over a SINGLE structurally-selected line, not the whole
+# capture - so a spinner-shaped line higher in scrollback (a displayed report or diff that
+# quotes a glyph) cannot SHADOW a real bottom state. This constrains WHERE the cue looks,
+# never WHAT it matches, so the #9 shape gains (alt glyph, ASCII ellipsis, past-tense verb,
+# narrow wrap) are preserved by construction - the matcher below is byte-identical.
+#
+# A fixed bottom-row count was too fragile (the first cut at this used K=6 and live-missed
+# the STANDARD busy layout, whose spinner sits 7 rows up: spinner / blank / rule / prompt /
+# rule / footerA / footerB). So we anchor STRUCTURALLY on the real input box instead:
+#   - Find the bottom-most RULE-FENCED prompt: a "^❯" line whose first non-blank line above
+#     is a "───" rule (the box's top fence). The fence is what makes it the REAL input box,
+#     not a menu cursor ("❯ 1.") or a "❯" quoted in displayed content - those have no rule
+#     above them, so they are not mistaken for the prompt.
+#   - Walk UP from the top fence, skipping ONLY blank lines and "───" rules, and take the
+#     first line that is neither. That candidate is the live status line - the spinner when
+#     working, the closing content line otherwise. No footer/mode-wording dependency, so no
+#     #9/#10-class drift.
+#   - No rule-fenced prompt visible (a streaming pane, or a synthetic fixture with no box,
+#     or a working pane displaying menu source): fall back to the last non-blank line, where
+#     a live spinner renders.
+# The candidate (one line) is then tested by the exact #9 matcher.
+#
+# Residual for a later slice (no fixture exercises it): a decoy spinner sitting IMMEDIATELY
+# above the box fence with NO content between is structurally identical to a real spinner
+# and still fires. Closing that needs the input-region distinction the idle-box slice adds.
 has_spinner() {
   printf '%s\n' "$1" \
-    | LC_ALL=C awk -v K="${SPINNER_TAIL_ROWS}" '
+    | LC_ALL=C awk '
         { line[NR] = $0 }
         END {
           last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
-          lo = last - (K - 1); if (lo < 1) lo = 1
-          for (i = lo; i <= last; i++) print line[i]
+          if (last == 0) exit
+          prompt = 0
+          for (i = last; i >= 1; i--) {
+            if (line[i] !~ /^[ \t]*❯/) continue
+            j = i - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
+            if (j >= 1 && line[j] ~ /───/) { prompt = i; break }
+          }
+          cand = 0
+          if (prompt > 0) {
+            for (i = prompt - 1; i >= 1; i--) {
+              if (line[i] ~ /^[ \t]*$/) continue
+              if (line[i] ~ /───/) continue
+              cand = i; break
+            }
+          } else {
+            cand = last
+          }
+          if (cand > 0) print line[cand]
         }' \
     | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 }
