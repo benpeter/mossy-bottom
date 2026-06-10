@@ -2148,3 +2148,50 @@ inherits hot transferable evidence from context-read's bottom-anchoring. Handed
 report-first. Still open: #12 (binding GUARDRAILS sequencing half, escalated), #11
 (up-chain signals), #8 (launch-verify tracker - now also holding #14's live-boot
 residuals: first real self-compact firing, real-footer recapture, stale-id guard).
+
+## 2026-06-10 (post-compaction shaun, evening) - #10 CLOSED: all four timmy cues bottom-anchored
+
+**The classifier-robustness frontier is complete.** timmy's four state cues -
+spinner, idle-box, menu, question - now all key on the live bottom region near the
+input box, so scrollback content (a quoted box, a frozen numbered list, a stale
+question, a spinner glyph in a report) can no longer impersonate a real state. The
+hermetic real-tmux suite grew 28 -> 43 across the four slices, each cue pinned in
+both directions: a shadow-rejection fixture (the cue's shape in scrollback above a
+*different* real bottom state must yield the bottom state) plus its positive
+fixture, with every #9 shape-matcher fixture still green.
+
+**Four atomic slices, each timmy + test only:**
+- **spinner** (a97ba1d -> d3643bd) - a fixed-K tail proved too fragile and the
+  running chain caught it live: shirley's own real busy pane (a 6m Processing
+  spinner) read as *idle* under K=6, the worst failure mode (busy-as-idle freezes
+  the chain). Replaced with a structural prompt-anchor; the exact live layout is
+  now a green fixture.
+- **idle-box** (0dc302e) - also closed menu-masking and protected question-gating.
+- **menu** (31c154e) - a structural gate keyed on the real-bottom structures that
+  always render beneath a scrollback quote in a real Claude pane, not a row count,
+  so it is not K-fragile and live menus still fire.
+- **question** (9fafbe2) - pinned both directions; hardened footer chrome so a
+  reworded key-hint footer with the timer gone, below a real question, still reads
+  question (the false-negative that would freeze the chain), with an inverse guard
+  so the strip never fabricates a question from a statement.
+
+**The dogfood paid off twice.** Because the driver runs on the very classifier the
+worker edits, two defects a green hermetic suite missed were caught by the running
+chain: the spinner K=6 live false-negative (synthetic fixture modeled a shorter box
+than production), and - more valuable - the worker *corrected the driver's premise*.
+shaun briefed the idle-box slice expecting it to also close the decoy-above-fence
+residual "via the input-region distinction"; shirley refused, with a correct
+argument: `is_idle_box` fires for working panes too (both render the same bottom
+box), so the anchor separates box-vs-no-box but not settled-idle-vs-working - that
+is the spinner's job. She declined to ship a precedence trick that would
+false-negative working panes. The chain absorbed the correction instead of shipping
+a wrong fix.
+
+**close-and-spawn.** Closed #10 after confirming the proving commit on origin
+(#12 discipline). The one residual bottom-anchoring cannot resolve was spawned as
+**#17 (idle-vs-working discrimination, Robustness)**: separating a settled idle box
+from a working box needs a dedicated signal (a wide-pane idle suffix, or a
+diff-based double-capture), with acceptance that forbids working-pane
+false-negatives. The queue stays non-empty: #16 (Farmer's new context-hygiene
+policy - the systematic form of shaun/shirley between-slice compaction, pairing
+with closed #14), #17, #11 (coupled to escalated #12), #8, #12.

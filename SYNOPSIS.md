@@ -44,10 +44,17 @@ which chapter holds the detail.
 - **Frontier #15 (LaunchAgent heartbeat variant) - PARKED (draft).** Farmer-filed
   alternative mechanism (OS-level LaunchAgent vs #13's tmux window, which shaun
   reasoned against). Held as `draft` pending the Farmer's mechanism call.
-- **Frontier #10 (position-anchor timmy's cues) - in progress.** Bottom-anchors
-  each cue so scrollback content cannot shadow a real state. Slice 1 + corrective
-  landed: spinner cue moved to a structural prompt-anchor, replacing the fragile
-  K=6 heuristic (a97ba1d, d3643bd). Slice 2 (idle-box cue) queued.
+- **Frontier #10 (position-anchor timmy's cues) - CLOSED.** All four cues
+  bottom-anchored so scrollback content cannot shadow a real state: spinner
+  (structural prompt-anchor replacing fragile K=6: a97ba1d, d3643bd), idle-box
+  (0dc302e), menu (31c154e), question + footer-chrome hardening (9fafbe2).
+  Hermetic suite grew through 36+ fixtures. A deferred residual (idle box vs
+  working input box are not yet discriminated) was filed as frontier #17.
+- **Frontier #17 (idle-vs-working discrimination) - open.** timmy cannot yet
+  tell a settled idle box from a working input box; the #10 anchoring exposed it.
+- **Frontier #16 (context-hygiene policy) - open, next.** Farmer-directed:
+  compact shaun + shirley between slices, bitzer self-compacts often (80%
+  ceiling). Front of queue.
 
 Detail for all of the above lives in the live CHRONICLE.md and TICKS.md dated
 2026-06-10 (no rotation has occurred yet, so there is no dated archive chapter).
