@@ -221,32 +221,57 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
 
 Before you hand shirley NEW work - a next step (idle-at-prompt) or the next slice
 (claiming-done) - check the usage windows, so a weeks-long run never blows through the
-5-hour or weekly rate limit mid-task and instead pauses and auto-resumes on its own. Run
-the reader, then feed its output to the watchdog, both by control-plane path:
+5-hour or weekly rate limit mid-task and instead pauses and auto-resumes on its own.
 
-1. `gate="$(${MOSSY_REPO_DIR}/bin/usage-read.sh)"` - the reader prints the
-   `--5h <pct> --weekly <pct>` args the watchdog consumes. If it EXITS NONZERO (it
-   prints a `usage unavailable` line), do NOT run the watchdog - you have no numbers;
-   take the fail-safe path below.
-2. Otherwise `"${MOSSY_REPO_DIR}/bin/watchdog.sh" $gate` (the args must word-split, so
-   leave `$gate` unquoted - you are in bash). Branch on its exit code:
-   - **CLEAR (exit 0)** -> proceed: hand the next step/slice as normal.
-   - **PAUSE (exit 10)** -> do NOT hand new work. The watchdog printed an observable
-     signal line naming which window tripped, the current %, and the threshold - write
-     that line into a TICKS entry and a CHRONICLE entry so the pause is visible from the
-     outside, then HOLD: leave shirley idle and hand her nothing. On each `--await`
-     heartbeat (step 7), re-run this gate; resume handing work only when it returns
-     CLEAR again - meaning a new window has started and usage dropped back under. That
-     heartbeat re-check IS the auto-resume; there is no separate timer (the window's
-     reset time could tune the wait, but that is YAGNI - skip it).
+Some accounts have NO rolling usage window to wait out (API key / pay-as-you-go - no
+subscription). For those the gate is meaningless and a live fetch only returns junk to
+misread, so the gate FIRST asks `--plan-check` and short-circuits to CLEAR when there is
+no plan. Run the whole gate as ONE control-plane snippet (it must run under `bash -c` so
+`$gate` word-splits into the watchdog's flag args):
 
-**Fail-safe - fail OPEN.** If `usage-read.sh` fails (nonzero / `usage unavailable` -
-network, a 401 or expired token, malformed JSON, or jq absent), treat it as CLEAR and
-PROCEED, but log the `usage unavailable` line loudly into TICKS and CHRONICLE so the
-blind spot stays observable. Rationale: a fail-CLOSED gate that cannot read usage could
-never observe usage-dropped-under, so it would never auto-resume - it would stall the
-autonomous run forever, the opposite of this gate's purpose. The hard rate limit is the
-ultimate backstop if usage is genuinely exhausted.
+```sh
+bash -c '
+  bin="$MOSSY_REPO_DIR/bin"
+  "$bin/usage-read.sh" --plan-check; pc=$?
+  if [ "$pc" -eq 3 ]; then
+    echo "usage gate: CLEAR - no plan (usage gate not applicable)"; exit 0
+  fi
+  gate="$("$bin/usage-read.sh")" \
+    || { echo "usage gate: CLEAR - usage unavailable (fail-open)"; exit 0; }
+  # shellcheck disable=SC2086  # $gate MUST word-split into the watchdog flag args
+  "$bin/watchdog.sh" $gate
+'
+```
+
+`--plan-check` reads only the local creds file - no network, no token spend - and exits 3
+ONLY when it positively finds no subscription; every on-plan or ambiguous state exits 0 and
+falls through to today's reader+watchdog path unchanged. Branch on the snippet's exit code
+and the line it printed:
+
+- **no plan (exit 0, `CLEAR - no plan`)** -> the account has no subscription window; the
+  gate is not applicable. Proceed exactly as CLEAR, and do NOT fetch or run the watchdog.
+  The FIRST time a fresh you hits this in a session, write ONE quiet TICKS line -
+  `usage gate not applicable (no plan)` - then stay silent on it; do NOT repeat it every
+  tick (that is noise, not legibility). No CHRONICLE entry - this is a positive
+  "not applicable", not a blind spot.
+- **CLEAR (exit 0, `watchdog: CLEAR ...`)** -> proceed: hand the next step/slice as normal.
+- **PAUSE (exit 10)** -> do NOT hand new work. The watchdog printed an observable
+  signal line naming which window tripped, the current %, and the threshold - write
+  that line into a TICKS entry and a CHRONICLE entry so the pause is visible from the
+  outside, then HOLD: leave shirley idle and hand her nothing. On each `--await`
+  heartbeat (step 7), re-run this gate; resume handing work only when it returns
+  CLEAR again - meaning a new window has started and usage dropped back under. That
+  heartbeat re-check IS the auto-resume; there is no separate timer (the window's
+  reset time could tune the wait, but that is YAGNI - skip it).
+
+**Fail-safe - fail OPEN.** If the reader fails (the snippet prints `CLEAR - usage
+unavailable (fail-open)` - network, a 401 or expired token, malformed JSON, or jq absent),
+treat it as CLEAR and PROCEED, but log the `usage unavailable` line loudly into TICKS and
+CHRONICLE so the blind spot stays observable. Rationale: a fail-CLOSED gate that cannot read
+usage could never observe usage-dropped-under, so it would never auto-resume - it would
+stall the autonomous run forever, the opposite of this gate's purpose. The hard rate limit
+is the ultimate backstop if usage is genuinely exhausted. (A no-plan result is NOT this
+case - it is a positive "not applicable", logged once and quietly, not a blind spot.)
 
 ## Typing mechanics (established empirically in docs/smoke-test.md)
 
