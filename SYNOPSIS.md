@@ -70,5 +70,14 @@ which chapter holds the detail.
   whole chain at next launch (prompt edits are next-launch per inv.1). Close
   deferred to a fresh shaun now that the proving commits are on origin.
 
+- **Frontier #18 (barn.sh launch configurability) - COMPLETE (close pending).**
+  Generality. Made the harness safe to launch more than once on a host - the
+  exact friction that had forced a parallel boot script in the wild: configurable
+  primary window name (--window > MOSSY_WINDOW > mossy; heartbeat derived
+  <window>-hb, 99050a6), collision-safe creation that auto-suffixes instead of
+  aborting (4711daf), and a pre-role-prompt injection hook for global lines
+  (--inject / MOSSY_INJECT, live-path only, 86aff06). Close deferred to a fresh
+  shaun now that the proving commits are on origin.
+
 Detail for all of the above lives in the live CHRONICLE.md and TICKS.md dated
 2026-06-10 (no rotation has occurred yet, so there is no dated archive chapter).
