@@ -50,15 +50,41 @@ assert_state "$busy_sess" busy 10 "advancing pane classified busy"
 tmux kill-session -t "$busy_sess" 2>/dev/null
 
 # --- fixture: a STALLED pane - identical snapshots but a spinner is present.
-# Snapshot-diff alone would call this idle; the spinner cue must force busy.
+# Snapshot-diff alone would call this idle; the spinner cue must force busy. The
+# active spinner LINE carries its live counter in parens (e2 97 8f "●", e2 80 a6
+# "…", c2 b7 "·"): "● Whirring… (esc to interrupt · 1.2k tokens)".
 spin_sess="timmy_t_spin_$$"
 tmux new-session -d -s "$spin_sess" -x 80 -y 24 \
-  'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6\n"; sleep 600' 2>/dev/null
+  'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n"; sleep 600' 2>/dev/null
 sleep 0.5
 
 assert_state "$spin_sess" busy 10 "stalled frame with spinner classified busy"
 
 tmux kill-session -t "$spin_sess" 2>/dev/null
+
+# --- GAP-1a (#9): the same active spinner but with an ASCII three-dot ellipsis
+# "..." instead of the … glyph. The SHAPE cue must still read busy regardless of
+# how the ellipsis renders - else a working pane reads idle and gets interrupted. ---
+dots_sess="timmy_t_dots_$$"
+tmux new-session -d -s "$dots_sess" -x 80 -y 24 \
+  'printf "\xe2\x97\x8f Whirring... (esc to interrupt)\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$dots_sess" busy 10 "GAP-1a spinner with ASCII '...' ellipsis classified busy"
+
+tmux kill-session -t "$dots_sess" 2>/dev/null
+
+# --- GAP-1b (#9): an active spinner led by a DIFFERENT frame glyph than "●"
+# (here U+2736 "✶" = e2 9c b6) with a past-tense verb. Glyph- and verb-agnostic:
+# the shape (leading glyph + verb + ellipsis + counter) must still read busy. ---
+glyph_sess="timmy_t_glyph_$$"
+tmux new-session -d -s "$glyph_sess" -x 80 -y 24 \
+  'printf "\xe2\x9c\xb6 Cooked\xe2\x80\xa6 (3s)\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$glyph_sess" busy 10 "GAP-1b spinner with alt glyph + past-tense verb classified busy"
+
+tmux kill-session -t "$glyph_sess" 2>/dev/null
 
 # --- fixture: a selection menu (the trust gate shape, smoke-test.md section 9).
 # Numbered options with a cursor plus an "Enter to confirm" affordance line.
@@ -98,6 +124,21 @@ sleep 0.5
 assert_state "$ib_sess" idle 0 "genuine idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ib_sess" 2>/dev/null
+
+# --- GAP-7 (#9): an idle pane whose CONTENT mentions a "●" bullet and a "…"
+# ellipsis on one line, plus a "✻ Cooked for 5s" summary - the exact shapes that a
+# finished report can contain. The OLD bare "●.*…" cue false-fired busy on such a
+# line (it happened live to the operator's own instrument). The shape cue must read
+# idle: none of these is an active spinner LINE (the glyphs are mid-line content, the
+# summary has no immediate ellipsis or parenthesised counter). '⏺' = e2 8f ba. ---
+g7_sess="timmy_t_g7_$$"
+tmux new-session -d -s "$g7_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba Report: a \xe2\x97\x8f bullet and a \xe2\x80\xa6 ellipsis share one line of content.\n  \xe2\x9c\xbb Cooked for 5s - this summary glyph is inline prose, not a live spinner.\n  All checks complete.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$g7_sess" idle 0 "GAP-7 idle report with inline ● bullet and ✻ summary classified idle, not busy"
+
+tmux kill-session -t "$g7_sess" 2>/dev/null
 
 # A NARROW idle box (width 50): the mode line truncates before "← for agents"
 # (verified empirically against a live session: "...(shift+tab to cycle ·"). The
@@ -185,7 +226,7 @@ tmux kill-session -t "$nts_sess" 2>/dev/null
 w_sess="timmy_t_watch_$$"
 w_out="$(mktemp "${TMPDIR:-/tmp}/timmy-watch-XXXXXX")"
 tmux new-session -d -s "$w_sess" -x 80 -y 24 \
-  "printf 'IDLE-A\n'; sleep 2; printf '\xe2\x97\x8f Whirring\xe2\x80\xa6\n'; sleep 2; clear; printf 'IDLE-B\n'; sleep 600" 2>/dev/null
+  "printf 'IDLE-A\n'; sleep 2; printf '\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt)\n'; sleep 2; clear; printf 'IDLE-B\n'; sleep 600" 2>/dev/null
 sleep 0.5  # let IDLE-A paint before watch takes its first read
 
 "$timmy" --watch --pane "$w_sess" > "$w_out" 2>/dev/null &

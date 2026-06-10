@@ -101,11 +101,34 @@ esac
 
 snapshot() { tmux capture-pane -p -t "$pane"; }
 
-# A working session shows a spinner line: the bullet glyph, a rotating gerund,
-# and an ellipsis (smoke-test.md section 3, e.g. "● Whirring…"). The verb
-# rotates, so we match the stable SHAPE, not any one word. LC_ALL=C keeps the
-# match on the literal UTF-8 bytes regardless of the caller's locale.
-has_spinner() { printf '%s\n' "$1" | LC_ALL=C grep -qE '●.*…'; }
+# A working session shows an ACTIVE spinner LINE. We match its stable SHAPE
+# (smoke-test.md section 3: "the stable cue is the shape"), NOT any one glyph or
+# word, so the cue survives glyph rotation AND does not false-fire on content.
+# The shape, anchored to line start:
+#
+#   <frame-glyph> <verb><ellipsis> ... (<live counter>)
+#   e.g.  "● Whirring… (esc to interrupt · 1.2k tokens)"
+#
+#   - <frame-glyph>  one or more non-ASCII glyphs at line start ([^ -~], the
+#                    complement of printable ASCII under LC_ALL=C). Covers ●, ✻, ✶,
+#                    braille frames, and any future frame - glyph-agnostic. The ^
+#                    anchor is what stops a ● bullet sitting MID-line in prose from
+#                    matching (GAP-7): a content glyph is never the first thing on
+#                    its line (it follows "- ", "| ", text, ...).
+#   - <verb>         a single [A-Za-z]+ word, rotating freely (Whirring, Propagating,
+#                    Cooked, ...) - verb-agnostic.
+#   - <ellipsis>     the … glyph OR three ASCII dots ... - rendering-agnostic (GAP-1).
+#                    Required IMMEDIATELY after the verb, so multi-word prose ending in
+#                    an ellipsis ("Building the parser…") does NOT match.
+#   - <live counter> a parenthesised elapsed/token counter carrying "esc" or a digit.
+#                    This is what a finished/summary line lacks: "✻ Cooked for 5s" has
+#                    no immediate ellipsis and no parens, so it reads idle (GAP-7).
+#
+# LC_ALL=C keeps the match on literal UTF-8 bytes regardless of the caller's locale.
+has_spinner() {
+  printf '%s\n' "$1" | LC_ALL=C grep -qE \
+    '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
+}
 
 # A selection menu (smoke-test.md section 9) is a numbered-option cursor line
 # ("❯ 1.") together with an "Enter to confirm" affordance. Requiring both keeps
