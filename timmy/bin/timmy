@@ -130,12 +130,29 @@ has_spinner() {
     '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 }
 
-# A selection menu (smoke-test.md section 9) is a numbered-option cursor line
-# ("❯ 1.") together with an "Enter to confirm" affordance. Requiring both keeps
-# stray prose mentioning either phrase from tripping the detector.
+# A selection menu (smoke-test.md sections 1 and 9) is a NUMBERED OPTION LIST with a
+# cursor on one option:
+#   ❯ 1. Yes, I trust this folder
+#     2. No, exit
+#    Enter to confirm · Esc to cancel      <- affordance: wraps/varies, NOT relied on
+# We match the stable STRUCTURAL shape - a "❯ <n>" cursor line PLUS at least two
+# numbered-option lines at line start - NOT the "Enter to confirm" affordance, which
+# truncates mid-phrase on a narrow pane (GAP-2) and varies or is absent across menus
+# (GAP-3). Short cursor/option lines stay left-aligned and survive wrapping, so the
+# shape holds where the phrase does not.
+#
+# Menu-like TEXT in displayed content (source, a quoted menu) shares this shape, so the
+# false-positive guard is NOT here - it is classifier PRECEDENCE: an active spinner, a
+# settled idle box, and an advancing diff are all decided BEFORE menu, so this fires
+# only when the pane is genuinely static, not working, and not a settled box - which is
+# exactly a live menu (its "❯" carries an option number, so it is never the empty idle
+# box). The no-break space is normalised as elsewhere; LC_ALL=C matches literal bytes.
 has_menu() {
-  printf '%s\n' "$1" | LC_ALL=C grep -qE '❯ [0-9]' \
-    && printf '%s\n' "$1" | grep -q 'Enter to confirm'
+  local nbsp=$'\xc2\xa0' text opts
+  text="${1//$nbsp/ }"
+  printf '%s\n' "$text" | LC_ALL=C grep -qE '^[[:space:]]*❯[[:space:]]+[0-9]' || return 1
+  opts="$(printf '%s\n' "$text" | LC_ALL=C grep -cE '^[[:space:]]*(❯[[:space:]]+)?[0-9][.)]')"
+  [ "$opts" -ge 2 ]
 }
 
 # A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line
@@ -214,16 +231,22 @@ ends_in_question() {
 # nonzero if a capture fails. Both the single-shot path and --watch call THIS, so
 # the two modes can never drift apart - there is one classifier, not two.
 #
-# Precedence:
-#   1. a menu asks for a choice            -> waiting-input
-#   2. a spinner is present                -> busy
-#   3. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for
-#      the settled state, ABOVE the snapshot diff: a real idle box can still show
-#      transient boot chrome that makes two snapshots differ (proven against a
-#      live session), so the box overrides motion. Inside it, a trailing "?"
-#      means question, else idle.
-#   4. nothing to trust -> fall back to the snapshot diff (idle detector for
-#      panes we cannot positively identify): differ means busy, else idle.
+# Precedence (liveness is decided BEFORE the menu shape, which is how menu-like text in
+# displayed content is kept from firing - GAP-2/3 false-positive, hit live at 14:17):
+#   1. a spinner is present                -> busy. A working pane is never a menu, so
+#      this is checked first; it vetoes a menu shape sitting in the working pane's text.
+#   2. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for the
+#      settled state, ABOVE the snapshot diff: a real idle box can still show transient
+#      boot chrome that makes two snapshots differ (proven against a live session), so
+#      the box overrides motion. A live menu has no empty "❯" (its "❯" carries an option
+#      number), so a settled box and a menu are mutually exclusive. Inside it, a trailing
+#      "?" means question, else idle.
+#   3. the snapshots differ                -> busy. An advancing pane is working, not a
+#      static menu; deciding this before menu stops streamed numbered-list content from
+#      reading as a menu. A real selection menu waits for input, so it is static here.
+#   4. a numbered-option menu shape         -> waiting-input. Reached only when the pane
+#      is static, not working, and not a settled box - i.e. a genuine live menu.
+#   5. nothing to trust                     -> idle (the snapshot-diff idle case).
 classify_once() {
   local snap1 snap2
   snap1="$(snapshot)" || return 1
@@ -236,9 +259,7 @@ classify_once() {
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
 
-  if [ "$menu" = "true" ]; then
-    state="waiting-input"; code="$EXIT_WAITING"
-  elif [ "$spinner" = "true" ]; then
+  if [ "$spinner" = "true" ]; then
     state="busy"; code="$EXIT_BUSY"
   elif [ "$idle_box" = "true" ]; then
     if [ "$ends_q" = "true" ]; then
@@ -248,6 +269,8 @@ classify_once() {
     fi
   elif [ "$differ" = "true" ]; then
     state="busy"; code="$EXIT_BUSY"
+  elif [ "$menu" = "true" ]; then
+    state="waiting-input"; code="$EXIT_WAITING"
   else
     state="idle"; code="$EXIT_IDLE"
   fi

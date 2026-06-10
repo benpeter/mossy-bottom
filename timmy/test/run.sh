@@ -97,6 +97,46 @@ assert_state "$menu_sess" waiting-input 20 "selection menu classified waiting-in
 
 tmux kill-session -t "$menu_sess" 2>/dev/null
 
+# --- GAP-2 (#9) false-NEGATIVE: a REAL selection menu on a NARROW pane (width 14),
+# where the "Enter to confirm" affordance WRAPS mid-phrase. The old phrase-based cue
+# missed this (verified live); the structural shape - the "❯ <n>" cursor plus >=2
+# numbered options, all short and left-aligned - survives the wrap. A miss here is the
+# dangerous direction (a menu read as idle -> a driver types into the trust gate). ---
+mnar_sess="timmy_t_mnar_$$"
+tmux new-session -d -s "$mnar_sess" -x 14 -y 24 \
+  'printf "\xe2\x9d\xaf 1. Yes\n  2. No\n Enter to confirm \xc2\xb7 Esc to cancel\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$mnar_sess" waiting-input 20 "GAP-2 narrow real menu (affordance wraps) classified waiting-input"
+
+tmux kill-session -t "$mnar_sess" 2>/dev/null
+
+# --- GAP-3 (#9) false-NEGATIVE: a REAL menu with ALTERNATE/absent affordance wording -
+# no "Enter to confirm" phrase at all (a permission-style prompt). The shape (cursor +
+# numbered options) must still classify waiting-input regardless of the affordance text. ---
+malt_sess="timmy_t_malt_$$"
+tmux new-session -d -s "$malt_sess" -x 80 -y 24 \
+  'printf "\xe2\x9d\xaf 1. Allow this command\n  2. Deny\n  3. Always allow\n  Use arrow keys, then press return to choose\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$malt_sess" waiting-input 20 "GAP-3 real menu with alternate wording classified waiting-input"
+
+tmux kill-session -t "$malt_sess" 2>/dev/null
+
+# --- GAP-2 (#9) false-POSITIVE, the 14:17 case: a WORKING pane whose CONTENT is
+# displaying the menu-detection source itself - "❯ 1." and "Enter to confirm" sit in the
+# text - while an active spinner runs at the bottom. The old menu-first precedence read
+# this as waiting-input (an obey-the-classifier driver would have injected a stray menu
+# answer into a working session). Spinner-before-menu precedence must read it BUSY. ---
+mfp_sess="timmy_t_mfp_$$"
+tmux new-session -d -s "$mfp_sess" -x 80 -y 24 \
+  'printf "\xe2\x8f\xba Editing has_menu: it keyed on \xe2\x9d\xaf 1. and the Enter to confirm line.\n  \xe2\x9d\xaf 1. Yes, I trust this folder\n    2. No, exit\n  Enter to confirm \xc2\xb7 Esc to cancel\n\xe2\x97\x8f Churning\xe2\x80\xa6 (esc to interrupt \xc2\xb7 2k tokens)\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$mfp_sess" busy 10 "GAP-2 working pane displaying menu source (14:17 case) classified busy, not menu"
+
+tmux kill-session -t "$mfp_sess" 2>/dev/null
+
 # A genuine Claude idle box: empty "❯" box fenced by rules, mode line ending in
 # the "← for agents" suffix (smoke-test.md section 2). The two fixtures below
 # differ only in whether the last assistant ("⏺") line ends in a question mark.
@@ -139,6 +179,20 @@ sleep 0.5
 assert_state "$g7_sess" idle 0 "GAP-7 idle report with inline ● bullet and ✻ summary classified idle, not busy"
 
 tmux kill-session -t "$g7_sess" 2>/dev/null
+
+# --- GAP-2 (#9) false-POSITIVE, settled variant: an IDLE pane (genuine "⏵⏵" box) whose
+# CONTENT quotes a full menu - cursor line, numbered options, and an "Enter to confirm"
+# line. The old menu-first precedence read this as waiting-input; the settled idle box is
+# decided before the menu shape, so it must read idle. (The "❯" in the quoted menu carries
+# an option number, so it is not the empty input box - box and menu stay distinct.) ---
+mci_sess="timmy_t_mci_$$"
+tmux new-session -d -s "$mci_sess" -x 100 -y 30 \
+  "printf '\xe2\x8f\xba The menu cue keys on \xe2\x9d\xaf 1. plus an Enter to confirm line:\n  \xe2\x9d\xaf 1. Yes, I trust this folder\n    2. No, exit\n  Enter to confirm \xc2\xb7 Esc to cancel\n  Done reviewing the menu cue.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$mci_sess" idle 0 "GAP-2 idle pane quoting a full menu in content classified idle, not menu"
+
+tmux kill-session -t "$mci_sess" 2>/dev/null
 
 # A NARROW idle box (width 50): the mode line truncates before "← for agents"
 # (verified empirically against a live session: "...(shift+tab to cycle ·"). The
