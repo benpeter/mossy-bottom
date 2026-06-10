@@ -32,10 +32,22 @@ which chapter holds the detail.
   fix: gate issue-close on the proving commit being on origin (85e0607). The
   binding-invariant half is escalated to the Farmer (GUARDRAILS sequencing),
   pending decision (ESCALATIONS 2026-06-10 19:09).
-- **Frontier #13 (durable autonomous heartbeat) - in progress.** Replaces the
-  session-cron stopgap with a harness-native heartbeat raised by `barn.sh up`,
-  no silent expiry, survives restarts. Slice A (standalone timmy-gated trigger,
-  bin/heartbeat.sh) landed (64ca23f); Slice B (barn.sh up wiring) in flight.
+- **Frontier #13 (durable autonomous heartbeat) - CLOSED.** Replaced the
+  session-cron stopgap with a harness-native heartbeat: standalone timmy-gated
+  trigger bin/heartbeat.sh (64ca23f) raised by `barn.sh up` in a background
+  window (741aaa7), no silent expiry, survives a bitzer REPL restart. Proven
+  launch-free via --plan.
+- **Frontier #14 (bitzer self-compaction) - CLOSED.** Bakes the self-compact
+  stopgap into the prompt: position/shape-anchored pane-context detector
+  (970990e) plus a curated self-compact wired into bitzer.md, gated on that
+  detector and fail-closed (c5af4b3). A future bitzer inherits it at next launch.
+- **Frontier #15 (LaunchAgent heartbeat variant) - PARKED (draft).** Farmer-filed
+  alternative mechanism (OS-level LaunchAgent vs #13's tmux window, which shaun
+  reasoned against). Held as `draft` pending the Farmer's mechanism call.
+- **Frontier #10 (position-anchor timmy's cues) - in progress.** Bottom-anchors
+  each cue so scrollback content cannot shadow a real state. Slice 1 + corrective
+  landed: spinner cue moved to a structural prompt-anchor, replacing the fragile
+  K=6 heuristic (a97ba1d, d3643bd). Slice 2 (idle-box cue) queued.
 
 Detail for all of the above lives in the live CHRONICLE.md and TICKS.md dated
 2026-06-10 (no rotation has occurred yet, so there is no dated archive chapter).
