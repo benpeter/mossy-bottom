@@ -1647,3 +1647,375 @@ launch-verified close. Their runtime only fully proves when the evolved harness 
 relaunched against a real authored target - an act outside this live run's authority and
 forbidden to fake from within it. That relaunch, or a new milestone, is the Farmer's next
 move. shaun and shirley are on standby at a clean boundary. Run 2 ends here.
+
+## 2026-06-10 13:36 - Run 3 kickoff; usage gate fails launch-verification on first live boot (issue #8)
+
+**What shirley did.** Booted from an empty session, received the Opening directive,
+oriented correctly on the constraints (smallest provable slice, prove via
+shellcheck/bash -n/hermetic test/shown diff, bin/+prompts/ only, no root state, no
+nested chains), and idled asking for the issue.
+
+**What evidence.** The live queue holds one open non-draft issue, #8
+("Launch-verify the evolved harness at runtime"), which explicitly inherits the
+launch-verification debt of #1-#7 - structurally proven, never booted. Before
+handing work I ran the usage gate for the first time against a real boot. The
+reader (bin/usage-read.sh) exited 0 but printed `--5h 900 --weekly 300`; the
+watchdog then returned PAUSE, naming 5h at 900% >= 80% and weekly at 300% >= 85%.
+
+**What I did, and why.** I did NOT hold on that PAUSE. 900% and 300% cannot be real
+`utilization*100` percentages, and both panes were responding instantly - we are
+provably not rate-limited. I classified the output as malformed and applied the
+gate's documented fail-OPEN posture: proceed, but log the blind spot loudly (this
+TICKS+CHRONICLE pair). Rationale, grounded in the gate's own design: a gate frozen
+at an impossible 900% would read 900% on every heartbeat and never observe
+usage-dropped-under, so it would never auto-resume - it would stall the autonomous
+run forever on tick 1, the precise failure fail-open exists to prevent. And the
+work I handed IS the gate fix, so proceeding cannot blow through a real limit
+mid-task. This is a genuine launch-verification finding, exactly what #8 is for.
+
+I also re-confirmed the zsh-vs-bash artifact: the gate's `$gate` args only
+word-split under bash; the Bash tool's outer zsh passes them as one token and the
+watchdog rejects it. I run the gate inside `bash -c` accordingly.
+
+**Slice handed.** Diagnose why the freshly-booted usage reader emits >100% values
+and fix it in bin/usage-read.sh, proven launch-free over the existing --parse
+fixtures plus corrected output - no token-spending live call (mirrors run-2's
+no-live-GET ruling; if she finds the live path is required, she reports it as a
+blocker and I rule/escalate). Names the Safety + Robustness qualities.
+
+## 2026-06-10 13:42 - usage-gate fix accepted on live evidence; #8 stays open
+
+**What shirley did.** Fixed the boot defect in bin/usage-read.sh and committed
+5216777. Root cause she found: the parser multiplied utilization by 100 assuming a
+0..1 fraction (a run-2 belief from static binary-string inspection, never validated
+live); the live endpoint actually returns utilization as a 0..100 percentage, so
+9.0/3.0 double-scaled to 900/300. She dropped the x100, rounded in place, and
+proved it launch-free over the --parse fixture path (boot-defect shape ->
+--5h 9 --weekly 3, at-threshold, decimals, weekly fallback, unavailable/exit-nonzero
+paths). She correctly left CHRONICLE/TICKS untouched and unstaged, and flagged a
+residual: the fetcher path was still structural-only, the live key assumption
+unvalidated, the fix confirmed only against reconstructed 9.0/3.0 data.
+
+**What evidence (mine, independent).** git show: 5216777 touches only
+bin/usage-read.sh (11+/6-); the only dirty tree files are my own CHRONICLE/TICKS.
+Then the decisive test - I re-ran the gate live (operating my own instrument):
+usage-read.sh exit 0 printing `--5h 10 --weekly 3`, watchdog CLEAR exit 0. The 5h
+value moved 9 -> 10 between my two runs, which only happens if the reader is hitting
+the live endpoint and reflecting real usage. So the live fetch path works, returns
+the expected five_hour/seven_day shape, and parses to sane sub-100% values.
+
+**What I did, and why.** Accepted the slice on that fresh visible evidence. My live
+operation also resolved most of shirley's residual: the fetcher is no longer
+structural-only - it executed and returned the right shape. I did NOT close #8: it
+is a broad launch-verification frontier (dogfood control-plane, rotation/SYNOPSIS,
+bitzer push, one end-to-end slice; plus the whole target-mode pass), and only the
+usage-gate bullet is proven. Per close-and-spawn, an issue with unproven slices left
+is not closed - the queue is not empty, so no new frontier is filed either.
+
+**Next slice handed.** The target-mode pass is entirely unexercised and serves the
+weakest live quality right now (Generality - drive any target, state in
+<target>/.mossy/). Provable launch-free via barn.sh's --plan mode: assert state
+resolves to <target>/.mossy/ by absolute path and the .mossy/ gitignore escape
+hatch behaves as documented. Hermetic, no nested live chain. Gate was CLEAR before
+handing.
+
+## 2026-06-10 13:47 - target-mode path resolution accepted (prove-it, no commit)
+
+**What shirley did.** A pure verification slice for #8's target-mode pass: ran
+barn.sh up against a scratch mktemp target under --plan (with
+MOSSY_CLAUDE=/bin/echo to satisfy the harmless claude-binary resolution that never
+runs under --plan) and asserted, across seven checks, that state resolves to
+<target>/.mossy/ by absolute path, all three pane cwds are the target, MOSSY_REPO_DIR
+stays the control-plane repo, and --plan writes no .mossy to disk. Nothing changed
+in bin/; no commit. She flagged a self-caught fixture bug (her expected string had a
+trailing-slash $TMPDIR; barn's cd && pwd normalizes to one slash - barn was right,
+she re-ran clean) and named what is still unproven: the .mossy/ gitignore
+escape-hatch and a real live write of .barn-panes into <target>/.mossy/.
+
+**What evidence (mine, independent).** I re-ran barn.sh up <mktemp-target> --plan
+myself. The plan reported the state files at
+<target>/.mossy/MISSION.md and <target>/.mossy/GUARDRAILS.md - absolute paths into
+the target's .mossy - and ls showed no .mossy directory was created on disk. That
+independently confirms both the path-resolution contract and the launch-free
+property. Accepted on that visible output.
+
+**What I did, and why.** Accepted. Did not close #8 - the target-mode bullet is only
+partly proven (resolution yes; gitignore escape-hatch and live write not yet), and
+the dogfood bullets (rotation/SYNOPSIS, end-to-end) remain. Queue not empty, so no
+new frontier filed. Gate CLEAR before handing.
+
+**Next slice handed.** Verify the .mossy/ gitignore escape-hatch behaves as
+documented - the remaining launch-free piece of the target-mode Generality bullet.
+Inspect what the harness documents about keeping .mossy/ out of the target's git,
+then prove the actual behavior with git check-ignore in a throwaway git repo.
+Hermetic, no live boot.
+
+## 2026-06-10 13:51 - ruled on the .mossy/ escape-hatch divergence; close-the-gap slice handed
+
+**What shirley did.** Investigated the .mossy/ gitignore escape-hatch and found a
+genuine divergence between the documented promise and the mechanism. Scenario A
+(target nested inside this harness repo): the repo's own .gitignore has `.mossy/`,
+so .mossy/ is ignored at any depth and the root state files stay tracked - the
+escape hatch is real. Scenario B (an external standalone git target, which IS the
+target-mode Generality use case): nothing in the shipped harness installs a .mossy/
+ignore rule, so git check-ignore .mossy/ fails and .mossy/ shows untracked - it
+would be swept into the target's history by a naive add. She confirmed barn.sh has
+zero ignore handling, reported the divergence, and stopped before any change, asking
+for direction.
+
+**What evidence (mine, independent).** I reproduced Scenario B in a throwaway
+git init'd repo: git check-ignore -v .mossy/ -> exit 1 (no matching rule), git
+status --porcelain -> `?? .mossy/`. Finding confirmed. I also validated the fix
+mechanism: appending `.mossy/` to that repo's .git/info/exclude flipped
+check-ignore to exit 0 and removed .mossy/ from status - a local-only ignore that
+never touches a tracked file or the target's history.
+
+**What I ruled, and why.** Close the gap. Generality (drive any target project) and
+Safety (the target's history stays clean) are both named MISSION qualities, and the
+doc promises an unconditional clean-history guarantee; the mechanism must deliver it
+for external targets too, not just nested ones. This is within #8's target-mode
+bullet and the MISSION vision, so it is my direction to give - no escalation, no new
+scope, no policy change. I chose .git/info/exclude over the target's tracked
+.gitignore deliberately: it is non-invasive (local, never committed), so the harness
+never mutates a tracked file in someone else's repo.
+
+**Slice handed.** barn.sh seeds `.mossy/` into the external target's
+.git/info/exclude on `up` - idempotent (no double-append), skips a target that is
+not a git repo, and must not disturb the nested-target case. Proven launch-free /
+hermetic against a throwaway git repo with git check-ignore + git status; no nested
+live chain. She owns the implementation seam (I do not read her source).
+
+## 2026-06-10 13:58 - escape-hatch seeding accepted; doc-completeness slice next
+
+**What shirley did.** Committed 62970f1: extracted a seed_target_exclude seam in
+bin/barn.sh, called once per real target-mode up (after preflight/mkdir, before any
+tmux/claude spawn, never under --plan), that appends `.mossy/` to an external
+target's .git/info/exclude. Proof table: external target ignored after seed,
+idempotent, non-git target a no-op, Scenario A (nested target) a pure no-op with the
+repo's own .git/info/exclude SHA byte-unchanged, source-guard so sourcing runs no
+main. Staged only bin/barn.sh. She flagged a follow-up: docs/target-split.md's
+escape-hatch section still describes only the .gitignore pattern, not the new
+seeding - the promise is now true for external targets but the doc doesn't say how.
+
+**What evidence (mine, independent, black-box).** I re-ran the observable behavior
+in a throwaway external git repo I control. Sourcing barn.sh ran no spawn
+(confirming the source-guard) but did export its set -euo pipefail into my shell, so
+I set +eu afterward. Results: before seed check-ignore exit 1 and `?? .mossy/`;
+after seed `.git/info/exclude:7:.mossy/`, check-ignore exit 0, git status shows only
+README (no .mossy/); re-seeding leaves exactly one .mossy/ line (idempotent); a
+non-git target returns exit 0 and writes nothing. Matches her table exactly. Commit
+scope confirmed bin/barn.sh only (name-only; I did not read the diff).
+
+**What I did, and why.** Accepted on that evidence. Did not close #8. Its remaining
+bullets are either bitzer's machinery (rotation/SYNOPSIS trigger, milestone push,
+remote-current) or inherently a relaunch act (a real `barn.sh up <external-target>`
+boot where the chain drives a target - forbidden in-chain as a nested live chain,
+and the Farmer's to do at relaunch, exactly as run 2's closing note observed). The
+remaining in-chain-doable piece is the doc gap.
+
+**Next slice handed.** docs/target-split.md escape-hatch section: document the new
+.git/info/exclude seeding so the doc explains how the (now unconditional) clean-
+history promise is delivered for external targets, while keeping the nested-target
+.gitignore description. Serves Legibility. Launch-free: shown diff; the mechanism it
+describes is already verified. Single-file scope, conventional commit.
+
+## 2026-06-10 14:02 - doc slice accepted; #8 in-chain work exhausted; frontier #9 spawned (Robustness)
+
+**What shirley did.** Committed 640c381: reconciled docs/target-split.md's
+escape-hatch section with the shipped mechanism, splitting by target kind (nested ->
+tracked .gitignore; external -> .git/info/exclude seeding; dogfood -> root record
+tracked) and renaming the heading off "gitignore" since the external path uses
+info/exclude. Single-file, ASCII-clean.
+
+**What evidence (mine).** Commit scope confirmed docs/target-split.md only
+(name-only). Style: pure ASCII, no em/en dashes or smart quotes (GUARDRAILS inv.8).
+I read the escape-hatch section (a doc is repo narrative, the Legibility quality I
+own, not shirley's source) and checked each clause against behavior I had already
+verified independently last tick - nested match-at-depth, external local-only
+seeding, idempotency, non-git skip, already-ignored skip (the Scenario-A no-op),
+dogfood root record tracked. No overclaim; promise and mechanism match.
+
+**What I did, and why.** Accepted. Then ran close-and-spawn. I did NOT close #8: its
+two remaining bullets (rotation/SYNOPSIS + milestone push; a real external
+target-mode boot) are bitzer's machinery or a relaunch act, not in-chain builder
+slices - so #8 stays open as the live launch-verification tracker, and I posted a
+checkbox comment making the verified-vs-pending state legible for the Farmer
+(issue #8 comment). Because no shirley-workable slice remains in the open queue, I
+derived the next frontier per the never-done rule: picked Robustness (the weakest
+high-leverage quality - timmy is the single classifier the whole event-driven loop
+depends on, and the live TUI has already shown verb rotation and width sensitivity)
+and filed it as issue #9, naming the quality. Gate CLEAR before handing.
+
+**Next slice handed.** #9 first slice, report-first (mirrors run-2's
+investigate-before-build): audit timmy's current robustness and fixture coverage
+across the four liveness states x TUI-wording variants x pane widths, and report the
+gaps before any change. No edits this slice - a legibility/investigation report.
+
+## 2026-06-10 14:09 - timmy audit accepted; ruled the spinner-cue hardening (GAP-1 + live GAP-7)
+
+**What shirley did.** Delivered the #9 report-first audit: eight gaps (GAP-1..8)
+rated by severity, with GAP-1a/1b confirmed by live demo (a working pane
+misclassified as idle when the spinner uses a non-● glyph or ASCII "..." instead of
+the Unicode ellipsis), and a prioritized hardening recommendation, explicitly
+deferring the direction to me. Her anchor is smoke-test.md §3: classification must
+be judgment on the stable shape, not a fixed glyph - timmy honors that for the verb
+but still hard-codes the glyphs around it.
+
+**What evidence (mine).** While reading her report, timmy itself misclassified: it
+returned busy / spinner:true on her completed, idle report (snapshots_differ:false,
+yet busy). I settled liveness the fallback way - two captures 3s apart were
+byte-identical and the mode line ended with the idle suffix "· ← for agents" - so
+she is idle. That is a live instance of GAP-7 (the spinner regex false-matching a
+● bullet or the ✻ summary line in content), which she had rated only LOW. It is not
+theoretical; it just happened to my own instrument.
+
+**What I ruled, and why.** Hardening starts with the spinner/working cue, and I
+folded GAP-7 into the GAP-1 slice rather than taking GAP-1 alone. They are inverse
+failure modes of the SAME cue: GAP-1 misses real spinners (working -> idle, so shaun
+would interrupt a working slice), GAP-7 false-matches content (idle -> busy, so
+shaun sleeps through an idle pane). Broadening the glyph match to fix GAP-1 without
+addressing GAP-7 would worsen the false-positive - and GAP-7 is now confirmed live.
+The coherent fix is to make the cue shape-based (an active-spinner LINE shape:
+leading frame glyph + gerund + an elapsed/token counter), catching real spinners
+regardless of glyph or ellipsis style while not matching a stray ●/✻ in report text.
+Both directions pinned by regression fixtures. GAP-2..6,8 are separate later slices.
+
+**Operational note.** Editing timmy mutates my live classifier (it is re-invoked
+fresh each tick, unlike prompts which load at session start). I will keep the
+two-snapshot liveness fallback ready during this slice in case a transient edit
+leaves timmy briefly broken - the role's documented fallback, just exercised above.
+
+**Slice handed.** Make timmy's spinner/working detection shape-based: fix GAP-1
+(catch real spinners regardless of glyph/ellipsis) and GAP-7 (do not false-match
+report content), with hermetic fixtures for both failure directions. Gate CLEAR
+before handing.
+
+## 2026-06-10 14:20 - shape-based spinner cue accepted; menu cue (GAP-2/3) is next, with live evidence
+
+**What shirley did.** Committed 05b09ae: replaced timmy's ●-specific spinner regex
+with a shape-based cue - leading frame glyph anchored at line start ([^ -~]+ with a ^
+anchor), any single verb, the ellipsis as either the … glyph or ASCII ..., and a
+required parenthesised live counter (esc/digit). The ^ anchor and counter-gate are
+the GAP-7 fix (a content bullet is never first on its line and a summary line has no
+counter); the glyph/verb/ellipsis agnosticism is the GAP-1 fix. She argued GAP-1
+isn't regressed: an animating spinner trips the snapshot-diff backstop anyway, so
+has_spinner only needs to catch the stalled frame, which keeps its last counter.
+Fixtures 16 -> 19, both directions pinned, 2 stale counter-less fixtures updated to
+the realistic counter-bearing form. Honest residual: a very narrow pane that wraps
+the counter onto the next line could miss a STALLED spinner (an animating one still
+diff-catches) - bounded by the out-of-scope narrow-pane work.
+
+**What evidence (mine, independent).** Commit scope confirmed: timmy/bin/timmy and
+timmy/test/run.sh only. I ran the hermetic suite myself: 19 passed, 0 failed,
+including GAP-1a (ASCII ...) -> busy, GAP-1b (alt glyph + past-tense verb) -> busy,
+GAP-7 (idle report with inline ● and ✻) -> idle. shellcheck clean, bash -n clean on
+both. And the live proof on my own instrument: the new timmy classified the current
+idle pane - which displays ✻ and ● in her report - as idle, exactly where the old
+cue false-fired busy at 14:09.
+
+**What I did, and why.** Accepted on suite + live evidence. Did not close #9 -
+GAP-2..6,8 remain. Picked GAP-2/3 (menu cue) as the next slice because I now have
+live evidence it is real and dangerous, not inspection-only: at 14:17 timmy returned
+waiting-input (menu:true) while shirley was actively working, because her pane was
+displaying the menu-detection source (which literally contains `❯ 1.` and
+"Enter to confirm"). The trust rule saved me - I judged working from the live
+spinner in the tail and did not type - but a less careful obey-the-classifier driver
+would have injected a stray menu answer into her working session. The menu cue has
+both failure modes: false-positive on menu-like content (what I hit) and
+false-negative on a narrow/alt-wording real menu (GAP-2/3) - and the real menu is
+the trust-gate moment where shaun must not act blind. Same shape-based treatment as
+the spinner cue. Gate CLEAR before handing.
+
+**Slice handed.** Harden has_menu both directions: recognize a real selection menu
+robustly across narrow panes and alternate/absent affordance wording (GAP-2/3
+false-negatives), and do NOT fire on menu-like strings sitting in displayed content
+(the live false-positive). Hermetic fixtures for both directions, including a
+reconstruction of the displayed-menu-source pane that fooled timmy at 14:17.
+
+## 2026-06-10 14:42 - shape-based menu cue accepted (incl the 14:17 case); question cue is next
+
+**What shirley did.** Committed c08421d: a shape-based menu cue plus liveness-first
+precedence. The menu cue now leans on the structural shape of a real selection menu
+rather than the contiguous "Enter to confirm" phrase, so it tolerates narrow-pane
+wrap and alternate wording; and busy/working now takes precedence over a menu match,
+so a working pane whose content merely displays menu-like strings reads busy, not
+waiting-input. Fixtures 19 -> 23. Honest boundary left (per my instruction): a
+frozen-mid-stream numbered list with no spinner could still shape-match a menu;
+closing that needs bottom-anchoring/position work overlapping the narrow-pane slice,
+so she left it rather than forcing it.
+
+**What evidence (mine, independent).** Commit scope: timmy/bin/timmy and
+timmy/test/run.sh only. I ran the hermetic suite: 23 passed, 0 failed, and grepped
+the menu cases - both directions are pinned: GAP-2 narrow real menu and GAP-3
+alternate-wording real menu both classify waiting-input; and the false-positive
+direction includes a reconstruction of the exact 14:17 pane (a working pane
+displaying the menu source) classifying busy, plus an idle pane quoting a full menu
+classifying idle. shellcheck and bash -n clean. Live: the new timmy classifies the
+current pane - which contains menu strings in my prompt and her report - as idle, no
+false fire.
+
+**Operational note (timmy broken mid-edit, resolved).** From ~14:25 to ~14:42 timmy
+errored `nbsp: unbound variable` because shirley was mid-edit on the very file my
+loop invokes each tick. I fell back to two-snapshot liveness + a timer poll (the
+role's documented fallback), typed nothing off the broken classifier, and waited;
+the moment her fix committed, timmy ran clean again and I resumed. The driver's
+instrument being transiently broken by its own builder is a real exposure of the
+self-modifying loop - the fallback covered it, but it is worth a future frontier
+(pin a known-good timmy at slice start, or stage timmy edits so the running driver
+never sees a half-written file). Logged as a data point in TICKS 14:28.
+
+**What I did, and why.** Accepted. Did not close #9 (GAP-4/5/6/8 question-path gaps
+and the narrow-pane bottom-anchoring boundary remain). Picked the question cue as the
+next slice: it is the last untreated cue, and GAP-4 (question x width) is the most
+dangerous remaining gap - a real question on a narrow pane degrades to idle, so shaun
+would fail to surface shirley's blocker to bitzer. Gate CLEAR before handing.
+
+**Slice handed.** Harden the question cue, shape-based, both directions: a real
+closing question must survive narrow-pane timer wrap (GAP-4), timer glyph/wording
+drift (✻ / "for Ns", GAP-5), and a missing ⏵⏵ idle-box marker (GAP-6); and a genuine
+closing question containing a "·" must not be stripped as chrome (GAP-8) - while
+non-question chrome footers must still not false-fire (already partly covered).
+Hermetic fixtures both directions; GAP-4/5/6/8 only.
+
+## 2026-06-10 15:00 - question cue accepted; frontier #9 complete and closed; #10 filed; shaun STANDBY(context)
+
+**What shirley did.** Committed f476c95: a shape-based question cue. Chrome is now
+identified by shape signatures (rule / Tip: / key-hint tokens / a glyph-led elapsed
+timer line) rather than by the fragile "contains ·" test; the timer signature is
+glyph-agnostic and not end-anchored; and the idle-box detector gained corroborating
+cues beyond ⏵⏵. Fixtures 23 -> 28. Honest edge-of-edge residuals flagged (a
+sparkle-led question carrying an elapsed token; a radically reworded key-hint footer
+shadowing a question with the timer gone - the bottom-anchoring cross-cut).
+
+**What evidence (mine, independent).** Commit scope: timmy/bin/timmy and
+timmy/test/run.sh only. I ran the suite: 28 passed, 0 failed; GAP-4 (narrow wrap),
+GAP-5 (alt timer glyph/wording), GAP-6 (⏵⏵-absent box), GAP-8 (· in a real question)
+all classify question, and the GAP-8 guard keeps ·-chrome at idle - both directions.
+shellcheck and bash -n clean. The non-ASCII bytes in the committed files are
+functional TUI glyphs the classifier matches and the fixtures embed, not decorative
+diagrams, so GUARDRAILS inv.8 is satisfied.
+
+**Milestone.** All four timmy cues - spinner, menu, idle box, question - are now
+shape-based and pinned in both directions, the suite grew 16 -> 28 across three
+single-file slices (05b09ae, c08421d, f476c95), and every one of the eight gaps from
+the #9 audit is fixed. Two of the defects were caught LIVE by the running chain
+(the GAP-7 spinner false-positive and the GAP-2/3 menu false-positive on shaun's own
+instrument), and the trust rule plus the snapshot/timer fallback kept the driving
+correct throughout, including a window where shirley's mid-edit left timmy
+transiently broken.
+
+**Close-and-spawn.** #9 met its acceptance terms, so I closed it with an
+evidence-citing comment (verification made legible for the Farmer - the three
+commits, the cue-by-cue fixes, the 28/0 suite). Because #8's remainder is
+bitzer/relaunch territory (no builder slice), I filed the follow-up frontier #10 -
+position-anchoring/bottom-anchoring so displayed content cannot shadow a real state,
+the Robustness cross-cut shirley flagged twice - so the queue keeps a workable
+builder slice. I did NOT hand its first slice and did NOT run the usage gate: I am
+standing by here.
+
+**Why STANDBY(context).** This is an unusually clean boundary - a completed frontier,
+shirley idle on a proven slice, the next frontier filed and unstarted. I am ~25 ticks
+into one turn; protecting context lightness is the experiment's core, and the next
+arc's decisions are better made by a fresh shaun than a context-heavy one. The files
+hold the memory. Rehydration: MISSION + GUARDRAILS in full, then the TICKS/CHRONICLE
+tails (no SYNOPSIS yet - no rotation has happened, so the fallback applies).
