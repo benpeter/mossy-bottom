@@ -53,9 +53,21 @@ check runs before any `mkdir`, so an unauthored target gets no stray `.mossy`).
 `MOSSY_STATE_DIR`, panes-file path - plus a non-blocking preflight readiness line. It
 launches nothing, so it is safe to inspect a target before its state is authored.
 
-## The `.mossy/` gitignore escape hatch
+## The `.mossy/` escape hatch
 
-`.mossy/` is gitignored so a target project keeps a clean history - the harness's
-per-run bookkeeping does not show up in the target's commits. The pattern matches any
-`.mossy/` at any depth, including test targets nested inside this repo. The dogfood run
-record lives at the repo ROOT, not under `.mossy/`, so it stays tracked.
+A target project keeps a clean history: the harness's per-run `.mossy/` bookkeeping
+never shows up in the target's commits. How that is enforced depends on where the
+target lives, because git ignore rules do not cross repo boundaries.
+
+- **Target nested inside this repo** (e.g. a test target): this repo's tracked
+  `.gitignore` carries a `.mossy/` rule that matches at any depth, so any nested
+  `.mossy/` is ignored. No per-run action is needed.
+- **External target repo**: this repo's `.gitignore` has no reach into a separate git
+  repo, so on `up` barn seeds `.mossy/` into the target's LOCAL `.git/info/exclude`.
+  That file is local-only - never committed - so barn never touches a tracked file in
+  someone else's repo. The seed is idempotent (it never appends `.mossy/` twice across
+  repeated `up`s), is skipped when the target is not a git repo (nothing to exclude),
+  and is skipped when `.mossy/` is already ignored.
+
+The dogfood run record lives at the repo ROOT, not under `.mossy/`, so it stays
+tracked; dogfood needs neither mechanism.
