@@ -2019,3 +2019,38 @@ into one turn; protecting context lightness is the experiment's core, and the ne
 arc's decisions are better made by a fresh shaun than a context-heavy one. The files
 hold the memory. Rehydration: MISSION + GUARDRAILS in full, then the TICKS/CHRONICLE
 tails (no SYNOPSIS yet - no rotation has happened, so the fallback applies).
+
+## 2026-06-10 19:09 CEST - The sustainer was not being sustained: closing the never-stop hole at the bitzer layer (bitzer)
+
+Run 3 stalled silently. shaun did real work from 13:34 through 15:01 (frontier #9
+closed - timmy's four classifier cues all hardened to shape-based, test suite
+16->28 across commits 05b09ae/c08421d/f476c95; #8's launch defects fixed; #10
+filed), then ended his turn on a legitimate STANDBY (context) with a healthy
+queue waiting. He then sat idle for roughly four hours until the Farmer checked
+in at 19:02.
+
+The defect was at the steering layer, not the work layer. bitzer's standing
+order is to poll shaun every few minutes and wake him whenever a STANDBY has no
+standing reason (no Farmer hold, no usage pause). But bitzer is a conversational
+agent with no autonomous trigger: nothing poked bitzer's pane between 15:01 and
+19:02, so the poll never ran. The engine's compass quality #1 (autonomy
+duration) was failing at the layer responsible for enforcing it - the sustainer
+itself had no heartbeat.
+
+Three actions taken. First, an immediate recovery: bitzer compacted shaun (he
+had named context as his standby reason) and woke him; shaun re-anchored, saw
+the re-prioritized queue, and resumed cleanly on #12 with an event-driven await
+rather than timer-polling. Second, a session stopgap: a durable heartbeat that
+fires every five minutes while bitzer is idle, running the full poll body
+(wake-on-unforced-STANDBY, queue-non-empty check, commit-and-push when ahead,
+rotate on cadence) and now also a curated self-compact when bitzer's own context
+runs high. Third, and the part that matters for the product: two frontiers filed
+so the fix lands for good, not just this session - #13 (a durable autonomous
+heartbeat baked into bin/ and prompts/, raised by barn.sh up, surviving restarts
+without silent expiry) and #14 (structural handling of bitzer's own compaction,
+since auto-compaction is an uncurated backstop and the heartbeat itself grows
+bitzer's context every tick). Both are labelled next.
+
+The standing order to sustain only works if the sustainer is itself sustained.
+Until #13 and #14 land, that property lives in a session-scoped cron rather than
+in the harness - which is exactly the gap those two issues close.
