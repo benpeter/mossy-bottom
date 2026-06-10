@@ -2,8 +2,8 @@
 # heartbeat.test.sh - hermetic, launch-free test for the #20 stuck-shaun recovery branch in
 # bin/heartbeat.sh. No claude: we drive `heartbeat.sh --once` against REAL throwaway tmux
 # panes whose content is canned, with --panes pointed at a fake .barn-panes and the shaun
-# fingerprint at a temp path. The fixture panes ignore SIGINT and re-sleep, so they survive
-# the wake's C-c and we can assert the wake text landed. Panes torn down on exit.
+# fingerprint at a temp path. The wake is now a plain trigger + Enter (no C-c, slice 4), so the
+# fixtures are plain sleep panes - they need not survive an interrupt. Torn down on exit.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -29,10 +29,10 @@ no() { printf 'FAIL - %s\n' "$1"; fail=$((fail + 1)); }
 # A genuine idle box (timmy -> idle); the same shape the timmy/stuck-check suites use.
 idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/t | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'
 
-# make_fixture <sess> <printf-content> - a pane that ignores INT and re-sleeps (so it survives
-# the wake's C-c), showing the canned content. Records the session for teardown.
+# make_fixture <sess> <printf-content> - a plain pane showing the canned content (the wake no
+# longer sends C-c, so no interrupt-survival shim is needed). Records the session for teardown.
 make_fixture() {
-  tmux new-session -d -s "$1" -x 80 -y 24 "trap '' INT; printf '$2'; while :; do sleep 600; done" 2>/dev/null
+  tmux new-session -d -s "$1" -x 80 -y 24 "printf '$2'; sleep 600" 2>/dev/null
   sessions="$sessions $1"
   sleep 0.5
 }

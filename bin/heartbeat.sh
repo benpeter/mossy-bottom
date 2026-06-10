@@ -141,16 +141,16 @@ send_trigger() {
   tmux send-keys -t "$1" Enter
 }
 
-# wake_shaun <pane> - a stuck-recovery wake that lands cleanly even if a malformed tool-call
-# fragment is sitting in shaun's input line: CLEAR the line (C-u) and cancel any partial state
-# (C-c) FIRST, then send the distinct stuck-recovery trigger (literal text, a beat, a separate
-# Enter, per the smoke-test send mechanics). The trigger re-anchors shaun; he continues per
-# shaun.md - we carry no copy of his procedure.
+# wake_shaun <pane> - mirror the proven-safe MANUAL recovery: a plain wake (trigger text +
+# Enter). A live stuck turn (observed 2026-06-11) emits the malformed tool call as OUTPUT and
+# ENDS the turn, leaving the input line EMPTY - so no interrupt is needed, and bitzer recovered
+# it with exactly this plain wake. We keep only a leading C-u: a harmless readline line-clear,
+# cheap insurance should a future variant leave a partial input line. We deliberately do NOT
+# send C-c: its interrupt/exit semantics against a real Claude TUI are unverified and could be
+# unsafe. The trigger re-anchors shaun; he continues per shaun.md - we carry no copy of it.
 wake_shaun() {
   local pane="$1"
   tmux send-keys -t "$pane" C-u
-  tmux send-keys -t "$pane" C-c
-  sleep 0.3
   tmux send-keys -l -t "$pane" -- "$STUCK_TRIGGER"
   sleep 0.5
   tmux send-keys -t "$pane" Enter
