@@ -390,6 +390,59 @@ assert_state "$shspin_q_sess" question 30 "#10 content spinner above a real ques
 
 tmux kill-session -t "$shspin_q_sess" 2>/dev/null
 
+# A QUOTED idle box as scrollback CONTENT (a full box - rule/❯/rule/footer - displayed in
+# a report, e.g. smoke-test.md). It has its own empty "❯", which the old is_idle_box fired
+# on from anywhere. The #10 anchor must reject it as the input box (it has real content
+# below it), so it cannot shadow the real bottom state. '%%' -> literal '%'.
+quoted_box='  (a displayed report quotes a full idle box:)\n  \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  \xe2\x9d\xaf\n  \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/quoted | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n  (end of the quoted box)\n'
+
+# --- #10 idle-box POSITIVE (real production box height): a REAL idle box at the very
+# bottom with substantial content above it -> idle. Models the real box (rule/❯/rule/
+# footerA/footerB), not a short stub. ---
+ibreal_sess="timmy_t_ibreal_$$"
+tmux new-session -d -s "$ibreal_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Here is a long report from the last turn.\n  line two of the report.\n  line three.\n  all settled now.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ibreal_sess" idle 0 "#10 real idle box at bottom with content above -> idle"
+
+tmux kill-session -t "$ibreal_sess" 2>/dev/null
+
+# --- #10 SHADOW-REJECTION (the menu-masking case, reproduced in the audit): a quoted idle
+# box in scrollback ABOVE a real MENU at the bottom. The old cue fired idle_box on the
+# quote and read idle (a driver would type INTO the menu); the anchor rejects the quote, so
+# the menu wins -> waiting-input. ---
+ibmenu_sess="timmy_t_ibmenu_$$"
+tmux new-session -d -s "$ibmenu_sess" -x 80 -y 24 \
+  "printf '${quoted_box}  a REAL permission menu is now live below:\n\xe2\x9d\xaf 1. Yes, I trust this folder\n  2. No, exit\n Enter to confirm \xc2\xb7 Esc to cancel\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ibmenu_sess" waiting-input 20 "#10 quoted idle box above a real menu -> waiting-input, not idle"
+
+tmux kill-session -t "$ibmenu_sess" 2>/dev/null
+
+# --- #10 SHADOW-REJECTION: a quoted idle box ABOVE a real BUSY spinner (the full working
+# layout: spinner/blank/rule/prompt/rule/footerA/footerB). Must read busy. ---
+ibspin_sess="timmy_t_ibspin_$$"
+tmux new-session -d -s "$ibspin_sess" -x 80 -y 24 \
+  "printf '${quoted_box}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ibspin_sess" busy 10 "#10 quoted idle box above a real busy spinner -> busy"
+
+tmux kill-session -t "$ibspin_sess" 2>/dev/null
+
+# --- #10 SHADOW-REJECTION: a quoted idle box ABOVE a real QUESTION at the bottom. The real
+# bottom question box must win (question gated on idle-box, protected by the anchor). ---
+ibq_sess="timmy_t_ibq_$$"
+tmux new-session -d -s "$ibq_sess" -x 80 -y 24 \
+  "printf '${quoted_box}\xe2\x8f\xba Should I proceed with the merge?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$ibq_sess" question 30 "#10 quoted idle box above a real question -> question"
+
+tmux kill-session -t "$ibq_sess" 2>/dev/null
+
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
 # lines in that order, with NO duplicate while a state is held. The pane holds

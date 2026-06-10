@@ -205,24 +205,46 @@ has_menu() {
   [ "$opts" -ge 2 ]
 }
 
-# A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line
-# fenced by "─" rules, with a "⏵⏵ ... (shift+tab to cycle)" mode line below. The
-# empty "❯" prompt is the MOST stable cue, but it is not enough alone (a bare "❯"
-# also appears as plain content), so we corroborate it. We do NOT corroborate on the
-# "⏵⏵" marker ALONE (GAP-6): that marker is version- and permission-mode-specific, and
-# keying question detection solely on it means a changed marker silently degrades a
-# real question to idle. Instead any ONE of three box cues suffices - the "⏵⏵" marker,
-# a "───" rule fence, or the "shift+tab" mode hint - so the box (and the question state
-# that rides on it) survives a changed/absent "⏵⏵". The "←  for agents" suffix is NOT
-# used: it truncates first on a narrow pane.
+# A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line fenced by
+# "─" rules, with a footer/mode line below it. The empty "❯" is the MOST stable cue, but
+# an empty "❯" also appears in displayed CONTENT (a quoted box in scrollback), and the old
+# any-empty-"❯"-anywhere test let such a quote SHADOW the real bottom state - so a real
+# menu (or diff-busy) below a quoted box read idle (#10, reproduced live).
+#
+# BOTTOM-ANCHOR (#10): the live input box renders at the bottom, so we recognise it only
+# THERE. The box is the bottom-most empty "❯" that is (a) rule-fenced - its first non-blank
+# line above is a "───" rule - and (b) has ONLY box-chrome below it to the bottom (rules,
+# the footer/mode line, blanks). A quoted box in scrollback fails (b): it has real content
+# (the live menu, more output) below it, so it is not mistaken for the input box. A real
+# box passes both. The "───" fence IS the GAP-6 corroborator, so a box with a changed or
+# absent "⏵⏵" marker is still recognised by its rule fence. This fires for BOTH idle and
+# working panes (both render the input box); distinguishing those is the spinner's job, so
+# spinner stays precedence step 1 - this anchor only stops a SCROLLBACK quote from firing.
 is_idle_box() {
-  # Claude renders the empty input line as "❯" + a U+00A0 NO-BREAK SPACE, which
-  # grep's [[:space:]] does NOT reliably match (verified live). Normalise the
-  # no-break space to a plain space in-shell (locale-independent) before testing.
+  # Claude renders the empty input line as "❯" + a U+00A0 NO-BREAK SPACE, which grep's
+  # [[:space:]] does NOT reliably match (verified live). Normalise it to a plain space.
   local nbsp=$'\xc2\xa0' text
   text="${1//$nbsp/ }"
-  printf '%s\n' "$text" | LC_ALL=C grep -qE '^❯[[:space:]]*$' \
-    && printf '%s\n' "$text" | LC_ALL=C grep -qE '⏵⏵|───|shift\+tab'
+  printf '%s\n' "$text" | LC_ALL=C awk '
+    { line[NR] = $0 }
+    function isboxchrome(s) {
+      return (s ~ /^[ \t]*$/ || s ~ /───/ \
+        || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| /)
+    }
+    END {
+      last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+      if (last == 0) exit 1
+      # bottom-most empty prompt
+      box = 0
+      for (i = last; i >= 1; i--) if (line[i] ~ /^❯[ \t]*$/) { box = i; break }
+      if (box == 0) exit 1
+      # (a) rule-fenced: first non-blank line above is a ─── rule
+      j = box - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
+      if (j < 1 || line[j] !~ /───/) exit 1
+      # (b) only box-chrome below it to the bottom (a quoted box has real content below)
+      for (k = box + 1; k <= last; k++) if (!isboxchrome(line[k])) exit 1
+      exit 0
+    }'
 }
 
 # Does the assistant's final message end in a question? Multi-line turns only prefix
