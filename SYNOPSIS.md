@@ -50,8 +50,18 @@ which chapter holds the detail.
   (0dc302e), menu (31c154e), question + footer-chrome hardening (9fafbe2).
   Hermetic suite grew through 36+ fixtures. A deferred residual (idle box vs
   working input box are not yet discriminated) was filed as frontier #17.
-- **Frontier #17 (idle-vs-working discrimination) - open.** timmy cannot yet
-  tell a settled idle box from a working input box; the #10 anchoring exposed it.
+- **Frontier #17 (idle-vs-working discrimination) - CLOSED.** Added a
+  wide-pane-only settled-idle suffix override with precedence over the spinner,
+  so a decoy spinner above a settled idle box reads idle (7a7f6ba); suite 43->45.
+  The narrow-pane case is left as a documented residual (the safe direction),
+  tracked under #8.
+- **Frontier #19 (usage gate skip when not on a plan) - CLOSED.** Farmer-
+  directed. usage-read.sh gained --plan-check, which exits 3 only on a valid
+  creds file positively showing no subscription (f822dc0); the gate in shaun.md
+  skips the watchdog on that signal, and anything ambiguous falls to the normal
+  fail-open path so an on-plan account is never mis-skipped (ed52a4a). Takes
+  effect at next launch. The undocumented API-only creds shape rides in a fixture,
+  to be confirmed at #8 launch-verify against a real account.
 - **Frontier #16 (context-hygiene policy) - COMPLETE (close pending).** Farmer-
   directed, built in three layers and dogfooded end to end: shirley compacted at
   every slice boundary, threshold demoted to backstop (5ee5cd2); bitzer proactive
