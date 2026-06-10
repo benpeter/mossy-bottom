@@ -217,6 +217,31 @@ preflight_state() {
   return 1
 }
 
+# seed_target_exclude <target> - keep the target repo's history clean of the harness's
+# per-run .mossy/ state. The doc promises an unconditional clean-history guarantee, but
+# this repo's tracked .gitignore only reaches targets NESTED inside it - an external
+# target repo has its own git and would show .mossy/ as untracked. So on a real up we
+# write ".mossy/" into the target git repo's LOCAL exclude (.git/info/exclude): local-only,
+# never committed, so barn never mutates a tracked file in someone else's repo. No-ops
+# three ways, in order:
+#   - target is not a git repo         -> nothing to exclude, return 0
+#   - .mossy/ is already ignored       -> a nested target (this repo's .gitignore) or a
+#                                         prior seed already covers it; touch nothing
+#   - .mossy/ already in info/exclude  -> idempotent; never append a second line
+seed_target_exclude() {
+  local target="$1" gitdir exclude
+  gitdir="$(git -C "${target}" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  if git -C "${target}" check-ignore -q .mossy 2>/dev/null; then
+    return 0
+  fi
+  exclude="${gitdir}/info/exclude"
+  if [ -f "${exclude}" ] && grep -qxF '.mossy/' "${exclude}"; then
+    return 0
+  fi
+  mkdir -p "${gitdir}/info"
+  printf '.mossy/\n' >>"${exclude}"
+}
+
 # cmd_resolve [<target>] - dry-run: print resolution and launch nothing.
 cmd_resolve() {
   local resolved target state_dir
@@ -262,6 +287,13 @@ cmd_up() {
   preflight_state "${state_dir}" || exit 1
 
   mkdir -p "${state_dir}"
+
+  # Target mode only: keep the external target's git history clean of our per-run .mossy/
+  # via its LOCAL exclude (never its tracked .gitignore). Dogfood (state_dir == REPO_ROOT)
+  # skips - the repo root is not a .mossy/, and this repo already tracks-ignores .mossy/.
+  if [ "${state_dir}" != "${REPO_ROOT}" ]; then
+    seed_target_exclude "${target}"
+  fi
 
   local session
   session="$(resolve_session)"
@@ -391,4 +423,8 @@ main() {
   esac
 }
 
-main "$@"
+# Run main only when executed, not when sourced (lets tests exercise seams like
+# seed_target_exclude directly). Byte-identical to before when run as a script.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi
