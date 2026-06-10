@@ -482,6 +482,55 @@ assert_state "$mqm_sess" waiting-input 20 "#10 quoted menu above a real live men
 
 tmux kill-session -t "$mqm_sess" 2>/dev/null
 
+# --- #10 question SHADOW-REJECTION: a question shape in SCROLLBACK above a real idle box
+# whose own last turn is a STATEMENT. ends_in_question anchors on the bottom-most box and
+# the LAST turn, so the scrollback question does not make it read question -> idle. ---
+qshadow_idle_sess="timmy_t_qshadow_idle_$$"
+tmux new-session -d -s "$qshadow_idle_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Should I proceed with the risky thing?\n  (older output scrolled up)\n\xe2\x8f\xba All settled now.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$qshadow_idle_sess" idle 0 "#10 question in scrollback above a real idle box (statement) -> idle"
+
+tmux kill-session -t "$qshadow_idle_sess" 2>/dev/null
+
+# --- #10 question SHADOW-REJECTION: a question shape in SCROLLBACK above a real BUSY
+# spinner (full working layout). Spinner wins -> busy, not question. ---
+qshadow_busy_sess="timmy_t_qshadow_busy_$$"
+tmux new-session -d -s "$qshadow_busy_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Should I proceed?\n\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$qshadow_busy_sess" busy 10 "#10 question in scrollback above a real busy spinner -> busy"
+
+tmux kill-session -t "$qshadow_busy_sess" 2>/dev/null
+
+# --- #10 question RESIDUAL (the issue's named false-negative): a real closing question
+# with the timer GONE and a RADICALLY REWORDED key-hint footer below it (none of #9's known
+# hint phrases: "↵ to select · esc to dismiss"). Question detection must NOT depend on the
+# footer wording or the timer - the "·"-hint-separator (not ending in "?") marks the footer
+# as chrome by shape, so the question above it still wins. '↵' = e2 86 b5. ---
+qreword_sess="timmy_t_qreword_$$"
+tmux new-session -d -s "$qreword_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Here are the options I see.\n  Which approach do you prefer?\n\n  \xe2\x86\xb5 to select \xc2\xb7 esc to dismiss\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$qreword_sess" question 30 "#10 reworded key-hint footer, timer gone, below a real question -> question"
+
+tmux kill-session -t "$qreword_sess" 2>/dev/null
+
+# --- #10 question RESIDUAL guard (inverse): the same reworded "·" hint footer below a
+# STATEMENT must NOT fabricate a question - stays idle. Proves the "·"-not-"?" footer strip
+# does not turn a statement into a question. ---
+qreword_guard_sess="timmy_t_qrewordg_$$"
+tmux new-session -d -s "$qreword_guard_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba All four states are wired up now.\n\n  \xe2\x86\xb5 to select \xc2\xb7 esc to dismiss\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$qreword_guard_sess" idle 0 "#10 reworded '·' hint footer below a statement -> idle, not question"
+
+tmux kill-session -t "$qreword_guard_sess" 2>/dev/null
+
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
 # lines in that order, with NO duplicate while a state is held. The pane holds

@@ -306,6 +306,11 @@ ends_in_question() {
       if (t ~ /^Tip:/) return 1
       if (t ~ /esc to interrupt|shift\+tab|ctrl\+|to show todos|to cycle|for agents/) return 1
       if (t ~ /^[^ -~]/ && t !~ /^⏺/ && t ~ /[0-9][smh]/) return 1
+      # A hint footer joins its key/action pairs with "·", whatever the specific words, and
+      # never ends in "?". So a "·"-bearing line that is NOT a question is a footer - this
+      # catches a reworded/timer-gone key-hint footer without depending on its wording, while
+      # a genuine "·"-bearing question (GAP-8) ends in "?" and is kept as content.
+      if (t ~ /·/ && t !~ /\?$/) return 1
       return 0
     }
     END {
