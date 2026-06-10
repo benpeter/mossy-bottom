@@ -2,21 +2,22 @@
 #
 # barn.sh - raise the Mossy Bottom deference chain in one tmux window.
 #
-# Creates a `mossy` window with three panes - bitzer | shaun | shirley, left to
-# right - boots an interactive Claude Code session in each, records the immutable
-# pane ids in .barn-panes, and delivers role prompts to shaun and bitzer.
-# shirley gets NOTHING: her first prompt comes from shaun. That asymmetry is the
-# experiment.
+# Creates a primary window (default `mossy`, override with --window or MOSSY_WINDOW)
+# with three panes - bitzer | shaun | shirley, left to right - boots an interactive
+# Claude Code session in each, records the immutable pane ids in .barn-panes, and
+# delivers role prompts to shaun and bitzer. shirley gets NOTHING: her first prompt
+# comes from shaun. That asymmetry is the experiment.
 #
-# It also raises a separate background window (`mossy-hb`) running bin/heartbeat.sh, the
+# It also raises a separate background window (`<window>-hb`, default `mossy-hb`) running
+# bin/heartbeat.sh, the
 # sustain trigger (#13): on a cadence it nudges bitzer's pane to run his sustaining poll,
 # so an idle run does not stall waiting for a human. The window lives in the same session,
 # so it is reaped by kill-session with the chain and survives a bitzer relaunch.
 #
 # Usage:
-#   bin/barn.sh up [--plan] [<target-repo>]   raise the chain (no target = dogfood)
+#   bin/barn.sh up [--plan] [--window <name>] [<target-repo>]   raise the chain (no target = dogfood)
 #   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
-#   bin/barn.sh relaunch [--plan] <role> [<target>]  respawn one pane
+#   bin/barn.sh relaunch [--plan] [--window <name>] <role> [<target>]  respawn one pane
 #
 # --plan prints the exact spawn plan (the -c <cwd> and injected MOSSY_STATE_DIR each
 # pane would get) and exits without creating or launching anything - a launch-free
@@ -40,6 +41,8 @@
 #   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
 #   MOSSY_CLAUDE        path to the claude binary (default: resolved from PATH)
 #   MOSSY_SHIRLEY_DIR   shirley's working directory (default: <repo>/timmy)
+#   MOSSY_WINDOW        primary tmux window name (default: "mossy"); --window overrides it.
+#                       The heartbeat window is always derived as <window>-hb.
 #
 # tva
 set -euo pipefail
@@ -48,13 +51,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TIMMY_DIR="${REPO_ROOT}/timmy"
 SHIRLEY_DIR="${MOSSY_SHIRLEY_DIR:-${TIMMY_DIR}}"
-WINDOW="mossy"
+# Primary window name: env-or-default here; a per-subcommand --window flag overrides it
+# (flag > MOSSY_WINDOW > "mossy"). HB_WINDOW is derived from it, below and after any flag.
+WINDOW="${MOSSY_WINDOW:-mossy}"
 
 # The sustain heartbeat (#13) runs in its OWN background window of the same session, so
 # it lives and dies with the chain (kill-session reaps it - no separate teardown) and is
 # independent of bitzer's pane process (it survives a bitzer relaunch). Cadence is
 # overridable via MOSSY_HEARTBEAT_SECS; the default matches the "every few minutes" poll.
-HB_WINDOW="mossy-hb"
+HB_WINDOW="${WINDOW}-hb"
 HB_SECS="${MOSSY_HEARTBEAT_SECS:-300}"
 
 # The interactive `claude` shell wrapper force-adds flags and can nest tmux;
@@ -80,6 +85,13 @@ shaun_boot() {
 bitzer_boot() {
   local state_dir="$1"
   printf '%s' "You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read ${REPO_ROOT}/prompts/bitzer.md, then ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm ${state_dir}/MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
+}
+
+# apply_window <name> - a --window flag wins over MOSSY_WINDOW and the default; re-derive
+# the heartbeat window as <window>-hb so the pair always stays in lockstep.
+apply_window() {
+  WINDOW="$1"
+  HB_WINDOW="${WINDOW}-hb"
 }
 
 resolve_session() {
@@ -277,7 +289,13 @@ cmd_resolve() {
 
 cmd_up() {
   local plan=0
-  if [ "${1:-}" = "--plan" ]; then plan=1; shift; fi
+  while [ $# -gt 0 ]; do
+    case "${1:-}" in
+      --plan) plan=1; shift ;;
+      --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
+      *) break ;;
+    esac
+  done
   local resolved target state_dir panes_file
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
@@ -297,6 +315,7 @@ cmd_up() {
     printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
     printf '  env      MOSSY_REPO_DIR=%s  (all three panes)\n' "${REPO_ROOT}"
     printf '  panes    %s\n' "${panes_file}"
+    printf '  window     %s (primary)\n' "${WINDOW}"
     printf '  heartbeat  window %s (background) -> %s\n' "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
     if state_authored "${state_dir}"; then
       printf '  preflight MISSION.md + GUARDRAILS.md present - up would boot\n'
@@ -392,7 +411,13 @@ EOF
 
 cmd_relaunch() {
   local plan=0
-  if [ "${1:-}" = "--plan" ]; then plan=1; shift; fi
+  while [ $# -gt 0 ]; do
+    case "${1:-}" in
+      --plan) plan=1; shift ;;
+      --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
+      *) break ;;
+    esac
+  done
   local role="${1:-}"
   case "${role}" in
     bitzer | shaun | shirley) ;;
