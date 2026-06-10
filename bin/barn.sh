@@ -8,6 +8,11 @@
 # shirley gets NOTHING: her first prompt comes from shaun. That asymmetry is the
 # experiment.
 #
+# It also raises a separate background window (`mossy-hb`) running bin/heartbeat.sh, the
+# sustain trigger (#13): on a cadence it nudges bitzer's pane to run his sustaining poll,
+# so an idle run does not stall waiting for a human. The window lives in the same session,
+# so it is reaped by kill-session with the chain and survives a bitzer relaunch.
+#
 # Usage:
 #   bin/barn.sh up [--plan] [<target-repo>]   raise the chain (no target = dogfood)
 #   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
@@ -44,6 +49,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TIMMY_DIR="${REPO_ROOT}/timmy"
 SHIRLEY_DIR="${MOSSY_SHIRLEY_DIR:-${TIMMY_DIR}}"
 WINDOW="mossy"
+
+# The sustain heartbeat (#13) runs in its OWN background window of the same session, so
+# it lives and dies with the chain (kill-session reaps it - no separate teardown) and is
+# independent of bitzer's pane process (it survives a bitzer relaunch). Cadence is
+# overridable via MOSSY_HEARTBEAT_SECS; the default matches the "every few minutes" poll.
+HB_WINDOW="mossy-hb"
+HB_SECS="${MOSSY_HEARTBEAT_SECS:-300}"
 
 # The interactive `claude` shell wrapper force-adds flags and can nest tmux;
 # bypass it by calling the binary directly and clearing the wrapper's toggle.
@@ -192,6 +204,17 @@ launch_cmd() {
   printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' %s" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
 }
 
+# heartbeat_cmd <state_dir> - the bin/heartbeat.sh command for the background heartbeat
+# window. It carries the same MOSSY_STATE_DIR / MOSSY_REPO_DIR as the panes (so it reads
+# THIS run's .barn-panes and finds timmy) plus the resolved cadence. Single source for
+# both the real spawn and the --plan preview, so the plan cannot drift from what up runs.
+# Paths single-quoted to survive spaces. No claude binary - it is a vanilla tmux+sleep
+# loop, so it does not go through launch_cmd.
+heartbeat_cmd() {
+  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' MOSSY_HEARTBEAT_SECS=%s '%s/bin/heartbeat.sh'" \
+    "$1" "${REPO_ROOT}" "${HB_SECS}" "${REPO_ROOT}"
+}
+
 # state_authored <state_dir> - true iff both Farmer-authored state files are present.
 # Reads only (test -f); creates nothing.
 state_authored() {
@@ -274,6 +297,7 @@ cmd_up() {
     printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
     printf '  env      MOSSY_REPO_DIR=%s  (all three panes)\n' "${REPO_ROOT}"
     printf '  panes    %s\n' "${panes_file}"
+    printf '  heartbeat  window %s (background) -> %s\n' "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
     if state_authored "${state_dir}"; then
       printf '  preflight MISSION.md + GUARDRAILS.md present - up would boot\n'
     else
@@ -331,6 +355,15 @@ cmd_up() {
     printf 'shirley=%s\n' "${shirley}"
   } >"${panes_file}"
 
+  # Raise the sustain heartbeat (#13) in its own background window of the same session,
+  # AFTER .barn-panes exists (the heartbeat reads it). Detached (-d) so the Farmer's view
+  # is not stolen; remain-on-exit so an unexpected exit stays visible rather than silently
+  # closing the window. Kill any stale same-name window first so a re-up never leaves two
+  # heartbeats racing. It is reaped by kill-session with the rest of the chain.
+  tmux kill-window -t "${session}:${HB_WINDOW}" 2>/dev/null || true
+  tmux new-window -d -t "${session}" -n "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
+  tmux set-option -w -t "${session}:${HB_WINDOW}" remain-on-exit on
+
   echo "barn: panes -> bitzer=${bitzer} shaun=${shaun} shirley=${shirley}"
   echo "barn: booting claude in each pane..."
   boot_pane "${bitzer}" bitzer || true
@@ -352,6 +385,7 @@ barn: up in session '${session}', window '${WINDOW}'.
   pane cwds:     bitzer=${bitzer_cwd}  shaun=${shaun_cwd}  shirley=${shirley_cwd}
   state env:     MOSSY_STATE_DIR=${state_dir}  (all three panes)
   repo env:      MOSSY_REPO_DIR=${REPO_ROOT}  (all three panes)
+  heartbeat:     window '${HB_WINDOW}' nudges bitzer every ${HB_SECS}s (lives and dies with the session)
   relaunch one:  bin/barn.sh relaunch <bitzer|shaun|shirley> [<target>]
 EOF
 }
