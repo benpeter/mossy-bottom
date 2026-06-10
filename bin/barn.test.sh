@@ -41,6 +41,13 @@ new_scratch_repo() {
 # count exact ".mossy/" lines in a file (0 if the file is absent).
 count_mossy() { if [ -f "$1" ]; then grep -cxF '.mossy/' "$1"; else echo 0; fi; }
 
+# plan_cwd <plan-text> <role> - the "-c <cwd>" a --plan line prints for a role.
+# A plan line is "  <role>   -c <cwd>", so awk's $3 is the cwd (test paths have no spaces).
+plan_cwd() { awk -v r="$2" '$1==r{print $3}' <<<"$1"; }
+# plan_env <plan-text> <KEY> - the value of KEY= on the "  env  KEY=<val>" line. Anchored to
+# the env line ($1=="env") so it never picks up the heartbeat command's own KEY='...' echo.
+plan_env() { awk -v k="$2" '$1=="env"{for(i=1;i<=NF;i++) if($i ~ "^" k "="){sub("^" k "=","",$i); print $i; exit}}' <<<"$1"; }
+
 # ============================================================================
 # Case A - target-mode resolution (resolve_target + cmd_resolve)
 # ============================================================================
@@ -126,6 +133,35 @@ mkdir -p "$plain"
 seed_target_exclude "$plain"
 chk_eq "E: seed on a non-git dir returns 0 (no-op)" "$?" "0"
 if [ -d "$plain/.git" ]; then no "E: non-git dir untouched (no .git created)"; else ok "E: non-git dir untouched (no .git created)"; fi
+
+# ============================================================================
+# Case F - target-mode `up --plan`: path + env assertions, all absolute (no spawn)
+# ============================================================================
+# cmd_up --plan returns before any mkdir/tmux/claude, so it is launch-free and leaves the
+# scratch repo untouched. Captured in $() so its internal `exit` (on bad input) can never
+# kill the harness.
+scratchF="$(new_scratch_repo repoF)"
+planF="$(cmd_up --plan "$scratchF")"
+
+chk_eq "F: MOSSY_STATE_DIR = <scratch>/.mossy (absolute)" "$(plan_env "$planF" MOSSY_STATE_DIR)" "$scratchF/.mossy"
+chk_eq "F: MOSSY_REPO_DIR  = repo root (absolute)" "$(plan_env "$planF" MOSSY_REPO_DIR)" "$expected_repo"
+if grep -qF "${scratchF}/.mossy/.barn-panes" <<<"$planF"; then ok "F: panes file = <scratch>/.mossy/.barn-panes"; else no "F: panes file = <scratch>/.mossy/.barn-panes"; fi
+# target-mode layout: all three panes run IN the target (pane_cwds else-branch).
+chk_eq "F: bitzer  cwd = target" "$(plan_cwd "$planF" bitzer)" "$scratchF"
+chk_eq "F: shaun   cwd = target" "$(plan_cwd "$planF" shaun)" "$scratchF"
+chk_eq "F: shirley cwd = target" "$(plan_cwd "$planF" shirley)" "$scratchF"
+case "$(plan_env "$planF" MOSSY_STATE_DIR)" in /*) ok "F: STATE_DIR is absolute" ;; *) no "F: STATE_DIR is absolute" ;; esac
+
+# ============================================================================
+# Case G - dogfood `up --plan` (no target) CONTRAST: STATE_DIR is the repo root, NOT .mossy
+# ============================================================================
+planG="$(cmd_up --plan)"
+chk_eq "G: dogfood MOSSY_STATE_DIR = repo root" "$(plan_env "$planG" MOSSY_STATE_DIR)" "$expected_repo"
+if grep -qF "MOSSY_STATE_DIR=${expected_repo}/.mossy" <<<"$planG"; then no "G: dogfood STATE_DIR is NOT a .mossy subdir"; else ok "G: dogfood STATE_DIR is NOT a .mossy subdir"; fi
+# dogfood layout: bitzer+shaun in the repo root, shirley in SHIRLEY_DIR (default <repo>/timmy).
+chk_eq "G: dogfood bitzer  cwd = repo root" "$(plan_cwd "$planG" bitzer)" "$expected_repo"
+chk_eq "G: dogfood shaun   cwd = repo root" "$(plan_cwd "$planG" shaun)" "$expected_repo"
+chk_eq "G: dogfood shirley cwd = <repo>/timmy" "$(plan_cwd "$planG" shirley)" "$expected_repo/timmy"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
