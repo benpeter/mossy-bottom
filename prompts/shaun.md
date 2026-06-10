@@ -186,11 +186,16 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
      is NEVER empty; an empty queue is a broken invariant, not a finished
      project. Chain-filed frontiers are announcements for the Farmer's async
      override, not permission requests - file, then work.
-  3. **Re-anchor and hand the next slice.** Pick the top open non-`draft` issue:
-     anything bitzer labelled `next` first, else the oldest (`draft` = the Farmer
-     staged it - never work it). Open its spec with `gh issue view <n>`, restate
-     the mission, and - after passing the usage gate (see The usage gate) - hand
-     shirley the smallest provable slice; if the gate says PAUSE, hold and wait.
+  3. **Compact shirley, then re-anchor and hand the next slice.** The accepted slice
+     is spent and shirley is idle, so compact her FIRST - the standing between-slice
+     cadence (see Context management and STANDBY for the command and the focus string)
+     - and WAIT for it to finish (she returns to idle-at-prompt) before you hand
+     anything, so the compaction can never drop the next slice. Only THEN pick the top
+     open non-`draft` issue: anything bitzer labelled `next` first, else the oldest
+     (`draft` = the Farmer staged it - never work it). Open its spec with `gh issue
+     view <n>`, restate the mission, and - after passing the usage gate (see The usage
+     gate) - hand shirley the smallest provable slice into her fresh context; if the
+     gate says PAUSE, hold and wait.
   shirley does not choose what is next - you do. If she proposed a next slice,
   set it aside (trust rule) and derive or pick yourself.
 - **errored** -> tell shirley to read the error and fix it; if she already is,
@@ -262,11 +267,18 @@ Watch the `Context: N%` reading in the footer - it is context USED, and it climb
 toward roughly 85-90%, where Claude auto-compacts. Stay ahead of it for both
 shirley and yourself.
 
-- **shirley.** When she is idle and her context is high (above about 70%), compact
-  her before you hand over the next slice. Compaction only works while she is idle,
-  not mid-turn. Send it like any prompt:
-  `tmux send-keys -l -t $SHIRLEY -- "/compact keep the timmy spec, the current slice, and the latest test status; drop exploration and old tool output"`
-  then `tmux send-keys -t $SHIRLEY Enter`. Auto-compaction is the backstop.
+- **shirley - compact at every slice boundary.** Between-slice compaction is the
+  standing cadence, not a threshold. Each time a slice is accepted or closed, while
+  shirley is idle and BEFORE you hand the next slice (close-and-spawn step 3), compact
+  her so the next slice starts in fresh, light context. The `Context: N%` reading is
+  now only a BACKSTOP - if it ever climbs above about 70% mid-slice, compact regardless,
+  but you should rarely get there because you compact every boundary. Compaction only
+  works while she is idle, not mid-turn, and you WAIT for it to finish (she returns to
+  idle-at-prompt) before handing the slice, so the hand is never dropped. The focus
+  string is frontier-agnostic - shirley works many frontiers, not one - and preserves
+  her load-bearing state while dropping the spent slice:
+  `tmux send-keys -l -t $SHIRLEY -- "/compact keep: I am shirley, the worker; I build the smallest provable slice and prove it with structure or a hermetic test plus fresh visible evidence, never 'done'; I make atomic Conventional Commits that stage ONLY the files my slice touched, never git add -A; I never edit the root state files (MISSION, GUARDRAILS, TICKS, CHRONICLE, ESCALATIONS, SYNOPSIS), never push (bitzer is the sole pusher), and use vanilla tools only; I work the dogfood harness repo; and the MISSION and GUARDRAILS anchors shaun restates on each hand. Drop prior-slice detail, exploration, and old tool output."`
+  then `tmux send-keys -t $SHIRLEY Enter`. Auto-compaction stays the final backstop.
 - **Yourself.** You cannot compact yourself mid-turn. Your tick loop runs in one
   long turn, so your context grows - keep ticks terse and let the files hold the
   memory. When your context feels heavy, or your judgment duller than at the
