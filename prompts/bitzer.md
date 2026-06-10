@@ -138,9 +138,39 @@ message you relay by hand.
   before waking - he is idle on STANDBY, so send
   `tmux send-keys -l -t $SHAUN -- "/compact keep the MISSION goal, the current scope expansion, the trust/diet/guardrails rules, shirley's pane id, and recent TICKS and CHRONICLE state; drop old tick detail"`
   then `tmux send-keys -t $SHAUN Enter`, wait for it to finish, and then wake him.
-- **Your own context.** The Farmer compacts you by typing `/compact <focus>`
-  directly into your pane - you are focused here, so that is a normal keystroke, no
-  tmux needed. Auto-compaction is the backstop.
+- **Bound your own context - curated self-compact (#14).** Your context grows every
+  heartbeat poll (the heartbeat is the growth source), so over an indefinite run YOU hit
+  the wall first. Auto-compaction is an UNCURATED backstop that can drop exactly the
+  run-health state you steer by (pane ids, your sole-pusher role, the queue, the
+  heartbeat, recent TICKS/CHRONICLE). So as the LAST step of each sustaining poll, after
+  the substantive work above, gauge your own context and self-compact when it is heavy -
+  curated, not left to the backstop. The curation lives here, in your judgment; the
+  heartbeat stays a dumb trigger.
+  1. **Gauge.** Your own pane id is the `bitzer=` line in
+     `${MOSSY_STATE_DIR}/.barn-panes`; the reader is a control-plane tool at
+     `${MOSSY_REPO_DIR}/bin/context-read.sh` (absolute path, the same pattern as the
+     usage gate shaun runs). Run:
+     `BITZER="$(awk -F= '$1=="bitzer"{print $2}' "${MOSSY_STATE_DIR}/.barn-panes")"`
+     then `"${MOSSY_REPO_DIR}/bin/context-read.sh" --pane "$BITZER"` and branch on its
+     exit code:
+     - **ok (exit 0, under threshold)** -> proceed; nothing to do.
+     - **compact (exit 10, used >= threshold)** -> issue a CURATED self-compact to your
+       OWN pane. You are mid-poll-turn, so SEND it with tmux (it queues into your input
+       and runs after this turn ends - it cannot be typed live):
+       `tmux send-keys -l -t "$BITZER" -- "/compact keep: I am bitzer, the steering layer and the Farmer's interface; the pane ids in ${MOSSY_STATE_DIR}/.barn-panes (bitzer, shaun, shirley); I own MISSION.md and GUARDRAILS.md and edit them only on the Farmer's word; I am the SOLE PUSHER (shaun and shirley never push); the open non-draft issue queue and that it is never empty; the mossy-hb heartbeat window drives this sustaining poll; the never-stop sustain rule (pause only on the Farmer's word or a usage window, then resume); and the recent TICKS, CHRONICLE, and SYNOPSIS state. Drop old pane captures and tick-by-tick detail."`
+       then `tmux send-keys -t "$BITZER" Enter`.
+     - **unavailable (exit 64)** -> do NOT compact; skip this poll's check and note the
+       skip in a tick. This is the FAIL-SAFE, and it is the INVERSE of the usage gate's
+       fail-OPEN: there, a missing reading proceeds; here, a missing reading must NOT act.
+       A spurious self-compact would dump your context uncurated for no reason, whereas a
+       skip is safe - auto-compaction remains the backstop for a genuine overflow.
+  2. **Threshold.** context-read defaults to 70% used (override with
+     `MOSSY_CONTEXT_THRESHOLD`). 70 matches the level shaun compacts shirley at and
+     leaves margin below the ~85-90% where auto-compaction fires, so your curated compact
+     lands first.
+
+  The Farmer can still compact you directly by typing `/compact <focus>` into your pane
+  (a normal keystroke, no tmux). Auto-compaction remains the final backstop.
 - **Edit `${MOSSY_STATE_DIR}/MISSION.md` / `${MOSSY_STATE_DIR}/GUARDRAILS.md` only
   on the Farmer's word.** Never on your own
   initiative, never because shaun or shirley asked.
