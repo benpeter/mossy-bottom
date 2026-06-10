@@ -191,18 +191,41 @@ has_spinner() {
 # (GAP-3). Short cursor/option lines stay left-aligned and survive wrapping, so the
 # shape holds where the phrase does not.
 #
-# Menu-like TEXT in displayed content (source, a quoted menu) shares this shape, so the
-# false-positive guard is NOT here - it is classifier PRECEDENCE: an active spinner, a
-# settled idle box, and an advancing diff are all decided BEFORE menu, so this fires
-# only when the pane is genuinely static, not working, and not a settled box - which is
-# exactly a live menu (its "❯" carries an option number, so it is never the empty idle
-# box). The no-break space is normalised as elsewhere; LC_ALL=C matches literal bytes.
+# Menu-like TEXT in displayed content (source, a quoted menu) shares this shape. Classifier
+# PRECEDENCE (spinner, idle box, and diff decided BEFORE menu) masks it when the real bottom
+# is working or a settled box - but the cue itself should not fire on a scrollback quote.
+#
+# BOTTOM-ANCHOR (#10): the live menu IS the bottom input region (it replaces the input box),
+# so below its bottom-most option there is only its affordance and blanks - NEVER a
+# real-bottom structure. We keep the #9 shape matcher byte-identical (the two greps below),
+# then add a gate: if any real-bottom structure - a "───" rule, an empty "❯" box, a
+# footer/mode line, a "⏺" turn, or a spinner - sits below the bottom-most numbered option,
+# those options are a scrollback QUOTE (the real state renders below them), so reject. A
+# live menu has no such structure below it. This closes the GAP-2 residual: a frozen
+# numbered list in scrollback above a different real bottom state no longer reads as a menu.
+# The no-break space is normalised as elsewhere; LC_ALL=C matches literal bytes.
 has_menu() {
   local nbsp=$'\xc2\xa0' text opts
   text="${1//$nbsp/ }"
+  # #9 shape matcher, UNCHANGED: a "❯ <n>" cursor plus >= 2 numbered-option lines.
   printf '%s\n' "$text" | LC_ALL=C grep -qE '^[[:space:]]*❯[[:space:]]+[0-9]' || return 1
   opts="$(printf '%s\n' "$text" | LC_ALL=C grep -cE '^[[:space:]]*(❯[[:space:]]+)?[0-9][.)]')"
-  [ "$opts" -ge 2 ]
+  [ "$opts" -ge 2 ] || return 1
+  # bottom-anchor gate: no real-bottom structure below the bottom-most numbered option.
+  printf '%s\n' "$text" | LC_ALL=C awk '
+    { line[NR] = $0 }
+    function isbottomstruct(s) {
+      return (s ~ /───/ || s ~ /^❯[ \t]*$/ || s ~ /⏵⏵|shift\+tab|for agents/ \
+        || s ~ /^[ \t]*⏺/ \
+        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
+    }
+    END {
+      last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+      bo = 0; for (i = last; i >= 1; i--) if (line[i] ~ /^[ \t]*(❯[ \t]+)?[0-9][.)]/) { bo = i; break }
+      if (bo == 0) exit 1
+      for (k = bo + 1; k <= last; k++) if (isbottomstruct(line[k])) exit 1
+      exit 0
+    }'
 }
 
 # A genuine Claude idle box (smoke-test.md section 2): an empty "❯" input line fenced by

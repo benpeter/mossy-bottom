@@ -443,6 +443,45 @@ assert_state "$ibq_sess" question 30 "#10 quoted idle box above a real question 
 
 tmux kill-session -t "$ibq_sess" 2>/dev/null
 
+# A frozen numbered-list / quoted menu as scrollback CONTENT (the GAP-2 residual shape).
+# The old has_menu fired on it from anywhere; the #10 anchor must reject it when a real
+# bottom state renders below it.
+quoted_menu='  (a displayed report quotes a selection menu:)\n  \xe2\x9d\xaf 1. Yes, I trust this folder\n    2. No, exit\n   Enter to confirm \xc2\xb7 Esc to cancel\n  (end of the quoted menu)\n'
+
+# --- #10 menu SHADOW-REJECTION: a frozen numbered list in scrollback ABOVE a real IDLE box
+# at the bottom. The quoted menu must not read as a live menu - the real idle box wins. ---
+mqi_sess="timmy_t_mqi_$$"
+tmux new-session -d -s "$mqi_sess" -x 80 -y 24 \
+  "printf '${quoted_menu}  all settled now.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$mqi_sess" idle 0 "#10 frozen numbered list above a real idle box -> idle, not menu"
+
+tmux kill-session -t "$mqi_sess" 2>/dev/null
+
+# --- #10 menu SHADOW-REJECTION: a frozen numbered list in scrollback ABOVE a real BUSY
+# spinner (full working layout). Must read busy. ---
+mqs_sess="timmy_t_mqs_$$"
+tmux new-session -d -s "$mqs_sess" -x 80 -y 24 \
+  "printf '${quoted_menu}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$mqs_sess" busy 10 "#10 frozen numbered list above a real busy spinner -> busy"
+
+tmux kill-session -t "$mqs_sess" 2>/dev/null
+
+# --- #10 menu NOT-REGRESSED: a quoted menu in scrollback ABOVE a real LIVE menu at the
+# bottom. The real bottom menu still wins -> waiting-input (the anchor anchors on the
+# BOTTOM-most option, whose tail is only the affordance). ---
+mqm_sess="timmy_t_mqm_$$"
+tmux new-session -d -s "$mqm_sess" -x 80 -y 24 \
+  "printf '${quoted_menu}  a REAL menu is now live below:\n\xe2\x9d\xaf 1. Allow this command\n  2. Deny\n  3. Always allow\n  Use arrow keys, then press return to choose\n'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$mqm_sess" waiting-input 20 "#10 quoted menu above a real live menu -> waiting-input"
+
+tmux kill-session -t "$mqm_sess" 2>/dev/null
+
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
 # lines in that order, with NO duplicate while a state is held. The pane holds
