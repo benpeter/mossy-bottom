@@ -2054,3 +2054,58 @@ bitzer's context every tick). Both are labelled next.
 The standing order to sustain only works if the sustainer is itself sustained.
 Until #13 and #14 land, that property lives in a session-scoped cron rather than
 in the harness - which is exactly the gap those two issues close.
+
+## 2026-06-10 (post-compaction shaun) - #12 operational half + #13 CLOSED
+
+A fresh shaun woke from compaction to a queue the Farmer had re-steered: #11
+(event-driven up-chain signals) and #12 (push-vs-close alignment) filed, then
+#13/#14 filed and triaged `next`. The Farmer's issues redirect the chain's
+self-filed frontier, so they jumped ahead of the self-filed #10.
+
+**#12 - the close-before-push divergence (operational half landed, binding half
+escalated).** shirley's report-first audit, verified against the files,
+confirmed a real seam: shaun closes a GitHub issue the instant a slice is
+accepted (shaun.md), but shaun cannot push - bitzer is the sole pusher, on his
+own poll. So an issue can read CLOSED while its proving commit is still
+local-only; the public record diverges from the upstream proven state until
+bitzer's next push. Direction taken: Option A (sequence close after push, keep
+the single-pusher invariant). The operational half landed in prompts/shaun.md
+(85e0607): before `gh issue close`, confirm the proving commit is on the live
+remote (`git fetch -q origin $b` then `git merge-base --is-ancestor <sha>
+FETCH_HEAD`), and DEFER the close if not - hand the next slice meanwhile, close
+once it lands, never force-push. The live proof was its own demonstration:
+shirley's own proving commit was sitting un-pushed at the moment of acceptance,
+the exact divergence the slice closes. The binding half (a GUARDRAILS sequencing
+invariant) is bitzer's, raised in ESCALATIONS. shaun also adopted the discipline
+by hand for the rest of the run.
+
+**#13 - the durable autonomous heartbeat - CLOSED.** This is the lasting fix for
+the never-stop hole the run itself exhibited (the ~4h stall). Built in two proven
+slices. Slice A (64ca23f): a standalone bin/heartbeat.sh - a vanilla tmux+sleep
+loop that reads bitzer's pane id from .barn-panes and, on a cadence (default
+300s, env-overridable), classifies that pane with timmy and sends a terse "run
+your poll" trigger ONLY when idle (skip when busy - no mid-turn stacking). The
+poll procedure stays in bitzer.md (single source of truth); no silent expiry.
+Proven three ways on throwaway panes (idle -> nudged, busy -> skipped, missing id
+-> graceful), the live chain never touched. Slice B (741aaa7): barn.sh up raises
+it in its own background window (mossy-hb) of the same session - the correct
+lifecycle (lives and dies with the chain, survives a bitzer REPL relaunch), with
+a single heartbeat_cmd() feeding both the real new-window and the --plan preview
+so they cannot drift. Proven launch-free via `barn.sh up --plan` (dogfood, both
+inside the live session and on a clean socket). The mechanism dogfoods the
+#9-hardened classifier as its idle-gate. shirley's mechanism analysis correctly
+rejected a launchd/cron implementation (reboot-survival overshoots the right
+lifecycle - a dead session has no bitzer to nudge). #13 closed only after both
+proving commits were confirmed on origin - the #12 discipline, dogfooded on
+#13's own close.
+
+**Open threads for the next shaun.** (1) The Farmer filed #15 ("chain stops dead
+when shaun's await returns"), a near-duplicate of #13 from the shaun-layer angle,
+proposing the launchd implementation #13 reasoned against - it needs triage
+reconciliation (is it satisfied-by-#13 via heartbeat -> bitzer -> wake-shaun, or
+does it want true reboot-survival?). (2) A target-mode `barn.sh up --plan`
+session-handling anomaly ("no such window: mossy:mossy") was observed outside the
+live session; Slice B adds no tmux call to the --plan path, so it is pre-existing
+barn code, a candidate Robustness/Generality follow-up in #8's family. (3) #14
+(bitzer self-compaction, `next`) and #11 (event-driven up-chain signals) remain -
+the autonomous-liveness cluster #13 opened.
