@@ -2109,3 +2109,42 @@ live session; Slice B adds no tmux call to the --plan path, so it is pre-existin
 barn code, a candidate Robustness/Generality follow-up in #8's family. (3) #14
 (bitzer self-compaction, `next`) and #11 (event-driven up-chain signals) remain -
 the autonomous-liveness cluster #13 opened.
+
+## 2026-06-10 (post-compaction shaun, evening) - #14 CLOSED: the never-stop autonomy pair is complete
+
+**Frontier #14 (bitzer self-compaction) - CLOSED.** The companion to #13, and the
+second half of the never-stop fix this run itself exposed (the ~4h stall). #13
+keeps bitzer WOKEN; #14 keeps bitzer from DROWNING in its own context over an
+indefinite unattended run. Two slices. Slice 1 (970990e, bin/context-read.sh): a
+position- and shape-anchored detector that reads the Claude "Context: NN%" footer
+from a pane and emits ok / compact / unavailable - it never compacts and never
+sends keys, just gauges. shaun re-proved its crux independently: three scrollback
+decoys (Context: 99/88/95%) buried above a real bottom footer (37%) -> reads 37,
+the timmy #9/#10 shadowing class beaten in miniature. Slice 2 (c5af4b3,
+prompts/bitzer.md): as the last step of each sustaining poll, bitzer gauges its
+OWN pane via the detector and, over threshold, types a CURATED `/compact <focus>`
+to its own pane - the focus preserving exactly the run-health state an uncurated
+auto-compaction would drop (pane ids, sole-pusher role, the never-empty queue,
+the mossy-hb heartbeat, MISSION/GUARDRAILS ownership, the never-stop rule, recent
+TICKS/CHRONICLE/SYNOPSIS). The curation lives in bitzer (the agent with judgment);
+the heartbeat stays a dumb trigger. The fail-safe is the deliberate inverse of the
+usage gate's fail-OPEN: a missing reading must NOT act (a spurious self-compact
+dumps context for nothing), so unavailable -> skip, auto-compaction the final
+backstop. The /compact-via-send-keys mechanic is not new - bitzer.md already
+compacts shaun the same way. Both commits confirmed on origin before close.
+
+**#15 reconciliation - resolved at the bitzer layer, not by shaun.** The open
+thread from #13's close (is #15 satisfied-by-#13 or does it want reboot-survival?)
+was settled by bitzer triaging #15 to `draft` with rationale: #13's tmux-window
+heartbeat shipped; #15 proposes an OS-level LaunchAgent, a mechanism fork shirley
+explicitly reasoned against, so it is parked for the Farmer to rule. `draft` =
+never work it - shaun did not touch it. The deference chain held: L1 (bitzer)
+triaged, L2 (shaun) deferred to that triage.
+
+**Next.** Picked #10 (position-anchor timmy's cues, Robustness) over #11 - #11's
+up-chain signal is coupled to the still-pending #12 binding-invariant escalation,
+while #10 has no dependency, hardens the linchpin classifier every tick reads, and
+inherits hot transferable evidence from context-read's bottom-anchoring. Handed
+report-first. Still open: #12 (binding GUARDRAILS sequencing half, escalated), #11
+(up-chain signals), #8 (launch-verify tracker - now also holding #14's live-boot
+residuals: first real self-compact firing, real-footer recapture, stale-id guard).
