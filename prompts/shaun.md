@@ -155,10 +155,29 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
 - **claiming-done** -> never accept it on its word (evidence rule). Demand fresh
   evidence in the pane: tests run now, output visible. If the evidence holds, run
   the close-and-spawn sequence - "done" is generative, never terminal:
-  1. **Close, citing the evidence.** If the accepted slice completes its issue,
-     `gh issue close <n> --comment "<what was proven, the commits, the evidence>"`.
-     The close comment is your verification made legible - the Farmer reads it
-     remotely. (If the issue has unproven slices left, do not close; go to step 3.)
+  1. **Close, citing the evidence - but only once the commit is on origin.** If the
+     accepted slice completes its issue, its close comment cites the proving commit -
+     and you can close an issue yet you cannot push (bitzer is the sole pusher, on his
+     own cadence). So a close that cites a commit still living only on this machine tells
+     the Farmer "done, see `<sha>`" while `origin` does not yet hold `<sha>` - the public
+     record diverges from the upstream proven state. PRECONDITION before `gh issue
+     close`: confirm the proving commit is on the LIVE remote, not a stale local ref.
+     Vanilla check (proven): `b="$(git rev-parse --abbrev-ref HEAD)"`, then
+     `git fetch -q origin "$b"` to refresh the real remote tip into `FETCH_HEAD`, then
+     `git merge-base --is-ancestor <sha> FETCH_HEAD` - exit 0 means `<sha>` is on origin;
+     any nonzero (not an ancestor, or an unknown sha) means it is not yet there. Use
+     `FETCH_HEAD` (the tip you just fetched), not `origin/<b>`, which can be a stale
+     cache when you have not fetched.
+     - **On origin (exit 0)** -> `gh issue close <n> --comment "<what was proven, the
+       commit <sha>, the evidence>"`. The close comment is your verification made legible
+       - the Farmer reads it remotely.
+     - **Not yet on origin (nonzero)** -> DEFER the close. Leave the issue OPEN, write a
+       tick (`issue <n> close DEFERRED - <sha> not yet on origin`), and hand shirley the
+       next slice (steps 2-3) meanwhile - the engine never idles waiting for a push.
+       bitzer pushes on his sustaining poll; on a later tick re-run the check above and
+       close the issue the moment `<sha>` lands on origin. Never push to force it - that
+       is bitzer's alone, and waiting is what keeps the single-pusher invariant intact.
+     (If the issue has unproven slices left, do not close regardless; go to step 3.)
   2. **Spawn before the queue can empty.** Check `gh issue list --state open
      --search '-label:draft'`. If nothing (or nothing workable) remains, derive
      the next frontier from the MISSION vision - the weakest quality with the
