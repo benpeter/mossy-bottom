@@ -138,14 +138,21 @@ message you relay by hand.
   before waking - he is idle on STANDBY, so send
   `tmux send-keys -l -t $SHAUN -- "/compact keep the MISSION goal, the current scope expansion, the trust/diet/guardrails rules, shirley's pane id, and recent TICKS and CHRONICLE state; drop old tick detail"`
   then `tmux send-keys -t $SHAUN Enter`, wait for it to finish, and then wake him.
-- **Bound your own context - curated self-compact (#14).** Your context grows every
+- **Bound your own context - curated self-compact (#14, #16).** Your context grows every
   heartbeat poll (the heartbeat is the growth source), so over an indefinite run YOU hit
   the wall first. Auto-compaction is an UNCURATED backstop that can drop exactly the
   run-health state you steer by (pane ids, your sole-pusher role, the queue, the
-  heartbeat, recent TICKS/CHRONICLE). So as the LAST step of each sustaining poll, after
-  the substantive work above, gauge your own context and self-compact when it is heavy -
-  curated, not left to the backstop. The curation lives here, in your judgment; the
-  heartbeat stays a dumb trigger.
+  heartbeat, recent TICKS/CHRONICLE). So you self-compact deliberately - the curation
+  lives in your judgment, the heartbeat stays a dumb trigger - in TWO ways that compose:
+  - **Proactively, at concern boundaries (#16).** Before you turn to a NEW area or
+    concern - a fresh Farmer request, an escalation you pick up, a part of the poll
+    different from the one you just finished - self-compact FIRST if you have taken on
+    material since your last compact, rather than waiting for the threshold to trip. Each
+    concern then begins in fresh, light context. Use the curated focus string below and
+    send it the same way (it queues into your input and runs when your current turn ends).
+  - **Reactively, at the threshold (the backstop).** As the LAST step of each sustaining
+    poll, after the substantive work above, gauge your own context and self-compact when
+    it is heavy:
   1. **Gauge.** Your own pane id is the `bitzer=` line in
      `${MOSSY_STATE_DIR}/.barn-panes`; the reader is a control-plane tool at
      `${MOSSY_REPO_DIR}/bin/context-read.sh` (absolute path, the same pattern as the
@@ -164,10 +171,14 @@ message you relay by hand.
        fail-OPEN: there, a missing reading proceeds; here, a missing reading must NOT act.
        A spurious self-compact would dump your context uncurated for no reason, whereas a
        skip is safe - auto-compaction remains the backstop for a genuine overflow.
-  2. **Threshold.** context-read defaults to 70% used (override with
-     `MOSSY_CONTEXT_THRESHOLD`). 70 matches the level shaun compacts shirley at and
-     leaves margin below the ~85-90% where auto-compaction fires, so your curated compact
-     lands first.
+  2. **Threshold, and 80% as the hard ceiling.** context-read defaults to 70% used
+     (override with `MOSSY_CONTEXT_THRESHOLD`). Treat 80% as a HARD CEILING you never
+     exceed. 70 sits well BELOW it on purpose: the reactive compact fires at 70 and the
+     proactive boundary compaction above keeps you lower still, so a curated compact always
+     lands before you approach 80 - you should never see it. 70 also matches the level
+     shaun compacts shirley at and stays clear of the ~85-90% where the UNCURATED
+     auto-compaction fires. A read at or above 80 means a compact is overdue: do it now,
+     before starting another concern.
 
   The Farmer can still compact you directly by typing `/compact <focus>` into your pane
   (a normal keystroke, no tmux). Auto-compaction remains the final backstop.
