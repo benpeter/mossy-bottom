@@ -165,6 +165,63 @@ chk_eq "G: dogfood shaun   cwd = repo root" "$(plan_cwd "$planG" shaun)" "$expec
 chk_eq "G: dogfood shirley cwd = <repo>/timmy" "$(plan_cwd "$planG" shirley)" "$expected_repo/timmy"
 
 # ============================================================================
+# Case I - per-role pre-boot injection (#24): MOSSY_INJECT_<ROLE> appends to the global list,
+# global-THEN-per-role, surfaced per pane in `up --plan`. Env source only (the per-role flag is
+# a deferred follow-up). All launch-free: dogfood `cmd_up --plan` returns before any tmux/claude.
+# Inline `VAR=val cmd_up` scopes the env to that one call; we `unset` between cases so none leak.
+# ============================================================================
+# plan_injects <plan-text> <role> - the ordered inject payloads a plan prints for one pane
+# ('  inject  <role>  <- X' -> X), one per line. Splits on '<- ' so payloads may contain spaces.
+plan_injects() { awk -v r="$2" '$1=="inject" && $2==r {sub(/^[^<]*<- /,""); print}' <<<"$1"; }
+
+# (a) GLOBAL-ONLY: every pane gets exactly the global list, no per-role - byte-stable with the
+# #18.3 inject-line format (the no-regression anchor). Assert the exact bytes AND the count, so
+# a stray per-role line could not slip in unnoticed.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planIa="$(MOSSY_INJECT='/model default' cmd_up --plan)"
+chk_eq "I(a): global-only bitzer  = global list" "$(plan_injects "$planIa" bitzer)" "/model default"
+chk_eq "I(a): global-only shaun   = global list" "$(plan_injects "$planIa" shaun)" "/model default"
+chk_eq "I(a): global-only shirley = global list" "$(plan_injects "$planIa" shirley)" "/model default"
+byte_ok=1
+for L in \
+  '  inject   bitzer  <- /model default' \
+  '  inject   shaun   <- /model default' \
+  '  inject   shirley <- /model default'; do
+  grep -qxF "$L" <<<"$planIa" || byte_ok=0
+done
+chk_eq "I(a): global-only inject section byte-stable (#18.3 format)" "$byte_ok" "1"
+chk_eq "I(a): global-only has exactly 3 inject lines (no per-role extras)" "$(grep -c '^  inject ' <<<"$planIa")" "3"
+
+# (b) PER-ROLE-ONLY (global unset): only the named role gets a line; the others get nothing.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planIb="$(MOSSY_INJECT_SHIRLEY='/model sonnet' cmd_up --plan)"
+chk_eq "I(b): per-role-only shirley = the per-role line" "$(plan_injects "$planIb" shirley)" "/model sonnet"
+chk_eq "I(b): per-role-only bitzer  = (no lines)" "$(plan_injects "$planIb" bitzer)" ""
+chk_eq "I(b): per-role-only shaun   = (no lines)" "$(plan_injects "$planIb" shaun)" ""
+chk_eq "I(b): per-role-only -> exactly 1 inject line" "$(grep -c '^  inject ' <<<"$planIb")" "1"
+
+# (c) GLOBAL + PER-ROLE: the named pane gets global FIRST, then its per-role line appended; the
+# other panes get the global list only. Pins the deterministic global-before-per-role order.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planIc="$(MOSSY_INJECT='/model default' MOSSY_INJECT_SHIRLEY='/model sonnet' cmd_up --plan)"
+chk_eq "I(c): shirley = global THEN per-role (ordered)" "$(plan_injects "$planIc" shirley)" "$(printf '/model default\n/model sonnet')"
+chk_eq "I(c): bitzer  = global only" "$(plan_injects "$planIc" bitzer)" "/model default"
+chk_eq "I(c): shaun   = global only" "$(plan_injects "$planIc" shaun)" "/model default"
+
+# (d) ABSENT or EMPTY per-role source is a clean no-op: byte-identical to global-only.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planId_absent="$(MOSSY_INJECT='/model default' cmd_up --plan)"
+planId_empty="$(MOSSY_INJECT='/model default' MOSSY_INJECT_SHIRLEY='' cmd_up --plan)"
+chk_eq "I(d): empty MOSSY_INJECT_SHIRLEY == absent (no-op)" \
+  "$(grep '^  inject ' <<<"$planId_empty")" "$(grep '^  inject ' <<<"$planId_absent")"
+chk_eq "I(d): empty per-role shirley still = global only" "$(plan_injects "$planId_empty" shirley)" "/model default"
+
+# (e) ALL sources absent -> the existing '(none)' line, unchanged.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planIe="$(cmd_up --plan)"
+if grep -qxF '  inject   (none)' <<<"$planIe"; then ok "I(e): all sources absent -> 'inject (none)'"; else no "I(e): all sources absent -> 'inject (none)'"; fi
+
+# ============================================================================
 # Case H - heartbeat-window collision-safety (#21): resolve_hb_window over a REAL throwaway
 # session. No claude: windows are plain `sleep` placeholders, torn down with the session.
 # ============================================================================
