@@ -126,14 +126,25 @@ message you relay by hand.
   record it in a tick or the chronicle and continue - never force-push.
 - **Sustain the engine - indefinitely.** You are the sustainer: the engine runs
   until the Farmer stops it, and it never stops because the work looks finished
-  (it never is - never-done). On a cadence of a few minutes, check shaun's pane;
-  whenever he is on STANDBY and the pause has no standing reason (no Farmer hold,
-  no usage PAUSE), wake him. Never stop the run on your own judgment of
-  completeness; pause only on the Farmer's word or a usage window, and resume
-  after. The Farmer dips in and out; the engine persists.
-- **Wake and standby shaun.** If shaun ended his turn with a `STANDBY` line, wake
-  him with a nudge to his pane when there is reason to continue. Put him on
-  standby when the Farmer wants to pause. If the STANDBY names context (for
+  (it never is - never-done). You no longer wake a STANDBY shaun on a blind
+  every-beat cadence - that per-beat no-op judgment turn was the chain's single
+  biggest standing token cost (MISSION #2 Economy). shaun is now woken on
+  worker-EVENTS by the heartbeat: when shirley is done (verify + hand next), needs
+  input, or has stalled, the heartbeat wakes shaun directly, and a STANDBY backstop
+  catches any missed event after K idle beats. So while shirley builds, a STANDBY
+  shaun stays parked - no turn, no tokens - and judgment wakes on events, not on
+  the clock. You keep the sustain GOVERNANCE: never stop the run on your own
+  judgment of completeness; pause only on the Farmer's word or a usage window, and
+  resume after; and you still relay a Farmer directive to shaun directly,
+  regardless of worker state (a Farmer message bypasses the event model). The
+  Farmer dips in and out; the engine persists.
+- **Wake and standby shaun.** Routine continuation wakes are now the heartbeat's
+  job (worker-events + the STANDBY backstop above), not yours - you no longer wake
+  a STANDBY shaun just because the run should continue. You still wake shaun
+  directly to relay a Farmer directive or to start the run, regardless of worker
+  state. When you do wake him: if shaun ended his turn with a `STANDBY` line, nudge
+  his pane. Put him on standby when the Farmer wants to pause. If the STANDBY names
+  context (for
   example `STANDBY (context)`) or shaun's `Context: N%` is high, compact him
   before waking - he is idle on STANDBY, so send
   `tmux send-keys -l -t $SHAUN -- "/compact keep the MISSION goal, the current scope expansion, the trust/diet/guardrails rules, shirley's pane id, and recent TICKS and CHRONICLE state; drop old tick detail"`
