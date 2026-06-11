@@ -277,6 +277,46 @@ assert_state "$ni_sess" idle 0 "narrow idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ni_sess" 2>/dev/null
 
+# --- #22 (the #17 narrow residual): a narrow idle box whose FULL mode line WRAPS, the
+# realistic case where tmux wraps the footer rather than Claude truncating it. The
+# wrapped continuation FRAGMENTS ("xt: 5%" from "Context: 5%", "agents" from "← for
+# agents") carry none of the box-chrome keywords, so the old whitelist "only box-chrome
+# below" check DROPPED the box (idle_box=false) - and every idle-box-gated state then
+# misclassified. This differs from the `narrow_box` fixtures above, which keep the footer
+# on ONE pre-truncated line and so already pass. The mode line below is the full
+# "⏵⏵ ... (shift+tab to cycle) · ← for agents" shape; at width 30 tmux wraps it. '%%' -> '%'.
+wrap_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/timmy | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'
+
+# RED before this slice: the wrapped footer dropped the box, so the question state was
+# lost and this read idle/0. The box must be recognised at narrow width -> question/30.
+wrapq_sess="timmy_t_wrapq_$$"
+tmux new-session -d -s "$wrapq_sess" -x 30 -y 18 \
+  "printf '\xe2\x8f\xba Should I proceed with the merge?\n${wrap_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$wrapq_sess" question 30 "#22 narrow WRAPPED-footer idle box ending in '?' classified question"
+
+tmux kill-session -t "$wrapq_sess" 2>/dev/null
+
+# A narrow WRAPPED-footer idle box (statement) must be POSITIVELY recognised AS A BOX -
+# idle by box recognition, not merely by the snapshot-diff fallback that masked the bug
+# for a settled statement. Asserting idle_box=true via --json pins the fix: a future
+# regression that drops the box (back to lucky fallback idle) trips here, not silently.
+wrapi_sess="timmy_t_wrapi_$$"
+tmux new-session -d -s "$wrapi_sess" -x 30 -y 18 \
+  "printf '\xe2\x8f\xba All settled now.\n${wrap_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+wrapi_json="$("$timmy" --pane "$wrapi_sess" --json 2>/dev/null)"
+wrapi_code=$?
+if [ "$wrapi_code" -eq 0 ] && [[ "$wrapi_json" == *'"state":"idle"'* ]] && [[ "$wrapi_json" == *'"idle_box":true'* ]]; then
+  ok "#22 narrow WRAPPED-footer idle box positively recognised (idle, idle_box=true)"
+else
+  no "#22 narrow WRAPPED-footer idle box positively recognised (got '$wrapi_json' exit $wrapi_code)"
+fi
+
+tmux kill-session -t "$wrapi_sess" 2>/dev/null
+
 # A MULTI-LINE assistant turn (reconstructed from a verbatim live capture): the
 # question is an indented CONTINUATION line (no "⏺" prefix), followed by the
 # "✻ ... for Ns" post-turn timer and a tip footer. The last content line of the

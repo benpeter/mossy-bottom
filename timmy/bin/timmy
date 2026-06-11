@@ -236,13 +236,26 @@ has_menu() {
 #
 # BOTTOM-ANCHOR (#10): the live input box renders at the bottom, so we recognise it only
 # THERE. The box is the bottom-most empty "❯" that is (a) rule-fenced - its first non-blank
-# line above is a "───" rule - and (b) has ONLY box-chrome below it to the bottom (rules,
-# the footer/mode line, blanks). A quoted box in scrollback fails (b): it has real content
-# (the live menu, more output) below it, so it is not mistaken for the input box. A real
+# line above is a "───" rule - and (b) has no COMPETING bottom structure below it to the
+# bottom. A quoted box in scrollback fails this: its "❯" is INDENTED (not "^❯"), so it is
+# never picked as the box; and any real bottom state below a column-0 "❯" trips (b). A real
 # box passes both. The "───" fence IS the GAP-6 corroborator, so a box with a changed or
 # absent "⏵⏵" marker is still recognised by its rule fence. This fires for BOTH idle and
 # working panes (both render the input box); distinguishing those is the spinner's job, so
 # spinner stays precedence step 1 - this anchor only stops a SCROLLBACK quote from firing.
+#
+# NARROW-ROBUST (#22, the #17 residual): check (b) was a WHITELIST - every line below the
+# box had to match a known box-chrome keyword. At narrow width tmux WRAPS the footer into
+# continuation fragments ("xt: 5%" from "Context: 5%", "agents" from "← for agents") that
+# carry no keyword, so the whitelist dropped a perfectly real box and idle/question
+# classification failed. (b) is now a BLACKLIST: the live input box is the bottom-most UI
+# element, so below it sit only its bottom rule fence and the footer (wrapped freely) -
+# NEVER a competing bottom structure. We reject ONLY on a competing structure - a live menu
+# cursor, an assistant turn glyph, or a spinner line - which would prove the "❯" we found
+# is not the live box. A wrapped footer fragment is none of those, so the box now survives
+# any width. This widens (b)'s tolerance without weakening the #10 shadow rejection: the
+# column-0 anchor (a quoted box's "❯" is indented) already carries that, and a real bottom
+# state below a column-0 "❯" still trips the blacklist.
 is_idle_box() {
   # Claude renders the empty input line as "❯" + a U+00A0 NO-BREAK SPACE, which grep's
   # [[:space:]] does NOT reliably match (verified live). Normalise it to a plain space.
@@ -250,9 +263,12 @@ is_idle_box() {
   text="${1//$nbsp/ }"
   printf '%s\n' "$text" | LC_ALL=C awk '
     { line[NR] = $0 }
-    function isboxchrome(s) {
-      return (s ~ /^[ \t]*$/ || s ~ /───/ \
-        || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| /)
+    # A competing bottom structure below the "❯": real content the live input box never has
+    # beneath it. Footer text (incl. width-wrapped fragments) and rules are NOT competing.
+    function competes(s) {
+      return (s ~ /^❯[ \t]+[0-9]/ \
+        || s ~ /^[ \t]*⏺/ \
+        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
     }
     END {
       last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
@@ -264,8 +280,8 @@ is_idle_box() {
       # (a) rule-fenced: first non-blank line above is a ─── rule
       j = box - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
       if (j < 1 || line[j] !~ /───/) exit 1
-      # (b) only box-chrome below it to the bottom (a quoted box has real content below)
-      for (k = box + 1; k <= last; k++) if (!isboxchrome(line[k])) exit 1
+      # (b) no competing bottom structure below it (a quoted box has real content below)
+      for (k = box + 1; k <= last; k++) if (competes(line[k])) exit 1
       exit 0
     }'
 }
