@@ -147,6 +147,26 @@ resolve_free_window() {
   done
 }
 
+# resolve_hb_window <session> <hb_base> <primary_advanced> - decide and PREPARE the heartbeat
+# window name collision-safely (#21), then echo it; the caller new-windows at the echoed name,
+# which is guaranteed free so the window ends up UNIQUELY named. Two paths:
+#   primary_advanced=0 (base REUSED): a lingering same-named window is a stale ORPHAN heartbeat
+#     from a dead chain that would read THIS run's .barn-panes - two heartbeats racing on one
+#     chain. KILL it by name (correct here: the base was reused, so the same name is ours/our
+#     orphan, not an innocent bystander), then echo hb_base (now free).
+#   primary_advanced=1 (a NEW concurrent chain): never destroy an occupant. Advance to a FREE
+#     unique name via resolve_free_window - an innocent window on the derived name SURVIVES.
+# Returns nonzero only if the session is unusable (vanished), mirroring the primary block.
+resolve_hb_window() {
+  local session="$1" hb_base="$2" advanced="$3"
+  if [ "${advanced}" -eq 0 ]; then
+    tmux kill-window -t "${session}:${hb_base}" 2>/dev/null || true
+    printf '%s' "${hb_base}"
+    return 0
+  fi
+  resolve_free_window "${session}" "${hb_base}"
+}
+
 # wait_for <pane> <pattern> <timeout_s> - poll capture-pane until pattern shows.
 wait_for() {
   local pane="$1" pat="$2" timeout="${3:-30}" i out
@@ -414,12 +434,13 @@ cmd_up() {
   # <window>-2, <window>-3, ... instead of hard-aborting, and re-derive HB_WINDOW from the
   # free name (apply_window). A bare name clash never blocks a run; only an unusable session
   # does (resolve_free_window returns nonzero -> the session is gone).
-  local free
+  local free primary_advanced=0
   free="$(resolve_free_window "${session}" "${WINDOW}")" \
     || { echo "barn: session '${session}' is unusable - cannot list its windows" >&2; exit 1; }
   if [ "${free}" != "${WINDOW}" ]; then
     echo "barn: window '${WINDOW}' already exists in session '${session}' - using '${free}' instead." >&2
     apply_window "${free}"
+    primary_advanced=1
   fi
 
   mkdir -p "${shirley_cwd}"
@@ -448,12 +469,17 @@ cmd_up() {
   } >"${panes_file}"
 
   # Raise the sustain heartbeat (#13) in its own background window of the same session,
-  # AFTER .barn-panes exists (the heartbeat reads it). Detached (-d) so the Farmer's view
-  # is not stolen; remain-on-exit so an unexpected exit stays visible rather than silently
-  # closing the window. Kill any stale same-name window first so a re-up never leaves two
-  # heartbeats racing. It is reaped by kill-session with the rest of the chain.
-  tmux kill-window -t "${session}:${HB_WINDOW}" 2>/dev/null || true
-  tmux new-window -d -t "${session}" -n "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
+  # AFTER .barn-panes exists (the heartbeat reads it). Detached (-d) so the Farmer's view is
+  # not stolen; remain-on-exit so an unexpected exit stays visible. Collision-safe (#21):
+  # resolve_hb_window kills a stale ORPHAN heartbeat when the primary base was reused, but
+  # never destroys an innocent occupant when the primary advanced - in that case it advances
+  # to a free unique name. Either way the new window ends up uniquely named, so the following
+  # set-option is unambiguous. It is reaped by kill-session with the rest of the chain.
+  local hb_name
+  hb_name="$(resolve_hb_window "${session}" "${HB_WINDOW}" "${primary_advanced}")" \
+    || { echo "barn: session '${session}' is unusable - cannot list its windows" >&2; exit 1; }
+  HB_WINDOW="${hb_name}"
+  tmux new-window -d -t "${session}:" -n "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
   tmux set-option -w -t "${session}:${HB_WINDOW}" remain-on-exit on
 
   echo "barn: panes -> bitzer=${bitzer} shaun=${shaun} shirley=${shirley}"

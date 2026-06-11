@@ -10,7 +10,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 barn="$here/barn.sh"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/barn-test-XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
+hb_sess="" # the heartbeat-window cases stand up one throwaway tmux session; reaped on exit
+trap '[ -n "$hb_sess" ] && tmux kill-session -t "$hb_sess" 2>/dev/null; rm -rf "$tmp"' EXIT
 
 # barn.sh requires an executable claude at LOAD time (it resolves MOSSY_CLAUDE/PATH and
 # aborts if none). We never launch it - point it at a stub so sourcing succeeds without a
@@ -162,6 +163,50 @@ if grep -qF "MOSSY_STATE_DIR=${expected_repo}/.mossy" <<<"$planG"; then no "G: d
 chk_eq "G: dogfood bitzer  cwd = repo root" "$(plan_cwd "$planG" bitzer)" "$expected_repo"
 chk_eq "G: dogfood shaun   cwd = repo root" "$(plan_cwd "$planG" shaun)" "$expected_repo"
 chk_eq "G: dogfood shirley cwd = <repo>/timmy" "$(plan_cwd "$planG" shirley)" "$expected_repo/timmy"
+
+# ============================================================================
+# Case H - heartbeat-window collision-safety (#21): resolve_hb_window over a REAL throwaway
+# session. No claude: windows are plain `sleep` placeholders, torn down with the session.
+# ============================================================================
+hb_sess="barn_hb_test_$$"
+tmux new-session -d -s "$hb_sess" -x 80 -y 24 'sleep 600' 2>/dev/null
+hb_count() { tmux list-windows -t "$hb_sess" -F '#{window_name}' 2>/dev/null | grep -cxF -- "$1"; }
+mkwin() { tmux new-window -d -t "$hb_sess" -n "$1" 'sleep 600' 2>/dev/null; }
+
+# (a) HB name FREE -> created as-is (primary base reused, no orphan).
+name="$(resolve_hb_window "$hb_sess" hbfree 0)"
+chk_eq "H(a): free HB name returned as-is" "$name" "hbfree"
+mkwin "$name"
+chk_eq "H(a): HB window is uniquely named" "$(hb_count hbfree)" "1"
+
+# (b) base REUSED + ORPHAN present -> orphan killed, new HB unique.
+mkwin hborph
+chk_eq "H(b) pre: orphan present" "$(hb_count hborph)" "1"
+name="$(resolve_hb_window "$hb_sess" hborph 0)"
+chk_eq "H(b): returns the base name" "$name" "hborph"
+chk_eq "H(b): orphan was KILLED (none left before re-create)" "$(hb_count hborph)" "0"
+mkwin "$name"
+chk_eq "H(b): new HB uniquely named" "$(hb_count hborph)" "1"
+
+# (c) primary ADVANCED + an INNOCENT window on the derived HB name -> innocent SURVIVES, HB
+# lands on a free unique name.
+mkwin hbinno
+chk_eq "H(c) pre: innocent present" "$(hb_count hbinno)" "1"
+name="$(resolve_hb_window "$hb_sess" hbinno 1)"
+chk_eq "H(c): advanced to a free unique name" "$name" "hbinno-2"
+chk_eq "H(c): innocent SURVIVED (not destroyed)" "$(hb_count hbinno)" "1"
+mkwin "$name"
+chk_eq "H(c): HB landed uniquely on the free name" "$(hb_count hbinno-2)" "1"
+
+# (d) unusable session (vanished) -> nonzero on the advanced path, mirroring the primary block.
+if resolve_hb_window "no_such_session_$$" hbx 1 >/dev/null 2>&1; then
+  no "H(d): unusable session -> nonzero (advanced path)"
+else
+  ok "H(d): unusable session -> nonzero (advanced path)"
+fi
+
+tmux kill-session -t "$hb_sess" 2>/dev/null
+hb_sess=""
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
