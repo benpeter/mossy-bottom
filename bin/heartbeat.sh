@@ -26,6 +26,16 @@
 # stuck-recovery wake; working/standby/unreadable do nothing. This keeps the decision OUT of
 # bitzer's in-the-moment judgment - it is mechanical, not an eyeball call.
 #
+# Stalled-worker alert (Issue #29 - the worker-side analog of #20): each beat ALSO runs
+# stuck-check on the WORKER (shirley) pane. timmy's stalled state (exit 40, #25) maps to stuck
+# (#28), so a frozen worker classifies STUCK. When the worker is stuck AND shaun is PARKED on a
+# STANDBY, we ALERT shaun (a wake to HIS pane: "your worker stalled - check shirley") so HIS
+# judgment drives recovery: re-handing the current slice needs slice context, which is shaun's,
+# not the heartbeat's. We NEVER type into shirley. The two shaun-aware branches share ONE
+# classification of shaun per beat and partition it by verdict - #20 owns STUCK (exit 20), #29
+# owns STANDBY (exit 10) - so they are DISJOINT and can never double-wake: a busy/working shaun
+# (verdict 0) is never interrupted, and a genuinely stuck shaun is recovered by #20, not alerted.
+#
 # Lifecycle: this loop is meant to run inside the tmux session as a background window
 # (the wiring is barn.sh's job - a later slice), so it lives and dies with the chain,
 # which is the correct lifecycle: a dead session has no bitzer to nudge. It has no timed
@@ -45,7 +55,9 @@
 #   MOSSY_HEARTBEAT_SECS         cadence in seconds (default: 300)
 #   MOSSY_HEARTBEAT_TRIGGER      override the bitzer poll trigger (default: aligned to bitzer.md)
 #   MOSSY_HEARTBEAT_STUCK_TRIGGER  override the shaun stuck-recovery wake text
+#   MOSSY_HEARTBEAT_WORKER_TRIGGER override the worker-stalled alert text sent to shaun (#29)
 #   MOSSY_SHAUN_FP               shaun's cross-beat fingerprint file (default: STATE_DIR/.shaun-fp)
+#   MOSSY_WORKER_FP              shirley's cross-beat fingerprint file (default: STATE_DIR/.shirley-fp)
 #
 # tva
 set -uo pipefail
@@ -63,6 +75,10 @@ TIMMY="${MOSSY_REPO_DIR:-${REPO_ROOT}}/timmy/bin/timmy"
 STUCK_CHECK="${SCRIPT_DIR}/stuck-check.sh"
 SHAUN_FP="${MOSSY_SHAUN_FP:-${STATE_DIR}/.shaun-fp}"
 
+# Stalled-worker alert (#29). shirley's fingerprint persists BETWEEN beats, exactly like
+# shaun's, so the worker 'changed' signal is cross-beat too.
+WORKER_FP="${MOSSY_WORKER_FP:-${STATE_DIR}/.shirley-fp}"
+
 # The terse trigger. The poll body is bitzer.md's, not ours - we only say "go poll", so
 # there is one source of truth and nothing to drift. The "[heartbeat]" tag marks it as
 # the autonomous nudge, distinct from a Farmer message. Override via env for tests.
@@ -75,6 +91,14 @@ TRIGGER="${MOSSY_HEARTBEAT_TRIGGER:-${DEFAULT_TRIGGER}}"
 readonly DEFAULT_STUCK_TRIGGER='[heartbeat] stuck-recovery: your turn looks frozen (idle, no progress, no STANDBY). Re-anchor on your MISSION.md and GUARDRAILS.md and resume your tick loop - re-read shirley pane and continue driving.'
 STUCK_TRIGGER="${MOSSY_HEARTBEAT_STUCK_TRIGGER:-${DEFAULT_STUCK_TRIGGER}}"
 
+# A DISTINCT worker-stalled ALERT for shaun (#29). Tagged "[heartbeat] worker-alert" so it is
+# legible in logs and unmistakable from both the bitzer poll and shaun's own stuck-recovery. It
+# only ALERTS shaun that his worker looks wedged; recovery (Esc + re-hand the current slice) is
+# his judgment, needing slice context the heartbeat does not carry - and it NEVER types into
+# shirley. Sent to shaun's pane only when shaun is parked on a STANDBY (disjoint from #20).
+readonly DEFAULT_WORKER_TRIGGER='[heartbeat] worker-alert: shirley looks stalled (frozen spinner, no progress across two beats). Check her pane - if wedged, Esc to interrupt and re-hand the current slice from MISSION.md. Recovery is yours; this is only an alert.'
+WORKER_TRIGGER="${MOSSY_HEARTBEAT_WORKER_TRIGGER:-${DEFAULT_WORKER_TRIGGER}}"
+
 die() { printf 'heartbeat: %s\n' "$1" >&2; exit 64; }
 log() { printf 'heartbeat %s | %s\n' "$(date '+%H:%M:%S')" "$1"; }
 
@@ -84,17 +108,22 @@ Usage: heartbeat.sh [--panes <file>] [--interval <secs>]   loop forever (default
        heartbeat.sh --once [--panes <file>]                a single beat, then exit
        heartbeat.sh -h | --help
 
-Each beat does two INDEPENDENT things from .barn-panes:
+Each beat does three INDEPENDENT things from .barn-panes:
   - bitzer: classify with timmy and send the "run your sustaining poll" trigger ONLY if idle
     (skip if busy/waiting/asking - no mid-turn stacking). The poll body lives in bitzer.md.
   - shaun: run stuck-check.sh across beats (a persistent fingerprint), and on a STUCK verdict
     (idle, stable across two ticks, no STANDBY) clear his input line and send a stuck-recovery
     wake. working/standby do nothing. Skipped quietly if there is no shaun pane yet.
+  - shirley (#29): run stuck-check.sh on the worker across beats, and when it is STUCK (a frozen
+    spinner stable across two ticks) AND shaun is parked on a STANDBY, ALERT shaun (a wake to HIS
+    pane) that his worker stalled - never typing into shirley. Disjoint from the shaun branch
+    (that owns a STUCK shaun, this owns a STANDBY shaun), so the two never double-wake.
 No timed expiry.
 
 Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
      MOSSY_HEARTBEAT_SECS (cadence, default 300), MOSSY_HEARTBEAT_TRIGGER (poll text),
-     MOSSY_HEARTBEAT_STUCK_TRIGGER (stuck-recovery text), MOSSY_SHAUN_FP (fingerprint file).
+     MOSSY_HEARTBEAT_STUCK_TRIGGER (stuck-recovery text), MOSSY_HEARTBEAT_WORKER_TRIGGER
+     (worker-alert text), MOSSY_SHAUN_FP / MOSSY_WORKER_FP (fingerprint files).
 EOF
 }
 
@@ -132,6 +161,13 @@ shaun_pane() {
   awk -F= '$1=="shaun"{print $2; ok=1} END{exit !ok}' "$1"
 }
 
+# shirley_pane <panes_file> - print the WORKER's pane id (#29); fail if absent. Mirrors
+# shaun_pane and is re-read each beat so a shirley relaunch is followed.
+shirley_pane() {
+  [ -f "$1" ] || return 1
+  awk -F= '$1=="shirley"{print $2; ok=1} END{exit !ok}' "$1"
+}
+
 # send_trigger <pane> - literal text, a short beat, then a SEPARATE Enter. This is the
 # established tmux send mechanics (docs/smoke-test.md): -l sends verbatim, and the Enter
 # is its own call so the text lands before it is submitted.
@@ -141,17 +177,18 @@ send_trigger() {
   tmux send-keys -t "$1" Enter
 }
 
-# wake_shaun <pane> - mirror the proven-safe MANUAL recovery: a plain wake (trigger text +
-# Enter). A live stuck turn (observed 2026-06-11) emits the malformed tool call as OUTPUT and
-# ENDS the turn, leaving the input line EMPTY - so no interrupt is needed, and bitzer recovered
-# it with exactly this plain wake. We keep only a leading C-u: a harmless readline line-clear,
-# cheap insurance should a future variant leave a partial input line. We deliberately do NOT
-# send C-c: its interrupt/exit semantics against a real Claude TUI are unverified and could be
-# unsafe. The trigger re-anchors shaun; he continues per shaun.md - we carry no copy of it.
-wake_shaun() {
-  local pane="$1"
+# send_wake <pane> <trigger> - mirror the proven-safe MANUAL recovery: a plain wake (trigger
+# text + Enter). A live stuck turn (observed 2026-06-11) emits the malformed tool call as OUTPUT
+# and ENDS the turn, leaving the input line EMPTY - so no interrupt is needed, and bitzer
+# recovered it with exactly this plain wake. We keep only a leading C-u: a harmless readline
+# line-clear, cheap insurance should a future variant leave a partial input line. We deliberately
+# do NOT send C-c: its interrupt/exit semantics against a real Claude TUI are unverified and could
+# be unsafe. Both the #20 stuck-recovery and the #29 worker-alert wake SHAUN's pane through this
+# one mechanism (different trigger text); neither ever sends keys to shirley.
+send_wake() {
+  local pane="$1" trigger="$2"
   tmux send-keys -t "$pane" C-u
-  tmux send-keys -l -t "$pane" -- "$STUCK_TRIGGER"
+  tmux send-keys -l -t "$pane" -- "$trigger"
   sleep 0.5
   tmux send-keys -t "$pane" Enter
 }
@@ -172,29 +209,62 @@ beat_bitzer() {
   esac
 }
 
-# beat_shaun - the stuck-recovery check, INDEPENDENT of beat_bitzer (a frozen shaun must be
-# woken whether or not bitzer is busy this beat). Read shaun's id (skip QUIETLY if absent -
-# the chain may not have shaun yet), run stuck-check across beats via the persistent
-# fingerprint, and on a STUCK verdict (exit 20) clear his line and send the recovery wake.
-# working/standby/unreadable -> do nothing. Never dies: stuck-check itself fails toward
-# working (never stuck), and a missing stuck-check just degrades to a bitzer-only beat.
-beat_shaun() {
-  local id rc
+# shaun_verdict - classify shaun ONCE per beat and echo "<id> <rc>" (rc is stuck-check's exit
+# code: 0 working, 10 standby, 20 stuck). Echoes nothing if there is no shaun pane / no
+# stuck-check (the chain may not have shaun yet). This single classification is SHARED by both
+# shaun-aware branches (#20 stuck-recovery and #29 worker-alert) so they read one verdict and
+# can never double-wake. Never dies: stuck-check fails toward working, never stuck.
+shaun_verdict() {
+  local id
   [ -x "$STUCK_CHECK" ] || return 0
   id="$(shaun_pane "$panes_file")" || return 0
   MOSSY_TIMMY="$TIMMY" "$STUCK_CHECK" --pane "$id" --fingerprint-file "$SHAUN_FP" >/dev/null 2>&1
-  rc=$?
-  if [ "$rc" -eq 20 ]; then
-    wake_shaun "$id"
+  printf '%s %s' "$id" "$?"
+}
+
+# beat_shaun <id> <rc> - the #20 stuck-recovery, INDEPENDENT of beat_bitzer (a frozen shaun must
+# be woken whether or not bitzer is busy this beat). On a STUCK verdict (exit 20) send the
+# recovery wake; working/standby/empty -> do nothing.
+beat_shaun() {
+  local id="$1" rc="$2"
+  [ -n "$id" ] || return 0
+  if [ "$rc" = "20" ]; then
+    send_wake "$id" "$STUCK_TRIGGER"
     log "shaun STUCK (${id}) -> stuck-recovery wake sent"
   fi
 }
 
-# beat - one heartbeat: the bitzer poll nudge, then the INDEPENDENT shaun stuck-check. Each
-# branch is self-contained and resilient, so one bad branch never stops the other or the loop.
+# beat_worker <shaun_id> <shaun_rc> - the #29 worker-alert. Classify the WORKER (shirley) across
+# beats; when it is STUCK (exit 20: a frozen spinner stable across two ticks, #28) AND shaun is
+# parked on a STANDBY (shaun_rc=10), ALERT shaun on HIS pane so his judgment drives recovery -
+# NEVER typing into shirley. The shaun_rc=10 gate makes this DISJOINT from beat_shaun (which owns
+# shaun_rc=20), so the two never double-wake, and a busy/working shaun (rc=0) is never
+# interrupted. Skipped QUIETLY when there is no shirley pane, no shaun to alert, or no
+# stuck-check. Never dies: stuck-check fails toward working (never stuck).
+beat_worker() {
+  local shaun_id="$1" shaun_rc="$2" wid rc
+  [ -n "$shaun_id" ] || return 0
+  [ -x "$STUCK_CHECK" ] || return 0
+  wid="$(shirley_pane "$panes_file")" || return 0
+  MOSSY_TIMMY="$TIMMY" "$STUCK_CHECK" --pane "$wid" --fingerprint-file "$WORKER_FP" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 20 ] && [ "$shaun_rc" = "10" ]; then
+    send_wake "$shaun_id" "$WORKER_TRIGGER"
+    log "shirley STUCK (${wid}) + shaun parked (${shaun_id}) -> worker-alert wake sent to shaun"
+  fi
+}
+
+# beat - one heartbeat: the bitzer poll nudge, then the two shaun-aware branches. Shaun is
+# classified ONCE (shaun_verdict) and that result is shared by beat_shaun (#20) and beat_worker
+# (#29), partitioned by verdict so they are disjoint and never double-wake. Each branch is
+# self-contained and resilient, so one bad branch never stops the others or the loop.
 beat() {
   beat_bitzer
-  beat_shaun
+  local sv shaun_id shaun_rc
+  sv="$(shaun_verdict)"
+  read -r shaun_id shaun_rc <<<"$sv"
+  beat_shaun "$shaun_id" "$shaun_rc"
+  beat_worker "$shaun_id" "$shaun_rc"
 }
 
 if [ "$once" -eq 1 ]; then
