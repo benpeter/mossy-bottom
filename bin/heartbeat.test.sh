@@ -25,6 +25,7 @@ export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: 
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
 export MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER='WAKE-DONE-XYZZY' # distinctive marker: worker-done wake to shaun (#36)
 export MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER='WAKE-INPUT-XYZZY' # distinctive marker: worker-needs-input wake (#36 sl.2)
+export MOSSY_HEARTBEAT_BACKSTOP_TRIGGER='WAKE-BACKSTOP-XYZZY' # distinctive marker: STANDBY-backstop wake (#36 sl.3)
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/heartbeat-test-XXXXXX")"
 sessions=""
@@ -77,6 +78,19 @@ make_counter() {
   sleep 0.5
 }
 
+# make_silent <sess> <printf-content> <logfile> - a PARKED pane that stays BYTE-IDENTICAL across captures
+# even while wakes are typed into it: it shows the canned content and blocks on `read -rs` (silent, NO
+# echo), so delivered input is consumed WITHOUT changing the display - exactly a shaun whose wake never
+# LANDED (the silent buffer-unsent / ineffective-delivery case the #36-sl.3 backstop is the net for). It
+# records each Enter-terminated delivery to <logfile> (count = deliveries), and stays timmy-idle/standby
+# throughout, so the freeze (combined fingerprint) persists UNCHANGED across the K beats the backstop needs.
+make_silent() {
+  local cmd="printf '$2'; while IFS= read -rs x; do printf '%s\\n' \"\$x\" >> '$3'; done"
+  tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
+  sessions="$sessions $1"
+  sleep 0.5
+}
+
 # fake_panes <sess> - write a .barn-panes whose shaun= points at the fixture (no bitzer entry,
 # so the bitzer branch just logs a skip). Echoes the panes-file path.
 fake_panes() {
@@ -121,9 +135,10 @@ animating() {
   sleep 0.5
 }
 
-# beat <panes-file> <shaun-fp> [worker-fp] - run a single heartbeat; OUT captures its log. The
-# worker fp defaults to an unused path so the #20 (shaun-only) calls are byte-unaffected.
-beat() { OUT="$(MOSSY_SHAUN_FP="$2" MOSSY_WORKER_FP="${3:-$tmp/unused-worker.fp}" "$hb" --once --panes "$1" 2>&1)"; }
+# beat <panes-file> <shaun-fp> [worker-fp] [backstop-fp] - run a single heartbeat; OUT captures its log.
+# The worker fp defaults to an unused path so the #20 (shaun-only) calls are byte-unaffected; the backstop
+# fp ALWAYS points at a temp path (default unused) so the #36-sl.3 freeze-state never pollutes the repo root.
+beat() { OUT="$(MOSSY_SHAUN_FP="$2" MOSSY_WORKER_FP="${3:-$tmp/unused-worker.fp}" MOSSY_BACKSTOP_FP="${4:-$tmp/unused-backstop.fp}" "$hb" --once --panes "$1" 2>&1)"; }
 log_has() { printf '%s\n' "$OUT" | grep -q "$1"; }
 pane_has() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -q "$2"; }
 
@@ -417,6 +432,46 @@ beat "$pfwia" "$tmp/wia_shaun.fp" "$tmp/wia_worker.fp"
 beat "$pfwia" "$tmp/wia_shaun.fp" "$tmp/wia_worker.fp"
 if log_has 'shirley NEEDS-INPUT'; then no "worker-input+shaun-active: a busy shaun is never woken (gates on STANDBY)"; else ok "worker-input+shaun-active: busy shaun never woken/interrupted (input-wake gates on STANDBY)"; fi
 if pane_has "$wia_shaun" 'WAKE-INPUT-XYZZY'; then no "worker-input+shaun-active: busy shaun never woken"; else ok "worker-input+shaun-active: busy shaun never woken"; fi
+
+# ============================================================================
+# #36 sl.3 STANDBY BACKSTOP: the missed-done-event / chain-stall net. shaun stays PARKED on a STANDBY and
+# shirley stays idle with BOTH panes UNCHANGED; after K beats (K=3 here) the backstop wakes shaun ONCE -
+# and only once, never every beat (de-duped structurally). shaun is make_silent (read -rs: stays
+# byte-identical even as wakes are typed in - the silent-non-landing case the backstop nets - while
+# recording deliveries); the worker is a static idle box (-> done). The done-wake (#36 sl.1) owns the FIRST
+# frozen beat (streak 1); the backstop owns the K-th. We COUNT backstop deliveries by the distinctive
+# marker: 0 before beat K, exactly one FIRING at beat K (2 lines = initial + one retry vs the never-busy
+# shaun), and NO re-fire after K. K is lowered to 3 (default 4) to keep the suite bounded; LAST case, so
+# the export does not contaminate earlier ones.
+# ============================================================================
+export MOSSY_HEARTBEAT_BACKSTOP_BEATS=3
+bs_shaun="hbt_bs_shaun_$$"
+bs_log="$tmp/bs_deliveries.log"
+make_silent "$bs_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}" "$bs_log"
+bs_shirley="hbt_bs_shirley_$$"
+make_fixture "$bs_shirley" "$idle_box"
+pfbs="$(fake_panes2 "$bs_shaun" "$bs_shirley")"
+bs_fp="$tmp/backstop.fp"
+bs_lines() { grep -c 'WAKE-BACKSTOP-XYZZY' "$bs_log" 2>/dev/null || true; }
+
+beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 1: shaun standby not yet confirmed -> not eligible
+beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 2: streak 1 -> done-wake (NOT backstop)
+if [ "$(bs_lines)" -eq 0 ]; then ok "backstop beat 2 (streak 1): NOT fired (done-wake owns the first frozen beat)"; else no "backstop beat 2: must NOT fire at streak 1 (got $(bs_lines) lines)"; fi
+if log_has 'backstop'; then no "backstop beat 2: no backstop log yet"; else ok "backstop beat 2: no backstop log yet"; fi
+
+beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 3: streak 2 (< K=3) -> NOTHING
+if [ "$(bs_lines)" -eq 0 ]; then ok "backstop beat 3 (streak 2 < K): still NOT fired (fewer than K beats -> not woken)"; else no "backstop beat 3: must NOT fire before K (got $(bs_lines) lines)"; fi
+
+beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 4: streak 3 == K -> backstop fires ONCE
+if log_has 'backstop wake'; then ok "backstop beat 4 (streak 3 == K): heartbeat logged the backstop wake"; else no "backstop beat 4: expected the backstop log ($OUT)"; fi
+if log_has 'UNCHANGED x3 beats'; then ok "backstop beat 4: log shows the K=3 unchanged-streak"; else no "backstop beat 4: log shows the unchanged streak ($OUT)"; fi
+if [ "$(bs_lines)" -eq 2 ]; then ok "backstop beat 4: delivered EXACTLY once (2 lines = initial + one retry vs the never-busy shaun)"; else no "backstop beat 4: expected 2 delivered lines, got $(bs_lines)"; fi
+if log_has 'shirley DONE'; then no "backstop beat 4: NOT the done-wake (disjoint, streak K != 1)"; else ok "backstop beat 4: NOT the done-wake (disjoint, streak K != 1)"; fi
+if log_has 'stuck-recovery'; then no "backstop beat 4: NOT the #20 stuck-recovery (disjoint)"; else ok "backstop beat 4: NOT the #20 stuck-recovery (disjoint)"; fi
+
+beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 5: streak 4 (> K) -> de-duped, no re-fire
+if log_has 'backstop'; then no "backstop beat 5: must NOT fire again (de-duped, no wake-loop)"; else ok "backstop beat 5 (streak 4 > K): NOT fired again (de-duped, woken once not every beat)"; fi
+if [ "$(bs_lines)" -eq 2 ]; then ok "backstop beat 5: still EXACTLY one delivery total (no wake-loop)"; else no "backstop beat 5: delivery count must stay 2, got $(bs_lines)"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

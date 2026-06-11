@@ -59,6 +59,16 @@
 # out as the 'needs-input' verdict, DISJOINT from done(idle)/stalled/alive. The wake (also to SHAUN's pane,
 # gated on shaun PARKED) lets shaun's judgment answer or redirect her; we never type into shirley.
 #
+# STANDBY backstop (Issue #36 slice 3): a defense-in-depth net for a MISSED worker-done event. The done-wake
+# fires the moment the worker becomes idle, but if it is missed or fails to land, the chain can strand -
+# shaun parked, shirley idle, nothing moving. So each beat also tracks a COMBINED fingerprint of BOTH the
+# shaun and shirley panes while (shaun STANDBY + worker idle); when that combined signature stays
+# byte-identical for K (BACKSTOP_BEATS, default 4) consecutive beats, wake shaun ONCE. This is partitioned
+# from the done-wake by the unchanged-STREAK: the done-wake owns the FIRST frozen beat (the immediate
+# event), the backstop owns the K-th (the escalation), and the streak in between fires NOTHING - so they
+# are disjoint and the backstop, firing only at the exact K-th beat, can never wake-loop. Any change to
+# either pane (shaun wakes, shirley advances) breaks the freeze and resets the streak.
+#
 # Lifecycle: this loop is meant to run inside the tmux session as a background window
 # (the wiring is barn.sh's job - a later slice), so it lives and dies with the chain,
 # which is the correct lifecycle: a dead session has no bitzer to nudge. It has no timed
@@ -81,8 +91,11 @@
 #   MOSSY_HEARTBEAT_WORKER_TRIGGER override the worker-stalled alert text sent to shaun (#29)
 #   MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER override the worker-done wake text sent to shaun (#36)
 #   MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER override the worker-needs-input wake text sent to shaun (#36 sl.2)
+#   MOSSY_HEARTBEAT_BACKSTOP_TRIGGER override the STANDBY-backstop wake text sent to shaun (#36 slice 3)
+#   MOSSY_HEARTBEAT_BACKSTOP_BEATS  K - frozen beats before the backstop fires (default 4, min 2)
 #   MOSSY_SHAUN_FP               shaun's cross-beat fingerprint file (default: STATE_DIR/.shaun-fp)
 #   MOSSY_WORKER_FP              shirley's cross-beat fingerprint file (default: STATE_DIR/.shirley-fp)
+#   MOSSY_BACKSTOP_FP            combined-pane backstop fingerprint+streak file (default: STATE_DIR/.backstop-fp)
 #
 # tva
 set -uo pipefail
@@ -111,6 +124,16 @@ SEND_VERIFIED="${SCRIPT_DIR}/send-verified.sh"
 # Stalled-worker alert (#29). shirley's fingerprint persists BETWEEN beats, exactly like
 # shaun's, so the worker 'changed' signal is cross-beat too.
 WORKER_FP="${MOSSY_WORKER_FP:-${STATE_DIR}/.shirley-fp}"
+
+# STANDBY backstop (#36 slice 3) - the missed-done-event / chain-stall net. When shaun stays PARKED on a
+# STANDBY and shirley stays idle with NOTHING changing - a COMBINED fingerprint of BOTH panes byte-identical
+# across BACKSTOP_BEATS (K) consecutive beats - wake shaun ONCE: the done-wake (#36 slice 1) may have been
+# missed or failed to land, and the run would otherwise strand. BACKSTOP_FP persists the combined
+# fingerprint AND the unchanged-streak count BETWEEN beats; the de-dup is STRUCTURAL (fire only at the
+# exact K-th frozen beat, never after), so the backstop can never wake-loop. K must be >= 2 so it can never
+# collide with the done-wake (which owns the first frozen beat).
+BACKSTOP_BEATS="${MOSSY_HEARTBEAT_BACKSTOP_BEATS:-4}"
+BACKSTOP_FP="${MOSSY_BACKSTOP_FP:-${STATE_DIR}/.backstop-fp}"
 
 # The terse trigger. The poll body is bitzer.md's, not ours - we only say "go poll", so
 # there is one source of truth and nothing to drift. The "[heartbeat]" tag marks it as
@@ -148,6 +171,13 @@ WORKER_DONE_TRIGGER="${MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER:-${DEFAULT_WORKER_DON
 readonly DEFAULT_WORKER_INPUT_TRIGGER='[heartbeat] worker-input: shirley looks blocked on input (a selection menu or a question on her pane - she needs an answer). Check her pane and answer or redirect her, or hand the next slice from MISSION.md. This is an event wake; direction is yours.'
 WORKER_INPUT_TRIGGER="${MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER:-${DEFAULT_WORKER_INPUT_TRIGGER}}"
 
+# A DISTINCT STANDBY-backstop wake for shaun (#36 slice 3). Tagged "[heartbeat] backstop" so it is legible
+# in logs and unmistakable from every other wake. It fires ONCE, only after the chain has been frozen
+# (shaun parked + shirley idle, BOTH panes unchanged) for K beats - the missed-done-event / chain-stall
+# net. It only WAKES shaun on HIS pane; it never types into shirley, and direction is shaun.md's, not ours.
+readonly DEFAULT_BACKSTOP_TRIGGER='[heartbeat] backstop: you have been parked on STANDBY with shirley idle and NOTHING changing for several beats - a worker-done event may have been missed or the chain has stalled. Check shirley and the run: verify her last slice and hand the next, or rotate/park per MISSION.md. This is the missed-event safety net.'
+BACKSTOP_TRIGGER="${MOSSY_HEARTBEAT_BACKSTOP_TRIGGER:-${DEFAULT_BACKSTOP_TRIGGER}}"
+
 die() { printf 'heartbeat: %s\n' "$1" >&2; exit 64; }
 log() { printf 'heartbeat %s | %s\n' "$(date '+%H:%M:%S')" "$1"; }
 
@@ -172,6 +202,10 @@ Each beat does three INDEPENDENT things from .barn-panes:
     blocked on a prompt) -> wake shaun to answer/redirect her. A BUSY worker does nothing (the
     economy win). Disjoint from the shaun branch (that owns a STUCK shaun) and from each other
     (stalled vs done vs needs-input), so no double-wake.
+  - backstop (#36 sl.3): if shaun stays parked on a STANDBY AND shirley stays idle with BOTH panes
+    unchanged for K beats (MOSSY_HEARTBEAT_BACKSTOP_BEATS, default 4), wake shaun ONCE - the
+    missed-done-event / chain-stall net. Disjoint from the done-wake by the unchanged-streak (done
+    owns beat 1, backstop owns beat K); de-duped structurally (fires only at the K-th beat).
 No timed expiry.
 
 Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
@@ -179,7 +213,8 @@ Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
      MOSSY_HEARTBEAT_STUCK_TRIGGER (stuck-recovery text), MOSSY_HEARTBEAT_WORKER_TRIGGER
      (worker-alert text), MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER (worker-done text),
      MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER (worker-needs-input text),
-     MOSSY_SHAUN_FP / MOSSY_WORKER_FP (fingerprint files).
+     MOSSY_HEARTBEAT_BACKSTOP_TRIGGER (backstop text), MOSSY_HEARTBEAT_BACKSTOP_BEATS (K, default 4),
+     MOSSY_SHAUN_FP / MOSSY_WORKER_FP / MOSSY_BACKSTOP_FP (fingerprint files).
 EOF
 }
 
@@ -201,6 +236,11 @@ case "$INTERVAL" in
 esac
 [ "$INTERVAL" -ge 1 ] || die "cadence must be at least 1 second (got ${INTERVAL})"
 [ -x "$TIMMY" ] || die "timmy not found or not executable at ${TIMMY} (set MOSSY_REPO_DIR)"
+
+case "$BACKSTOP_BEATS" in
+  '' | *[!0-9]*) die "MOSSY_HEARTBEAT_BACKSTOP_BEATS needs an integer (beats)" ;;
+esac
+[ "$BACKSTOP_BEATS" -ge 2 ] || die "backstop beats must be at least 2 (got ${BACKSTOP_BEATS}) - 1 collides with the done-wake"
 
 # bitzer_pane <panes_file> - print bitzer's pane id from the panes file; fail if absent.
 # Re-read every beat (not cached) so a bitzer relaunch is followed: respawn-pane keeps
@@ -367,13 +407,13 @@ beat_worker() {
   fi
 }
 
-# beat_worker_done <shaun_id> <shaun_rc> <wid> <wstate> - the #36 worker-done wake, reading the SHARED
-# worker_verdict. When the worker is 'done' (idle, stable across two beats - a finished slice awaiting the
-# next hand) AND shaun is parked on a STANDBY (shaun_rc=10), WAKE shaun on HIS pane so his judgment
-# verifies the slice and hands the next - NEVER typing into shirley. This is the event that replaces the
-# old per-beat blind poll: a BUSY worker reaches this with wstate='alive' and does NOTHING (the economy
-# win). DISJOINT from beat_worker by the 'done' vs 'stalled' state-gate, and from beat_shaun by the
-# shaun_rc=10 gate - so no double-wake. Skipped QUIETLY when there is no worker verdict or no shaun.
+# beat_worker_done <shaun_id> <shaun_rc> <wid> <wstate> - the #36 worker-done wake. Invoked by the
+# beat_idle_standby ladder at the FIRST frozen beat (streak==1), so it fires ONCE when the worker becomes
+# done rather than every beat - which is why a persistent freeze escalates to the backstop instead of
+# wake-looping. WAKE shaun on HIS pane so his judgment verifies the finished slice and hands the next -
+# NEVER typing into shirley. This is the event that replaces the old per-beat blind poll. The internal
+# (done + standby) guard is belt-and-suspenders; the ladder already gates on it. DISJOINT from beat_worker
+# by 'done' vs 'stalled', from beat_backstop by the streak (1 vs K), and from beat_shaun by shaun_rc=10.
 beat_worker_done() {
   local shaun_id="$1" shaun_rc="$2" wid="$3" wstate="$4"
   [ -n "$shaun_id" ] || return 0
@@ -407,12 +447,77 @@ beat_worker_needs() {
   fi
 }
 
+# backstop_fingerprint <shaun_pane> <worker_pane> - echo a stable COMBINED fingerprint of BOTH panes'
+# current content (the frozen-state signature). Returns 1 if either pane cannot be captured (gone pane) so
+# the caller treats it as a broken freeze, never a spurious match.
+backstop_fingerprint() {
+  local a b
+  a="$(tmux capture-pane -p -t "$1" 2>/dev/null)" || return 1
+  b="$(tmux capture-pane -p -t "$2" 2>/dev/null)" || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s\n--\n%s\n' "$a" "$b" | shasum | awk '{print $1}'
+  else
+    printf '%s\n--\n%s\n' "$a" "$b" | cksum | awk '{print $1 "-" $2}'
+  fi
+}
+
+# beat_backstop <shaun_id> <wid> <n> - deliver the STANDBY-backstop wake to shaun (#36 slice 3) after K
+# frozen beats. Same send_wake -> send-verified mechanism as the other recovery wakes; n is the streak
+# length (== K) for the log. The caller (beat_idle_standby) guarantees this is called ONCE per frozen
+# episode, exactly at the K-th beat.
+beat_backstop() {
+  local shaun_id="$1" wid="$2" n="$3"
+  if send_wake "$shaun_id" "$BACKSTOP_TRIGGER"; then
+    log "shaun STANDBY + shirley idle UNCHANGED x${n} beats (${shaun_id}/${wid}) -> backstop wake delivered + verified to shaun (missed-event net, fired once)"
+  else
+    log "shaun STANDBY + shirley idle UNCHANGED x${n} beats (${shaun_id}/${wid}) -> backstop wake FAILED to submit after retry"
+  fi
+}
+
+# beat_idle_standby <shaun_id> <shaun_rc> <wid> <wstate> - the worker-done + shaun-STANDBY escalation
+# ladder, sharing the worker_verdict and shaun_verdict already computed this beat. The freeze (shaun parked
+# on a STANDBY AND shirley idle/done) is tracked via a COMBINED fingerprint of BOTH panes plus an
+# unchanged-STREAK count, persisted in BACKSTOP_FP between beats. The two wakes are partitioned by streak so
+# they are DISJOINT and never double-wake:
+#   streak == 1   -> the immediate worker-done event (beat_worker_done, #36 slice 1) - fired once when the
+#                    worker becomes done; in production this wakes shaun and breaks the freeze on the spot.
+#   streak == K   -> the STANDBY backstop (beat_backstop, #36 slice 3) - fired ONCE if the freeze persisted
+#                    K beats unchanged, i.e. the done-wake was missed or never landed.
+#   otherwise     -> NOTHING (a young freeze 1<streak<K, or a stale one streak>K already backstopped).
+# Any beat that is NOT (shaun STANDBY + worker done), or a capture failure, BREAKS the freeze and resets the
+# streak - so a wake that lands (shaun goes busy) or a worker that advances starts the ladder over. Disjoint
+# from beat_worker (#29 'stalled'), beat_worker_needs ('needs-input'), and beat_shaun (#20 shaun_rc=20) by
+# their state/verdict gates. Skipped QUIETLY when there is no verdict or no shaun.
+beat_idle_standby() {
+  local shaun_id="$1" shaun_rc="$2" wid="$3" wstate="$4"
+  # Only the worker-done + shaun-STANDBY freeze is tracked; anything else breaks it (reset the streak file).
+  if [ -z "$shaun_id" ] || [ -z "$wid" ] || [ "$shaun_rc" != "10" ] || [ "$wstate" != "done" ]; then
+    rm -f "$BACKSTOP_FP" 2>/dev/null || true
+    return 0
+  fi
+  local cur prior_fp="" prior_n=0 streak
+  if ! cur="$(backstop_fingerprint "$shaun_id" "$wid")"; then
+    rm -f "$BACKSTOP_FP" 2>/dev/null || true
+    return 0
+  fi
+  if [ -f "$BACKSTOP_FP" ]; then read -r prior_fp prior_n <"$BACKSTOP_FP" || true; fi
+  if [ -n "$prior_fp" ] && [ "$cur" = "$prior_fp" ]; then streak=$((prior_n + 1)); else streak=1; fi
+  mkdir -p "$(dirname "$BACKSTOP_FP")" 2>/dev/null || true
+  printf '%s %s\n' "$cur" "$streak" >"$BACKSTOP_FP"
+  if [ "$streak" -eq "$BACKSTOP_BEATS" ]; then
+    beat_backstop "$shaun_id" "$wid" "$streak"
+  elif [ "$streak" -eq 1 ]; then
+    beat_worker_done "$shaun_id" "$shaun_rc" "$wid" "$wstate"
+  fi
+}
+
 # beat - one heartbeat: the bitzer poll nudge, then the shaun-aware and worker-aware branches. Shaun is
 # classified ONCE (shaun_verdict), shared by beat_shaun (#20, owns shaun STUCK) and the worker branches'
 # STANDBY gate. The WORKER is also classified ONCE (worker_verdict), shared by beat_worker (#29, owns
-# 'stalled'), beat_worker_done (#36, owns 'done'), and beat_worker_needs (#36 sl.2, owns 'needs-input'),
-# partitioned by state so all the wakes are mutually disjoint and can never double-wake. Each branch is
-# self-contained and resilient, so one bad branch never stops the others or the loop.
+# 'stalled'), beat_worker_needs (#36 sl.2, owns 'needs-input'), and the idle+standby escalation ladder
+# (beat_idle_standby: done-wake #36 sl.1 at the first frozen beat, backstop #36 sl.3 at the K-th),
+# partitioned by state and streak so all the wakes are mutually disjoint and can never double-wake. Each
+# branch is self-contained and resilient, so one bad branch never stops the others or the loop.
 beat() {
   beat_bitzer
   local sv shaun_id shaun_rc
@@ -423,7 +528,7 @@ beat() {
   wv="$(worker_verdict)"
   read -r wid wstate <<<"$wv"
   beat_worker "$shaun_id" "$shaun_rc" "$wid" "$wstate"
-  beat_worker_done "$shaun_id" "$shaun_rc" "$wid" "$wstate"
+  beat_idle_standby "$shaun_id" "$shaun_rc" "$wid" "$wstate"
   beat_worker_needs "$shaun_id" "$shaun_rc" "$wid" "$wstate"
 }
 
