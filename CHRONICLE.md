@@ -298,3 +298,45 @@ per the #29 precedent; Farmer messages relayed regardless of worker state) and h
 slice 1 - the heartbeat now detects the worker-done event and wakes a STANDBY shaun via
 send-verified, doing nothing while the worker is busy (the economy win). The buildable
 queue was never actually empty; the engine stayed on the prize.
+
+## 2026-06-11 12:10 - the event-driven Economy milestone lands; the engine reaches a genuine Farmer-gated boundary
+
+The morning's work compounded into one milestone: the harness stopped waking its own driver
+on a blind clock. Across the run the chain first hardened the machinery a wake would lean on -
+timmy classification made robust to narrow panes, scrollback decoys, and frozen-spinner stalls;
+the stall-recovery loop (detect -> map-to-stuck -> recover the driver -> alert on a stalled
+worker); a pager-neutralized, preflighted launch path. Then it built bin/send-verified.sh - a
+driving helper that types a prompt and CONFIRMS it actually submitted (busy=submitted,
+idle=clear+retry-once-then-fail), mechanizing a hard-won lesson: a long send plus an immediate
+Enter can race and leave the prompt buffered-unsent. That helper was adopted across every send
+the harness makes - the heartbeat trigger, both recovery wakes, and the boot role prompts - so
+no delivery in the safety net can silently fail.
+
+On that foundation the event-driven wake (the #36 arc, four slices) replaced the single biggest
+standing token cost: bitzer's blind every-beat "wake a STANDBY shaun" judgment turn. Now the
+heartbeat wakes the driver on worker EVENTS - shirley done (idle confirmed across two beats),
+needs-input, or stalled - and does nothing while she is busy; a STANDBY backstop wakes the driver
+once after K idle beats so a missed event cannot strand the run. The safety net (the backstop)
+was deliberately built and proven BEFORE the blind-wake was removed. Judgment now wakes on
+events, not the clock. It is inert until the next launch - the running chain keeps its
+fixed-interval wake until relaunched. Two follow-ups closed cleanly: a ~2x faster heartbeat test
+suite (parameterized timing, production byte-unchanged), and the run's driving discipline banked
+into prompts/shaun.md so a fresh driver keeps it across a boot instead of re-learning it the hard
+way (verify a FRESH submission spinner not a settling glyph; rule out a buffered box before
+calling a pane wedged; content-change and git-edits beat an unreliable process check).
+
+That exhausted the genuine in-chain frontier. Economy is strong (event-driven wake + fast suites
++ per-role models); timmy, recovery, and launch are hardened; every send is verified. The weakest
+quality left is Generality - driving a real external target - and its substantive work routes
+through the one step the chain structurally cannot do to itself: the live target-mode boot
+(Farmer-operated; a chain may not launch a nested live chain). The driver squeezed out the last
+Farmer-independent value first - running timmy --selftest on the real live panes to evidence that
+the new wake's key inputs are faithful (a done worker reads idle, a busy driver reads busy) - then
+judged that the remaining residual, a full live integration test, would need two real Claude
+throwaway panes (a nested mini-chain straining the one-throwaway-pane guardrail) for marginal gain,
+since the Farmer's relaunch-review IS that integration check. So the engine HOLDS: not a
+self-imposed pause on safe buildable work (that earlier reflex was caught and overturned), but the
+genuine Farmer-gated boundary. The high-value moves - the #8 live boot and the #36 relaunch-review,
+which one Farmer session activates together - await the Farmer's word. The mechanism stays alive,
+bitzer keeps the watch, and the chain acts the instant the word comes. Padding to fake motion would
+betray the Economy the milestone just bought; the honest state is a surfaced, sanctioned hold.
