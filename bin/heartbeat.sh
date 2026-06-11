@@ -23,8 +23,10 @@
 # stuck-check compares a fingerprint ACROSS beats (a persistent file under STATE_DIR), so
 # 'stuck' means idle AND stable across two heartbeat ticks AND no STANDBY. On that verdict we
 # clear shaun's input line (in case a malformed fragment is sitting in it) and send a distinct
-# stuck-recovery wake; working/standby/unreadable do nothing. This keeps the decision OUT of
-# bitzer's in-the-moment judgment - it is mechanical, not an eyeball call.
+# stuck-recovery wake - delivered VIA send-verified (#32) so the wake itself cannot silently
+# buffer-unsent on the very path the recovery net relies on; working/standby/unreadable do
+# nothing. This keeps the decision OUT of bitzer's in-the-moment judgment - mechanical, not an
+# eyeball call.
 #
 # Stalled-worker alert (Issue #29 - the worker-side analog of #20): each beat ALSO runs
 # stuck-check on the WORKER (shirley) pane. timmy's stalled state (exit 40, #25) maps to stuck
@@ -75,6 +77,14 @@ TIMMY="${MOSSY_REPO_DIR:-${REPO_ROOT}}/timmy/bin/timmy"
 STUCK_CHECK="${SCRIPT_DIR}/stuck-check.sh"
 SHAUN_FP="${MOSSY_SHAUN_FP:-${STATE_DIR}/.shaun-fp}"
 
+# send-verified.sh (#31, adopted by #32) - the verified deliverer for the RECOVERY wakes. A
+# recovery wake IS the safety net: if it silently buffers-unsent (the 06:39 race), the stuck
+# state just persists and the chain stays dead. send-verified types, then confirms via timmy
+# that the pane went busy (the turn started), retrying ONCE before giving up - so a failed
+# recovery delivery is caught and logged, not lost. Only the recovery wakes use it; the
+# frequent bitzer sustain trigger stays a plain fire-and-forget send (a separate follow-up).
+SEND_VERIFIED="${SCRIPT_DIR}/send-verified.sh"
+
 # Stalled-worker alert (#29). shirley's fingerprint persists BETWEEN beats, exactly like
 # shaun's, so the worker 'changed' signal is cross-beat too.
 WORKER_FP="${MOSSY_WORKER_FP:-${STATE_DIR}/.shirley-fp}"
@@ -113,11 +123,13 @@ Each beat does three INDEPENDENT things from .barn-panes:
     (skip if busy/waiting/asking - no mid-turn stacking). The poll body lives in bitzer.md.
   - shaun: run stuck-check.sh across beats (a persistent fingerprint), and on a STUCK verdict
     (idle, stable across two ticks, no STANDBY) clear his input line and send a stuck-recovery
-    wake. working/standby do nothing. Skipped quietly if there is no shaun pane yet.
+    wake VIA send-verified (#32) - confirmed-submitted + retried once, logged if it still fails.
+    working/standby do nothing. Skipped quietly if there is no shaun pane yet.
   - shirley (#29): run stuck-check.sh on the worker across beats, and when it is STUCK (a frozen
     spinner stable across two ticks) AND shaun is parked on a STANDBY, ALERT shaun (a wake to HIS
-    pane) that his worker stalled - never typing into shirley. Disjoint from the shaun branch
-    (that owns a STUCK shaun, this owns a STANDBY shaun), so the two never double-wake.
+    pane, also via send-verified) that his worker stalled - never typing into shirley. Disjoint
+    from the shaun branch (that owns a STUCK shaun, this owns a STANDBY shaun), so they never
+    double-wake.
 No timed expiry.
 
 Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
@@ -177,20 +189,23 @@ send_trigger() {
   tmux send-keys -t "$1" Enter
 }
 
-# send_wake <pane> <trigger> - mirror the proven-safe MANUAL recovery: a plain wake (trigger
-# text + Enter). A live stuck turn (observed 2026-06-11) emits the malformed tool call as OUTPUT
-# and ENDS the turn, leaving the input line EMPTY - so no interrupt is needed, and bitzer
-# recovered it with exactly this plain wake. We keep only a leading C-u: a harmless readline
-# line-clear, cheap insurance should a future variant leave a partial input line. We deliberately
-# do NOT send C-c: its interrupt/exit semantics against a real Claude TUI are unverified and could
-# be unsafe. Both the #20 stuck-recovery and the #29 worker-alert wake SHAUN's pane through this
-# one mechanism (different trigger text); neither ever sends keys to shirley.
+# send_wake <pane> <trigger> - deliver a recovery wake and CONFIRM it submitted (#32). Mirrors
+# the proven-safe MANUAL recovery (a plain trigger + Enter - a live stuck turn observed 2026-06-11
+# emits the malformed call as OUTPUT and ENDS the turn, leaving the input line empty, so no
+# interrupt is needed and a plain wake recovers it), but routes the actual delivery through
+# send-verified.sh so the wake cannot silently buffer-unsent (the 06:39 race) on the very path
+# the recovery net depends on. We keep the leading C-u (a harmless readline line-clear, cheap
+# insurance should a variant leave a partial input line) BEFORE handing off; send-verified then
+# types the trigger, confirms the pane went busy via timmy, and retries ONCE on a miss. We pass
+# MOSSY_TIMMY so send-verified classifies with the SAME timmy heartbeat resolved. We deliberately
+# do NOT send C-c (its TUI interrupt/exit semantics are unverified). Both the #20 stuck-recovery
+# and the #29 worker-alert wake SHAUN's pane through this one mechanism (different trigger text);
+# neither ever sends keys to shirley. Returns send-verified's exit code: 0 submitted, nonzero
+# delivery failed - so the caller logs the outcome instead of assuming the wake landed.
 send_wake() {
   local pane="$1" trigger="$2"
   tmux send-keys -t "$pane" C-u
-  tmux send-keys -l -t "$pane" -- "$trigger"
-  sleep 0.5
-  tmux send-keys -t "$pane" Enter
+  MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$pane" "$trigger"
 }
 
 # beat_bitzer - the poll nudge. Read bitzer's id, classify with timmy, nudge IFF idle
@@ -229,8 +244,11 @@ beat_shaun() {
   local id="$1" rc="$2"
   [ -n "$id" ] || return 0
   if [ "$rc" = "20" ]; then
-    send_wake "$id" "$STUCK_TRIGGER"
-    log "shaun STUCK (${id}) -> stuck-recovery wake sent"
+    if send_wake "$id" "$STUCK_TRIGGER"; then
+      log "shaun STUCK (${id}) -> stuck-recovery wake delivered + verified"
+    else
+      log "shaun STUCK (${id}) -> stuck-recovery wake FAILED to submit after retry - still stuck"
+    fi
   fi
 }
 
@@ -249,8 +267,11 @@ beat_worker() {
   MOSSY_TIMMY="$TIMMY" "$STUCK_CHECK" --pane "$wid" --fingerprint-file "$WORKER_FP" >/dev/null 2>&1
   rc=$?
   if [ "$rc" -eq 20 ] && [ "$shaun_rc" = "10" ]; then
-    send_wake "$shaun_id" "$WORKER_TRIGGER"
-    log "shirley STUCK (${wid}) + shaun parked (${shaun_id}) -> worker-alert wake sent to shaun"
+    if send_wake "$shaun_id" "$WORKER_TRIGGER"; then
+      log "shirley STUCK (${wid}) + shaun parked (${shaun_id}) -> worker-alert delivered + verified to shaun"
+    else
+      log "shirley STUCK (${wid}) + shaun parked (${shaun_id}) -> worker-alert FAILED to submit after retry"
+    fi
   fi
 }
 

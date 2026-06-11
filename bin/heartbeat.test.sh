@@ -2,15 +2,24 @@
 # heartbeat.test.sh - hermetic, launch-free test for the #20 stuck-shaun recovery branch AND the
 # #29 stalled-worker alert in bin/heartbeat.sh. No claude: we drive `heartbeat.sh --once` against
 # REAL throwaway tmux panes whose content is canned, with --panes pointed at a fake .barn-panes
-# and the shaun/worker fingerprints at temp paths. The wake is a plain trigger + Enter (no C-c,
-# slice 4), so the fixtures are plain sleep panes - they need not survive an interrupt. Torn down
-# on exit.
+# and the shaun/worker fingerprints at temp paths. Torn down on exit.
+#
+# #32: the recovery wakes are now delivered through send-verified, which CONFIRMS the pane went
+# busy (the turn started) and retries once on a miss. So a wake-EXPECTING fixture must transition
+# idle->busy on input (make_wakeable): static until the wake's Enter, then an ever-changing loop,
+# which is exactly the submission send-verified confirms. A wake whose delivery should FAIL uses
+# make_counter: it stays visually static (always idle, so send-verified never sees busy -> retries
+# then gives up) while recording every delivered line to a file, so the file's line count is the
+# number of deliveries made. The no-wake cases (working/standby/worker-working/worker-active) never
+# deliver, so they keep their plain static fixtures.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 hb="$here/heartbeat.sh"
 
-export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.3}" # timmy runs inside stuck-check inside heartbeat
+export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.3}" # timmy runs inside stuck-check AND send-verified inside heartbeat
+export SV_POLLS="${SV_POLLS:-3}"               # send-verified polls per delivery attempt (bound the failure path)
+export SV_SETTLE="${SV_SETTLE:-0.2}"           # send-verified text->Enter settle (short for a fast suite)
 export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: shaun stuck-recovery (#20)
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
 
@@ -31,10 +40,36 @@ no() { printf 'FAIL - %s\n' "$1"; fail=$((fail + 1)); }
 # A genuine idle box (timmy -> idle); the same shape the timmy/stuck-check suites use.
 idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/t | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'
 
-# make_fixture <sess> <printf-content> - a plain pane showing the canned content (the wake no
-# longer sends C-c, so no interrupt-survival shim is needed). Records the session for teardown.
+# make_fixture <sess> <printf-content> - a plain STATIC pane showing the canned content. Used by
+# the NO-wake cases (working/standby/...), which never deliver, so the pane need only hold a
+# classifiable state. Records the session for teardown.
 make_fixture() {
   tmux new-session -d -s "$1" -x 80 -y 24 "printf '$2'; sleep 600" 2>/dev/null
+  sessions="$sessions $1"
+  sleep 0.5
+}
+
+# make_wakeable <sess> <printf-content> - a WAKE-EXPECTING pane: it shows the canned content and
+# blocks on `read` (so it is idle/classifiable until woken), then on receiving the wake's line it
+# loops emitting ever-changing output (-> busy). That idle->busy transition is exactly what
+# send-verified confirms, so a wake delivered here verifies as submitted. The loop body runs in
+# the FIXTURE shell ($x / $RANDOM are deliberately not expanded here).
+make_wakeable() {
+  local cmd="printf '$2'; read x; while :; do printf 'tick %s\\n' \"\$RANDOM\"; sleep 0.05; done"
+  tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
+  sessions="$sessions $1"
+  sleep 0.5
+}
+
+# make_counter <sess> <printf-content> <logfile> - a DELIVERY-FAILING pane: it shows the canned
+# content and stays VISUALLY static forever (timmy always idle), so send-verified never sees a
+# busy transition - it retries once, then reports failure. Meanwhile it reads every delivered
+# (Enter-terminated) line and APPENDS it to <logfile> WITHOUT touching the display, so the file's
+# line count is exactly the number of deliveries send-verified made. clear_input's C-u/BSpace
+# carry no newline, so they never add a phantom line.
+make_counter() {
+  local cmd="printf '$2'; while IFS= read -r x; do printf '%s\\n' \"\$x\" >> '$3'; done"
+  tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
   sessions="$sessions $1"
   sleep 0.5
 }
@@ -82,11 +117,15 @@ log_has() { printf '%s\n' "$OUT" | grep -q "$1"; }
 pane_has() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -q "$2"; }
 
 # ============================================================================
-# STUCK: idle box, no STANDBY. Beat 1 stores fp / no nudge; beat 2 (identical, changed=0)
-# -> shaun nudged. Assert BOTH the log line AND that the pane received the wake text.
+# STUCK (#20, delivered AND verified via send-verified, #32): a wakeable pane - idle box, no
+# STANDBY, blocked on read. Beat 1 stores fp / no nudge; beat 2 (identical, changed=0) -> shaun
+# STUCK -> stuck-recovery wake delivered, the pane transitions idle->busy, and send-verified
+# CONFIRMS it. The success log line ("delivered + verified") is the proof the busy transition was
+# observed; we also assert timmy now reads the pane busy. (The wake TEXT scrolls off as the busy
+# loop runs, so the verified-delivery LOG, not a pane-text grep, is the robust signal here.)
 # ============================================================================
 ss="hbt_stuck_$$"
-make_fixture "$ss" "\xe2\x8f\xba all settled now.\n${idle_box}"
+make_wakeable "$ss" "\xe2\x8f\xba all settled now.\n${idle_box}"
 pf="$(fake_panes "$ss")"
 fp="$tmp/stuck.fp"
 
@@ -96,9 +135,35 @@ if [ -f "$fp" ]; then ok "stuck beat 1: fingerprint file written"; else no "stuc
 if pane_has "$ss" 'WAKE-STUCK-XYZZY'; then no "stuck beat 1: pane NOT yet woken"; else ok "stuck beat 1: pane NOT yet woken"; fi
 
 beat "$pf" "$fp"
-if log_has 'shaun STUCK'; then ok "stuck beat 2: heartbeat logged 'shaun STUCK -> wake'"; else no "stuck beat 2: heartbeat logged 'shaun STUCK -> wake'"; fi
-sleep 0.3
-if pane_has "$ss" 'WAKE-STUCK-XYZZY'; then ok "stuck beat 2: pane RECEIVED the stuck-recovery wake text"; else no "stuck beat 2: pane RECEIVED the stuck-recovery wake text"; fi
+if log_has 'shaun STUCK'; then ok "stuck beat 2: heartbeat logged 'shaun STUCK'"; else no "stuck beat 2: heartbeat logged 'shaun STUCK'"; fi
+if log_has 'delivered + verified'; then ok "stuck beat 2: wake DELIVERED + VERIFIED (send-verified saw the idle->busy submission)"; else no "stuck beat 2: wake delivered + verified ($OUT)"; fi
+if log_has 'FAILED'; then no "stuck beat 2: must NOT log a delivery failure"; else ok "stuck beat 2: no delivery failure logged"; fi
+"$here/../timmy/bin/timmy" --pane "$ss" >/dev/null 2>&1; brc=$?
+if [ "$brc" -eq 10 ]; then ok "stuck beat 2: pane is now BUSY (the wake started a turn)"; else no "stuck beat 2: pane should be busy after a verified wake (timmy rc=$brc)"; fi
+
+# ============================================================================
+# RETRY / DELIVERY FAILURE (#32): a stuck shaun whose pane NEVER goes busy (make_counter stays
+# visually static -> timmy idle on every poll). send-verified's first delivery does not 'take',
+# so it CLEARS and RETRIES once, then reports failure. The fixture records each delivered line to
+# a file, so the file's line count == deliveries: exactly 2 (initial + one retry). The heartbeat
+# logs a CLEAR failure, NOT a false success. This is the recovery-net's own delivery being
+# caught when it cannot submit, instead of silently no-op'ing (the whole point of #32).
+# ============================================================================
+rs="hbt_retry_$$"
+rgot="$tmp/retry_deliveries.log"
+make_counter "$rs" "\xe2\x8f\xba all settled now.\n${idle_box}" "$rgot"
+rpf="$(fake_panes "$rs")"
+rfp="$tmp/retry.fp"
+
+beat "$rpf" "$rfp"   # beat 1: store fp, no wake
+if [ -s "$rgot" ]; then no "retry beat 1: no delivery yet"; else ok "retry beat 1: no delivery yet (fp just stored)"; fi
+
+beat "$rpf" "$rfp"   # beat 2: STUCK -> deliver, miss, retry once, fail
+if log_has 'shaun STUCK'; then ok "retry beat 2: heartbeat logged 'shaun STUCK'"; else no "retry beat 2: heartbeat logged 'shaun STUCK'"; fi
+if log_has 'FAILED to submit after retry'; then ok "retry beat 2: clear delivery-FAILED log (not a silent no-op)"; else no "retry beat 2: expected a clear FAILED log ($OUT)"; fi
+if log_has 'delivered + verified'; then no "retry beat 2: must NOT claim a verified success"; else ok "retry beat 2: did not falsely claim success"; fi
+dn="$(grep -c . "$rgot" 2>/dev/null || printf 0)"
+if [ "$dn" -eq 2 ]; then ok "retry beat 2: delivered EXACTLY twice (initial + one retry)"; else no "retry beat 2: expected 2 deliveries, got $dn"; fi
 
 # ============================================================================
 # WORKING: a genuinely BUSY pane - an ANIMATING spinner (the frame + token count change
@@ -141,7 +206,7 @@ if pane_has "$sb" 'WAKE-STUCK-XYZZY'; then no "standby: pane never woken"; else 
 # Beat 1 stores both fingerprints / no wake; beat 2 (worker stable -> stuck, shaun standby) fires.
 # ============================================================================
 wa_shaun="hbt_wa_shaun_$$"
-make_fixture "$wa_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+make_wakeable "$wa_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
 wa_shirley="hbt_wa_shirley_$$"
 stalled_worker "$wa_shirley"
 pfwa="$(fake_panes2 "$wa_shaun" "$wa_shirley")"
@@ -150,10 +215,9 @@ beat "$pfwa" "$tmp/wa_shaun.fp" "$tmp/wa_worker.fp"
 if pane_has "$wa_shaun" 'WAKE-WORKER-XYZZY'; then no "worker-alert beat 1: shaun NOT yet alerted"; else ok "worker-alert beat 1: shaun NOT yet alerted (fps just stored)"; fi
 
 beat "$pfwa" "$tmp/wa_shaun.fp" "$tmp/wa_worker.fp"
-sleep 0.3
-if log_has 'shirley STUCK'; then ok "worker-alert beat 2: heartbeat logged 'shirley STUCK -> worker-alert'"; else no "worker-alert beat 2: heartbeat logged 'shirley STUCK -> worker-alert'"; fi
-if pane_has "$wa_shaun" 'WAKE-WORKER-XYZZY'; then ok "worker-alert beat 2: shaun RECEIVED the worker-alert wake"; else no "worker-alert beat 2: shaun RECEIVED the worker-alert wake"; fi
-if pane_has "$wa_shaun" 'WAKE-STUCK-XYZZY'; then no "worker-alert beat 2: shaun NOT given the stuck-recovery wake (disjoint, no double-wake)"; else ok "worker-alert beat 2: shaun NOT given the stuck-recovery wake (disjoint, no double-wake)"; fi
+if log_has 'shirley STUCK'; then ok "worker-alert beat 2: heartbeat logged 'shirley STUCK'"; else no "worker-alert beat 2: heartbeat logged 'shirley STUCK'"; fi
+if log_has 'worker-alert delivered + verified'; then ok "worker-alert beat 2: alert DELIVERED + VERIFIED to shaun (idle->busy submission confirmed)"; else no "worker-alert beat 2: alert delivered + verified ($OUT)"; fi
+if log_has 'stuck-recovery'; then no "worker-alert beat 2: shaun NOT given the stuck-recovery wake (disjoint, no double-wake)"; else ok "worker-alert beat 2: shaun NOT given the stuck-recovery wake (disjoint, no double-wake)"; fi
 
 # ============================================================================
 # #29 WORKER-WORKING: an ANIMATING (busy) worker -> never an alert, whatever shaun is doing.
