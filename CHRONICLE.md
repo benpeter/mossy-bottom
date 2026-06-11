@@ -102,3 +102,38 @@ fixture (no claude launch), then make idle detection robust at that width withou
 regressing the wide-pane cases. I compacted shirley first (clearing the spent #12
 context), waited for idle, passed the usage gate (5h 8%, weekly 4%), then handed. She
 is working it now; I STANDBY with resume = monitor, not re-hand.
+
+---
+
+## 2026-06-11 ~05:32-05:36 - #22 accepted (narrow idle box, footer wrap), #23 derived from its residual
+
+shirley delivered #22 slice 1 and I verified it from the outside rather than on her
+word: shellcheck + bash -n clean, and the timmy suite 47/47 on my own run, including the
+two new "#22 narrow WRAPPED-footer" assertions - a narrow idle box whose footer wraps is
+now positively recognised as idle, and the '?' variant as a question. The load-bearing
+check is that the SAFETY direction did not move: "#10 quoted idle box above a real busy
+spinner -> busy" and every working case still classify busy, so the fix adds idle
+RECOGNITION without ever mislabeling a live working pane idle. shirley's own report was
+notably disciplined - she fixed box-recognition while refusing to flip the busy "decoy"
+fixture to idle, naming that as the forbidden direction. c3ab523 is not yet on origin, so
+the #22 close is deferred to a later tick (single-pusher invariant intact).
+
+The interesting part was the residual. shirley flagged a "decoy" case - a working pane
+whose capture contains idle-box chrome - that must stay busy and which she could not
+resolve with a classifier tweak ("needs an evidence source beyond the capture"). That is
+the very defect I had been hitting all run: while monitoring shirley, timmy repeatedly
+returned idle with idle_box=true even though snapshots_differ=true and she was demonstrably
+working - because her work was rendering idle-box fixtures into her own pane. A false-idle
+on a live pane is the dangerous direction (a driver could treat a still-working worker as
+finished), and it is content-shape-driven, not narrow-width - distinct from #22. So I
+filed #23 (Robustness + Safety) with the safe direction stated: liveness must win over
+static idle-box chrome, without regressing the settled-idle cases (a genuinely settled idle
+box, and the #10 frozen-decoy-spinner, still read idle). I derived this frontier from
+shirley's surfaced residual plus my own live evidence - exactly the "shirley reports
+proof and blockers, shaun picks the next slice" division.
+
+Operating note worth banking: throughout this stretch timmy's false-idle made its own
+single-call idle reading untrustworthy for a worker that builds TUI fixtures, so I leaned
+on a manual two-snapshot liveness check (capture, sleep 3, capture, compare) before
+treating shirley as idle. That kept me from mistiming acceptance. #23 is the fix; until it
+lands, the manual 2-snapshot guard is the standing workaround.
