@@ -12,6 +12,11 @@ readonly EXIT_IDLE=0
 readonly EXIT_BUSY=10
 readonly EXIT_WAITING=20
 readonly EXIT_QUESTION=30
+# #25: a spinner is present but FROZEN - byte-identical across the confirm window, its elapsed
+# counter included - i.e. a wedged turn (process blocked, TUI not repainting). Distinct from
+# busy (a LIVE spinner advances) so a caller can choose to recover, and deliberately NOT idle
+# (folding a stall into idle is the dangerous false-idle direction).
+readonly EXIT_STALLED=40
 # --watch/--await: a snapshot failed mid-poll. Distinct from the per-state codes
 # and from the usage error (64), so a caller can tell a dead pane apart.
 readonly EXIT_WATCH_ERR=65
@@ -60,6 +65,8 @@ States and exit codes (single-shot):
                       differ
   waiting-input 20    a numbered selection menu is shown
   question      30    idle box whose last assistant line ends in '?'
+  stalled       40    a spinner is present but frozen - byte-identical across the
+                      confirm window, counter included - a wedged turn, not live work
 
 --watch mode:
   Prints "<state> <tick>" once on the first read, then one line each time the
@@ -437,6 +444,31 @@ sustained_motion() {
   return 0
 }
 
+# sustained_freeze - confirm a spinner-bearing pane is WEDGED, not slowly working (#25). A LIVE
+# spinner advances its elapsed/token counter (or the pane otherwise changes between repaints); a
+# WEDGED turn is byte-identical including that counter. classify_once reaches here only with a
+# spinner present AND its first snapshot pair already identical (differ=false). A SINGLE identical
+# pair is not enough to call it stalled: an advancing spinner can skip ONE repaint between two
+# captures, so trusting one match would mis-fire stalled on genuine work - the FORBIDDEN direction
+# (the issue's binding safety bias: genuine work must NEVER read stalled). So we require the freeze
+# to PERSIST: take SUSTAIN_SAMPLES more snapshot pairs and return 0 (frozen -> stalled) only if
+# EVERY consecutive pair is identical; return 1 (advancing -> stays busy) the moment any pair
+# differs. This mirrors sustained_motion, inverted. A capture failure returns 1 (busy), keeping the
+# SAFE direction rather than inventing a new error path - exactly as sustained_motion falls back to
+# the box. The window costs SUSTAIN_SAMPLES*INTERVAL, paid ONLY in the rare spinner-AND-static case
+# (a genuinely advancing spinner takes differ=true and never reaches here).
+sustained_freeze() {
+  local prev cur n
+  prev="$(snapshot)" || return 1
+  for ((n = 0; n < SUSTAIN_SAMPLES; n++)); do
+    sleep "$INTERVAL"
+    cur="$(snapshot)" || return 1
+    [ "$prev" = "$cur" ] || return 1
+    prev="$cur"
+  done
+  return 0
+}
+
 # Take one fresh pair of snapshots and classify them. Sets the globals `state`,
 # `code`, and the evidence vars (differ/spinner/menu/idle_box/sustained/ends_q). Returns
 # nonzero if a capture fails. Both the single-shot path and --watch call THIS, so
@@ -451,8 +483,13 @@ sustained_motion() {
 #      pane never renders the suffix; when the suffix is absent (working OR narrow-pane
 #      truncated) this is skipped and the spinner/precedence below decides unchanged.
 #      Inside it, a trailing "?" means question, else idle.
-#   1. a spinner is present                -> busy. A working pane is never a menu, so
-#      this is checked first; it vetoes a menu shape sitting in the working pane's text.
+#   1. a spinner is present                -> busy, UNLESS it is frozen. A working pane is never
+#      a menu, so this is checked first; it vetoes a menu shape in the working pane's text. #25:
+#      an ADVANCING spinner (snapshots already differ, or differ within the confirm window) is
+#      live -> busy; a spinner byte-identical across sustained_freeze's window (counter included)
+#      is a WEDGED turn -> stalled, a distinct signal (never idle - false-idle is the dangerous
+#      direction). The freeze is confirmed across multiple samples so a one-frame repaint-skip on
+#      an advancing pane does not mis-fire.
 #   2. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for the
 #      settled state, ABOVE a SINGLE snapshot diff: a real idle box can still show transient
 #      boot chrome that makes two snapshots differ (proven against a live session), so the box
@@ -481,6 +518,7 @@ classify_once() {
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
   if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
   sustained="false"  # set true only when the idle_box+differ branch confirms persistent motion
+  spinner_frozen="false"  # set true only when the spinner branch confirms a persistent freeze (#25)
 
   if [ "$idle_suffix" = "true" ]; then
     # settled-idle box confirmed by the "← for agents" suffix: beats the spinner, closing
@@ -492,7 +530,18 @@ classify_once() {
       state="idle"; code="$EXIT_IDLE"
     fi
   elif [ "$spinner" = "true" ]; then
-    state="busy"; code="$EXIT_BUSY"
+    # #25: a spinner present but FROZEN - byte-identical across the confirm window, its elapsed
+    # counter and all - is a WEDGED turn (process blocked, TUI not repainting), not live work.
+    # An advancing spinner already changed snap1..snap2 (differ=true), so it goes busy at once;
+    # only when the first pair MATCHED do we confirm the freeze PERSISTS (sustained_freeze mirrors
+    # sustained_motion), so a one-sample repaint-skip on an advancing pane does NOT mis-fire. A
+    # confirmed freeze is a DISTINCT signal (stalled), never folded into idle (false-idle is the
+    # dangerous direction) nor masked as plain busy, so a caller can choose to recover.
+    if [ "$differ" = "false" ] && sustained_freeze; then
+      spinner_frozen="true"; state="stalled"; code="$EXIT_STALLED"
+    else
+      state="busy"; code="$EXIT_BUSY"
+    fi
   elif [ "$idle_box" = "true" ]; then
     # #23: the box shape fires for an idle box AND a working pane that renders idle-box
     # chrome. If the pane is PERSISTENTLY advancing, it is the latter - liveness overrules
@@ -579,8 +628,8 @@ fi
 classify_once || die "capture-pane failed for pane '$pane'"
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$spinner_frozen" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi

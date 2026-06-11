@@ -29,6 +29,22 @@ assert_state() {
   fi
 }
 
+# spawn_advancing <session> <width> <height> <printf-fmt-with-ONE-%d-in-the-spinner-counter>
+# Stand up a pane whose spinner is GENUINELY LIVE: redraw <fmt> from cursor-home every 0.1s with
+# an advancing counter, so the spinner's elapsed region changes between captures. #25: an
+# advancing spinner is working, so it must read busy, never stalled - and because the snapshots
+# always differ, classify_once takes the busy path WITHOUT the freeze-confirm window. The home
+# redraw (not a clear) keeps the frame's full structure present in every snapshot, exactly like
+# the #23 motion fixture; the trailing \033[J wipes any leftover when the counter widens. Use
+# this for every fixture whose intent is a LIVE busy spinner (a STATIC spinner is now the
+# wedged/stalled case). Pass <fmt> double-quoted so embedded ${box}/${menu} vars expand; the
+# block must contain no single quote and exactly one %d (other literal %s stay %%).
+spawn_advancing() {
+  local sess="$1" w="$2" h="$3" fmt="$4"
+  tmux new-session -d -s "$sess" -x "$w" -y "$h" \
+    "i=0; while true; do printf '\033[H'; printf '$fmt' \"\$i\"; printf '\033[J'; i=\$((i+1)); sleep 0.1; done" 2>/dev/null
+}
+
 # --- fixture: an idle pane (static content, nothing advancing) ---
 idle_sess="timmy_t_idle_$$"
 tmux new-session -d -s "$idle_sess" -x 80 -y 24 \
@@ -49,25 +65,57 @@ assert_state "$busy_sess" busy 10 "advancing pane classified busy"
 
 tmux kill-session -t "$busy_sess" 2>/dev/null
 
-# --- fixture: a STALLED pane - identical snapshots but a spinner is present.
-# Snapshot-diff alone would call this idle; the spinner cue must force busy. The
-# active spinner LINE carries its live counter in parens (e2 97 8f "●", e2 80 a6
-# "…", c2 b7 "·"): "● Whirring… (esc to interrupt · 1.2k tokens)".
+# --- fixture: a LIVE spinner whose elapsed counter ADVANCES between snapshots. The spinner cue
+# forces busy AND the advance proves it is working, not wedged (#25): an advancing spinner reads
+# busy, never stalled. The active spinner LINE carries its live counter in parens (e2 97 8f "●",
+# e2 80 a6 "…", c2 b7 "·"): "● Whirring… (esc to interrupt · <n>k tokens)". Because the snapshots
+# differ, classify_once takes the busy path WITHOUT entering the freeze-confirm window. ---
 spin_sess="timmy_t_spin_$$"
-tmux new-session -d -s "$spin_sess" -x 80 -y 24 \
-  'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n"; sleep 600' 2>/dev/null
+spawn_advancing "$spin_sess" 80 24 "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %dk tokens)\n"
 sleep 0.5
 
-assert_state "$spin_sess" busy 10 "stalled frame with spinner classified busy"
+assert_state "$spin_sess" busy 10 "#25 advancing-counter spinner classified busy (live, not stalled)"
 
 tmux kill-session -t "$spin_sess" 2>/dev/null
+
+# --- #25 RED: a WEDGED turn - a spinner present but BYTE-IDENTICAL across timmy's sample
+# window (the spinner's own elapsed counter frozen, here a stuck "48s") = a blocked process
+# whose TUI is not repainting. This reads exactly like genuine work today (the spinner cue
+# forces busy whether the counter advances or not), so a human has had to spot the frozen
+# counter and intervene. #25 moves that judgment into timmy: a fully-frozen spinner must emit
+# a DISTINCT stalled signal (state "stalled", exit 40) so a caller can choose to recover -
+# never folded into idle (the dangerous false-idle direction) nor masked as plain busy. This
+# static pane is byte-identical on every capture, so it is the frozen case. RED until the fix:
+# timmy returns busy/10 today, so this asserts stalled/40 and FAILS. ---
+frozen_sess="timmy_t_frozen_$$"
+tmux new-session -d -s "$frozen_sess" -x 80 -y 24 \
+  'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 48s)\n"; sleep 600' 2>/dev/null
+sleep 0.5
+
+assert_state "$frozen_sess" stalled 40 "#25 frozen spinner (byte-identical, counter stuck) -> stalled, not busy"
+
+tmux kill-session -t "$frozen_sess" 2>/dev/null
+
+# --- #25 mis-fire guard: an ADVANCING spinner that REPAINTS the same frame between counter
+# ticks. The TUI repaints every 0.1s but the shown counter ticks only every ~0.5s (i/5), so
+# MANY consecutive captures are byte-identical (a one-sample repaint-skip) even though the pane
+# is genuinely working. A single identical pair must NOT read stalled: like sustained_motion,
+# sustained_freeze takes a MULTI-sample window and any advance within it -> busy. So this must
+# classify busy, never stalled - the binding safety bias (genuine work never reads stalled). ---
+skip_sess="timmy_t_skip_$$"
+tmux new-session -d -s "$skip_sess" -x 80 -y 24 \
+  "i=0; while true; do printf '\033[H\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %ds)\033[K\n' \"\$((i/5))\"; i=\$((i+1)); sleep 0.1; done" 2>/dev/null
+sleep 0.5
+
+assert_state "$skip_sess" busy 10 "#25 advancing spinner with one-sample repaint-skip -> busy (no stall mis-fire)"
+
+tmux kill-session -t "$skip_sess" 2>/dev/null
 
 # --- GAP-1a (#9): the same active spinner but with an ASCII three-dot ellipsis
 # "..." instead of the … glyph. The SHAPE cue must still read busy regardless of
 # how the ellipsis renders - else a working pane reads idle and gets interrupted. ---
 dots_sess="timmy_t_dots_$$"
-tmux new-session -d -s "$dots_sess" -x 80 -y 24 \
-  'printf "\xe2\x97\x8f Whirring... (esc to interrupt)\n"; sleep 600' 2>/dev/null
+spawn_advancing "$dots_sess" 80 24 "\xe2\x97\x8f Whirring... (esc to interrupt \xc2\xb7 %ds)\n"
 sleep 0.5
 
 assert_state "$dots_sess" busy 10 "GAP-1a spinner with ASCII '...' ellipsis classified busy"
@@ -78,8 +126,7 @@ tmux kill-session -t "$dots_sess" 2>/dev/null
 # (here U+2736 "✶" = e2 9c b6) with a past-tense verb. Glyph- and verb-agnostic:
 # the shape (leading glyph + verb + ellipsis + counter) must still read busy. ---
 glyph_sess="timmy_t_glyph_$$"
-tmux new-session -d -s "$glyph_sess" -x 80 -y 24 \
-  'printf "\xe2\x9c\xb6 Cooked\xe2\x80\xa6 (3s)\n"; sleep 600' 2>/dev/null
+spawn_advancing "$glyph_sess" 80 24 "\xe2\x9c\xb6 Cooked\xe2\x80\xa6 (%ds)\n"
 sleep 0.5
 
 assert_state "$glyph_sess" busy 10 "GAP-1b spinner with alt glyph + past-tense verb classified busy"
@@ -91,8 +138,7 @@ tmux kill-session -t "$glyph_sess" 2>/dev/null
 # bottom-anchoring keeps the real live spinner, it only rejects content above. (No idle
 # box here, so this can sit with the other spinner fixtures, before idle_box is defined.) ---
 realspin_sess="timmy_t_realspin_$$"
-tmux new-session -d -s "$realspin_sess" -x 80 -y 24 \
-  "printf '\xe2\x8f\xba Here is a lot of report content from the last turn.\n  more content.\n  even more content.\n\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$realspin_sess" 80 24 "\xe2\x8f\xba Here is a lot of report content from the last turn.\n  more content.\n  even more content.\n\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %dk tokens)\n"
 sleep 0.5
 
 assert_state "$realspin_sess" busy 10 "#10 real bottom spinner with content above it -> busy"
@@ -107,8 +153,7 @@ tmux kill-session -t "$realspin_sess" 2>/dev/null
 # Footer B carries NO "← for agents" suffix: a working footer never does (smoke-test.md
 # section 3), so the #17 settled-idle override does not fire and the spinner decides. ---
 reallayout_sess="timmy_t_reallayout_$$"
-tmux new-session -d -s "$reallayout_sess" -x 80 -y 24 \
-  "printf '\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$reallayout_sess" 80 24 "\xe2\x97\x8f Processing... (6m %ds \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n"
 sleep 0.5
 
 assert_state "$reallayout_sess" busy 10 "#10 real production busy layout (spinner 7 rows up) -> busy"
@@ -158,8 +203,7 @@ tmux kill-session -t "$malt_sess" 2>/dev/null
 # this as waiting-input (an obey-the-classifier driver would have injected a stray menu
 # answer into a working session). Spinner-before-menu precedence must read it BUSY. ---
 mfp_sess="timmy_t_mfp_$$"
-tmux new-session -d -s "$mfp_sess" -x 80 -y 24 \
-  'printf "\xe2\x8f\xba Editing has_menu: it keyed on \xe2\x9d\xaf 1. and the Enter to confirm line.\n  \xe2\x9d\xaf 1. Yes, I trust this folder\n    2. No, exit\n  Enter to confirm \xc2\xb7 Esc to cancel\n\xe2\x97\x8f Churning\xe2\x80\xa6 (esc to interrupt \xc2\xb7 2k tokens)\n"; sleep 600' 2>/dev/null
+spawn_advancing "$mfp_sess" 80 24 "\xe2\x8f\xba Editing has_menu: it keyed on \xe2\x9d\xaf 1. and the Enter to confirm line.\n  \xe2\x9d\xaf 1. Yes, I trust this folder\n    2. No, exit\n  Enter to confirm \xc2\xb7 Esc to cancel\n\xe2\x97\x8f Churning\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %dk tokens)\n"
 sleep 0.5
 
 assert_state "$mfp_sess" busy 10 "GAP-2 working pane displaying menu source (14:17 case) classified busy, not menu"
@@ -214,8 +258,7 @@ tmux kill-session -t "$decoy_sess" 2>/dev/null
 # has_idle_suffix must NOT fire, so the spinner decides -> busy. Proves the override never
 # false-negatives a working pane (mislabeling working as idle is the forbidden direction). ---
 work_sess="timmy_t_work_$$"
-tmux new-session -d -s "$work_sess" -x 80 -y 24 \
-  "printf '\xe2\x97\x8f Processing\xe2\x80\xa6 (6m 24s \xc2\xb7 esc to interrupt)\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$work_sess" 80 24 "\xe2\x97\x8f Processing\xe2\x80\xa6 (6m %ds \xc2\xb7 esc to interrupt)\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n"
 sleep 0.5
 
 assert_state "$work_sess" busy 10 "#17 working pane, spinner active, NO suffix -> busy (never false-negative working)"
@@ -538,8 +581,7 @@ tmux kill-session -t "$ibmenu_sess" 2>/dev/null
 # --- #10 SHADOW-REJECTION: a quoted idle box ABOVE a real BUSY spinner (the full working
 # layout: spinner/blank/rule/prompt/rule/footerA/footerB). Must read busy. ---
 ibspin_sess="timmy_t_ibspin_$$"
-tmux new-session -d -s "$ibspin_sess" -x 80 -y 24 \
-  "printf '${quoted_box}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$ibspin_sess" 80 24 "${quoted_box}\xe2\x97\x8f Processing... (6m %ds \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n"
 sleep 0.5
 
 assert_state "$ibspin_sess" busy 10 "#10 quoted idle box above a real busy spinner -> busy"
@@ -576,8 +618,7 @@ tmux kill-session -t "$mqi_sess" 2>/dev/null
 # --- #10 menu SHADOW-REJECTION: a frozen numbered list in scrollback ABOVE a real BUSY
 # spinner (full working layout). Must read busy. ---
 mqs_sess="timmy_t_mqs_$$"
-tmux new-session -d -s "$mqs_sess" -x 80 -y 24 \
-  "printf '${quoted_menu}\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$mqs_sess" 80 24 "${quoted_menu}\xe2\x97\x8f Processing... (6m %ds \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n"
 sleep 0.5
 
 assert_state "$mqs_sess" busy 10 "#10 frozen numbered list above a real busy spinner -> busy"
@@ -611,8 +652,7 @@ tmux kill-session -t "$qshadow_idle_sess" 2>/dev/null
 # --- #10 question SHADOW-REJECTION: a question shape in SCROLLBACK above a real BUSY
 # spinner (full working layout). Spinner wins -> busy, not question. ---
 qshadow_busy_sess="timmy_t_qshadow_busy_$$"
-tmux new-session -d -s "$qshadow_busy_sess" -x 80 -y 24 \
-  "printf '\xe2\x8f\xba Should I proceed?\n\xe2\x97\x8f Processing... (6m 24s \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'; sleep 600" 2>/dev/null
+spawn_advancing "$qshadow_busy_sess" 80 24 "\xe2\x8f\xba Should I proceed?\n\xe2\x97\x8f Processing... (6m %ds \xc2\xb7 esc to interrupt)\n\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n"
 sleep 0.5
 
 assert_state "$qshadow_busy_sess" busy 10 "#10 question in scrollback above a real busy spinner -> busy"
@@ -648,12 +688,15 @@ tmux kill-session -t "$qreword_guard_sess" 2>/dev/null
 # --- fixture: --watch emits one line per state CHANGE only ---
 # Drive a pane through idle -> busy -> idle and assert watch prints EXACTLY three
 # lines in that order, with NO duplicate while a state is held. The pane holds
-# each state ~2s; watch polls at TIMMY_INTERVAL. busy is forced by the spinner
-# cue (deterministic on a static frame), idle by static plain content.
+# each state ~2-3s; watch polls at TIMMY_INTERVAL. busy is forced by an ADVANCING
+# spinner (the snapshots differ -> busy, not stalled), idle by static plain content.
 w_sess="timmy_t_watch_$$"
 w_out="$(mktemp "${TMPDIR:-/tmp}/timmy-watch-XXXXXX")"
+# The middle phase is an ADVANCING spinner (counter ticks every 0.1s for ~3s), so it reads busy,
+# NOT stalled (#25) - a static spinner here would now classify stalled and break the idle,busy,idle
+# sequence. The phase is bounded by the seq loop, then clear + IDLE-B, then a settle sleep.
 tmux new-session -d -s "$w_sess" -x 80 -y 24 \
-  "printf 'IDLE-A\n'; sleep 2; printf '\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt)\n'; sleep 2; clear; printf 'IDLE-B\n'; sleep 600" 2>/dev/null
+  "printf 'IDLE-A\n'; sleep 2; for k in \$(seq 1 30); do printf '\033[H\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %ds)\033[K\n' \"\$k\"; sleep 0.1; done; clear; printf 'IDLE-B\n'; sleep 600" 2>/dev/null
 sleep 0.5  # let IDLE-A paint before watch takes its first read
 
 "$timmy" --watch --pane "$w_sess" > "$w_out" 2>/dev/null &
