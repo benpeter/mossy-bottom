@@ -51,7 +51,7 @@ cannot self-verify (a live 3-pane target-mode boot) is escalated as a
 Farmer-operated step (ESCALATIONS 23:43); the #17 narrow-pane, #19 API-only-creds,
 and #18 deferred bits get checked during that boot.
 
-## 2026-06-11 - Run 3 continued: timmy robustness, Economy levers, the wedge taxonomy
+## 2026-06-11 - Run 3 continued: timmy robustness, the wedge taxonomy, send-verified driving, event-driven Economy
 
 Detail in the live TICKS/CHRONICLE (seals to chapter `2026-06-11.md` at the next
 rotation). The chain relaunched this morning on the evolved prompts after a 00:40
@@ -94,15 +94,37 @@ when the WORKER stalls (alert-only, disjoint from the driver path). Takes effect
 next launch. Lesson banked: the pane elapsed counter is an unreliable liveness signal -
 trust process activity + forward progress.
 
-**In flight:** #30 - preflight the launch prerequisites on a live `up` (claude/tmux/git
-on PATH, target is a git work tree) so the Farmer-operated #8 boot fails fast with one
-clear message. The on-ramp to #8; does not replace it. Generality + Robustness.
+**Send-verified driving + event-driven Economy (#30-#36, all CLOSED) - the Economy milestone.**
+- #30 - live-`up` preflight (claude/tmux/git on PATH, target is a git work tree) so the
+  Farmer-operated #8 boot fails fast with one clear message. An #8 on-ramp. Generality + Robustness.
+- #31 - bin/send-verified.sh: type + Enter, poll timmy, busy=submitted / idle=clear+retry-once-
+  then-fail. Mechanizes the 06:39 prompt-submission lesson for a fresh shaun. Robustness (driving) + Economy.
+- #32/#33 - send-verified adopted across every heartbeat send: the recovery wakes (#20 stuck +
+  #29 worker-alert) and the bitzer sustain-trigger. No silent-delivery single point in the safety net.
+- #34 - timmy --selftest: a human-readable #8-boot verdict over the same classify path (2nd #8
+  on-ramp). Robustness + Generality.
+- #35 - barn delivers boot ROLE prompts via send-verified (selective: role prompts only, inject
+  lines stay plain) - the last unverified send. Verified delivery now complete across the harness. Robustness.
+- #36 - MILESTONE: event-driven wake built end to end (4 slices). The heartbeat now wakes shaun on
+  worker EVENTS (done / needs-input / stalled) + a STANDBY backstop after K idle beats; bitzer's
+  blind every-beat STANDBY-wake is removed - the chain's biggest standing token cost. Judgment wakes
+  on events, not the clock. The backstop net was built and proven BEFORE the blind-wake removal.
+  Economy #2. Inert until next launch.
 
-**Standing steering flag (for the Farmer).** The hermetic surface is thinning - the
-remaining in-chain frontiers are incremental. The highest-value quality, Generality
-(driving a real external target), is gated on the live target-mode boot under #8, which
-only the Farmer can run (a chain cannot self-verify a nested live boot). #30 lowers the
-friction of that boot; the boot itself awaits the Farmer's word.
+Banked (driving lessons): verify-submission must confirm a FRESH spinner (a prior turn's settled
+glyph fools "a spinner"); rule out a BUFFERED input box (Esc reveals it) before calling a frozen
+pane a wedge; when ps-checking the worker, exclude the chain's own heartbeat.sh (sleep 300) red
+herring; the advancing pane counter is the reliable live signal.
+
+**In flight:** #37 - parameterize the heartbeat suite's beat/confirm timing (the #26 lever applied
+to heartbeat) so the grown ~73s suite runs fast. Economy + dev-loop legibility.
+
+**Standing steering flag (for the Farmer) - sharper now.** With event-driven Economy done (#36) and
+the send-verified / timmy hardening complete, the in-chain hermetic surface is worked down to modest
+follow-ups (e.g. #37). The two highest-value frontiers left both need the Farmer: Generality - driving
+a real external target - is gated on the live target-mode boot under #8 (a chain cannot self-verify a
+nested live boot; #30 + #34 de-risk it). bitzer keeps the engine warm on the modest in-chain work, but
+#8 is the high-leverage move and it awaits the Farmer's word.
 
 **Open / parked / pending the Farmer:**
 - #12 - close-vs-push: operational half landed (gate close on proving-commit-on-
