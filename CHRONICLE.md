@@ -254,3 +254,47 @@ that only the Farmer can run (a chain cannot launch a nested live chain to self-
 The chain is not idle on this: it filed #30 to preflight the launch prerequisites so that
 Farmer-operated boot fails fast with one clear message instead of a confusing mid-boot
 failure. The on-ramp is being built; the boot itself waits on the Farmer's word.
+
+## 2026-06-11 09:33 - the hardening arc closes; the first design-first frontier, and a deliberate Farmer-review pause
+
+Run 3's long in-chain hardening arc is complete - #22 through #35: timmy classification
+robustness (narrow panes, frozen-spinner stall detection), the full stall-recovery loop
+(detect #25 -> map-to-stuck #28 -> recover-shaun #20 -> alert-on-worker #29), launch
+safety (pager-neutralized #27, live-boot preflight #30, --selftest diagnostic #34),
+economy (per-role inject #24, fast timmy suite #26), and a verified-delivery helper
+(#31) now adopted across every prompt-send in the harness (heartbeat trigger + recovery
+wakes #32/#33, boot role prompts #35). Every send the chain makes is now confirmed.
+
+Two-thirds through that arc I flagged to bitzer that the hermetic frontier was thinning
+into diminishing-return hardening and on-ramps, while the two highest-value qualities -
+Generality (drive a real target, #8) and event-driven Economy (stop waking shaun on a
+fixed interval when nothing changed) - both needed steering decisions, not more shirley
+slices. bitzer steered: finish the last send-verified gap (#35, done), then take
+event-driven Economy as the next frontier - but DESIGN-FIRST. So #36 is the wake-redesign
+APPROACH, authored and filed for the Farmer to review, with nothing built: the heartbeat
+becomes the single event-driven waker of shaun (wake on worker done/stalled/needs-input,
+do nothing while the worker is busy), bitzer's poll stops blind-waking a STANDBY shaun,
+and a STANDBY backstop guards against a missed event. It lands only at next launch, so it
+cannot touch the running chain.
+
+That leaves the buildable queue intentionally empty: #36 awaits the Farmer's review of the
+design, #8 awaits the Farmer's live boot, #12/#11 are Farmer-blocked. This is a deliberate
+pause, not a stall - the engine idles only when paused, and design-first review IS the
+pause. shirley sits idle; shaun STANDBYs pending the Farmer's call on #36 or #8. The
+on-ramp treadmill is broken: the next build, when cleared, is the highest-value in-chain
+quality the MISSION names.
+
+**09:43 correction (bitzer) - the pause was overturned, the engine did NOT idle.** The
+design-first gate above was bitzer's own over-gating, and on second look it was a
+never-stop regression: self-pausing the engine to wait on a possibly-absent Farmer is
+exactly the hole Run 3 exists to close. The wake-redesign lands only at next launch and is
+reversible before relaunch, so building it now cannot break the running chain or foreclose
+the Farmer's input. So the gate belongs on RELAUNCH with the new wake (verify in a
+throwaway pane, review before any `up`), NOT on building it. bitzer refined the steer
+accordingly: #36's design stays filed and visible for the Farmer to override anytime, and
+the chain BUILDS. shaun resolved the open questions on his own direction (STANDBY backstop
+only; worker-done = idle confirmed across two beats; heartbeat<->worker coupling accepted
+per the #29 precedent; Farmer messages relayed regardless of worker state) and handed
+slice 1 - the heartbeat now detects the worker-done event and wakes a STANDBY shaun via
+send-verified, doing nothing while the worker is busy (the economy win). The buildable
+queue was never actually empty; the engine stayed on the prize.
