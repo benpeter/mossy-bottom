@@ -13,13 +13,16 @@
 #   working  state is busy|waiting|question, OR changed=1 - the pane is alive / advancing.
 #   standby  state=idle AND changed=0 AND has_standby=1 - a legitimate paused turn; bitzer's
 #            normal STANDBY-wake handles it, it is NOT a stuck-nudge target.
-#   stuck    state=idle AND changed=0 AND has_standby=0 - the dead, frozen turn.
+#   stuck    state=stalled AND changed=0 (a frozen-spinner WEDGED turn, timmy exit 40 #25),
+#            OR state=idle AND changed=0 AND has_standby=0 - both are dead, frozen turns the
+#            heartbeat must recover. stalled maps to stuck DIRECTLY (a frozen spinner cannot
+#            be a legit STANDBY pause), closing the #25-detection -> #20-recovery loop (#28).
 #
 # The function TRUSTS 'changed' as given. The await-vs-stuck distinction (a legitimately
 # backgrounded await advances its pane within a heartbeat interval, so changed=1) is carried
 # by HOW 'changed' is sampled - that sampling is a LATER slice, not this one.
 #
-# CLI: stuck-check.sh --state <idle|busy|waiting|question> --has-standby <0|1> --changed <0|1>
+# CLI: stuck-check.sh --state <idle|busy|waiting|question|stalled> --has-standby <0|1> --changed <0|1>
 # prints the verdict and exits 0 (working) / 10 (standby) / 20 (stuck); 64 on a usage error.
 #
 # tva
@@ -45,13 +48,13 @@ die() { printf 'stuck-check: %s\n' "$1" >&2; exit "${EXIT_USAGE}"; }
 usage() {
   cat <<'EOF'
 Usage:
-  stuck-check.sh --state <idle|busy|waiting|question> --has-standby <0|1> --changed <0|1>
+  stuck-check.sh --state <idle|busy|waiting|question|stalled> --has-standby <0|1> --changed <0|1>
   stuck-check.sh --pane <id> --fingerprint-file <path>
 
 Decide whether a pane is working, legitimately paused (standby), or stuck on a dead turn.
 
 Explicit-inputs mode (the pure core):
-  --state <s>        the pane's classified state (idle|busy|waiting|question)
+  --state <s>        the pane's classified state (idle|busy|waiting|question|stalled)
   --has-standby <b>  1 if the pane shows a STANDBY marker, else 0
   --changed <b>      1 if the pane advanced (see --pane for how this is sampled), else 0
 
@@ -60,26 +63,41 @@ Live-pane mode (gathers the three inputs from a REAL pane):
   --fingerprint-file <p>   per-pane file holding the prior capture fingerprint (or env
                            MOSSY_STUCK_FP). The change signal is the fingerprint compared
                            ACROSS calls; the first call (no prior) is treated as changed=1.
-    state       <- timmy (timmy/bin/timmy; override with MOSSY_TIMMY)
+    state       <- timmy (timmy/bin/timmy; override with MOSSY_TIMMY); exit 40 -> stalled (#25)
     has_standby <- a STANDBY marker line in the capture (override MOSSY_STANDBY_PATTERN)
     changed     <- this capture's fingerprint vs the prior call's
   A pane that cannot be read (timmy can't classify, capture fails) -> working, never stuck.
 
 Verdict (printed) and exit code:
-  working  0   state is busy|waiting|question, OR changed=1 (alive / advancing)
+  working  0   busy|waiting|question, OR changed=1 (alive / advancing - wins even over stalled)
   standby 10   idle AND changed=0 AND has_standby=1 (legit paused turn)
-  stuck   20   idle AND changed=0 AND has_standby=0 (dead, frozen turn)
+  stuck   20   stalled with changed=0 (frozen-spinner wedged turn #25), OR idle AND changed=0
+               AND has_standby=0 - both are dead, frozen turns the heartbeat recovers
   usage error 64
 EOF
 }
 
 # classify_turn <state> <has_standby> <changed> - PURE: echo the verdict word for the given
-# inputs, total over the documented domain (state in {idle,busy,waiting,question}; the two
-# flags in {0,1}). No side effects, no I/O beyond the echo - this is the seam the test drives.
+# inputs, total over the documented domain (state in {idle,busy,waiting,question,stalled}; the
+# two flags in {0,1}). No side effects, no I/O beyond the echo - this is the seam the test drives.
 classify_turn() {
   local state="$1" has_standby="$2" changed="$3"
-  # Alive / advancing wins first: any non-idle state, or a pane that moved this interval.
-  if [ "${state}" != "idle" ] || [ "${changed}" = "1" ]; then
+  # Safe direction wins first: a pane that MOVED this interval is alive / advancing -> working,
+  # never stuck. This holds even for a momentarily 'stalled' read, which then gets another
+  # heartbeat cycle (genuine work must never be recovered out from under itself).
+  if [ "${changed}" = "1" ]; then
+    printf 'working\n'
+    return 0
+  fi
+  # A frozen-spinner 'stalled' turn (timmy exit 40, #25) is WEDGED -> stuck. It carries a frozen
+  # spinner, so it cannot be a legit idle STANDBY pause; map it DIRECTLY, without consulting
+  # has_standby (#28 - the new state #25 added, now wired into #20 recovery).
+  if [ "${state}" = "stalled" ]; then
+    printf 'stuck\n'
+    return 0
+  fi
+  # Any OTHER non-idle state (busy|waiting|question) is genuinely alive -> working.
+  if [ "${state}" != "idle" ]; then
     printf 'working\n'
     return 0
   fi
@@ -112,6 +130,8 @@ fingerprint() {
 
 # pane_state <pane> - map timmy's exit code to a state word; return 1 if timmy could not
 # classify (gone pane, usage error) so the caller can treat that as alive, never stuck.
+# Exit 40 (stalled, #25) is a recognised state here (#28): a frozen-spinner WEDGED turn, which
+# classify_turn routes to stuck - NOT the return-1 'cannot read -> working' path.
 pane_state() {
   "${TIMMY}" --pane "$1" >/dev/null 2>&1
   case "$?" in
@@ -119,6 +139,7 @@ pane_state() {
     10) printf 'busy' ;;
     20) printf 'waiting' ;;
     30) printf 'question' ;;
+    40) printf 'stalled' ;;
     *) return 1 ;;
   esac
 }
@@ -179,7 +200,7 @@ main() {
   [ -n "${state}" ] || die "--state is required (idle|busy|waiting|question)"
   [ -n "${has_standby}" ] || die "--has-standby is required (0|1)"
   [ -n "${changed}" ] || die "--changed is required (0|1)"
-  case "${state}" in idle | busy | waiting | question) ;; *) die "invalid --state '${state}' (idle|busy|waiting|question)" ;; esac
+  case "${state}" in idle | busy | waiting | question | stalled) ;; *) die "invalid --state '${state}' (idle|busy|waiting|question|stalled)" ;; esac
   case "${has_standby}" in 0 | 1) ;; *) die "invalid --has-standby '${has_standby}' (0|1)" ;; esac
   case "${changed}" in 0 | 1) ;; *) die "invalid --changed '${changed}' (0|1)" ;; esac
 

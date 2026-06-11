@@ -43,6 +43,15 @@ table=(
   "idle     1 0 standby"
   # idle + stable + NO standby -> the dead, frozen turn
   "idle     0 0 stuck"
+  # #28: a frozen-spinner 'stalled' turn (timmy exit 40, #25) is WEDGED -> stuck, not working.
+  # A frozen spinner cannot be a legit STANDBY pause, so stalled -> stuck even WITH a marker
+  # (has_standby is not consulted). RED today: current code maps any non-idle state to working.
+  "stalled  0 0 stuck"
+  "stalled  1 0 stuck"
+  # ...but the safe direction holds: a pane that ADVANCED this interval (changed=1) is never
+  # called stuck, even if momentarily read stalled - it gets another heartbeat cycle.
+  "stalled  0 1 working"
+  "stalled  1 1 working"
 )
 
 printf '== verdict table (state / has_standby / changed -> verdict) ==\n'
@@ -74,6 +83,10 @@ cli_case "CLI busy -> working/0" working 0 --state busy --has-standby 0 --change
 cli_case "CLI idle+standby -> standby/10" standby 10 --state idle --has-standby 1 --changed 0
 cli_case "CLI idle+no-standby -> stuck/20" stuck 20 --state idle --has-standby 0 --changed 0
 cli_case "CLI idle+changed -> working/0" working 0 --state idle --has-standby 0 --changed 1
+# #28: the CLI accepts 'stalled' and routes a frozen turn to stuck; changed=1 still wins (safe dir).
+cli_case "CLI stalled -> stuck/20 (#28)" stuck 20 --state stalled --has-standby 0 --changed 0
+cli_case "CLI stalled+marker -> stuck/20 (#28, marker ignored)" stuck 20 --state stalled --has-standby 1 --changed 0
+cli_case "CLI stalled+changed -> working/0 (#28 safe dir)" working 0 --state stalled --has-standby 0 --changed 1
 
 # usage errors are exit 64, never a verdict
 "$sc" --state idle --has-standby 0 >/dev/null 2>&1
@@ -136,6 +149,21 @@ tmux send-keys -t "$sch" -l 'ZZZ-ALTERED'
 sleep 0.4
 sc_live "changed call 2 (content altered -> changed=1 -> working, NOT stuck)" "$sch" "$tmp/chg.fp" working 0
 tmux kill-session -t "$sch" 2>/dev/null
+
+# STALLED (#28): a frozen-spinner turn. The real frozen-spinner fixture lives in timmy's own
+# suite; here we drive timmy via a stub that exits 40, which proves the --pane GATHER path now
+# recognises 'stalled' (pane_state 40 -> stalled) and routes it to stuck. Call 1 has no prior fp
+# -> changed=1 -> working (safe direction even for a stalled read); call 2 is stable -> stuck.
+stub40="$tmp/timmy-stub40"
+printf '#!/bin/sh\nexit 40\n' >"$stub40"; chmod +x "$stub40"
+sl="sct_stalled_$$"
+tmux new-session -d -s "$sl" -x 80 -y 24 "printf '\xe2\x97\x8f Whirring\xe2\x80\xa6 (frozen)\n${idle_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+export MOSSY_TIMMY="$stub40"
+sc_live "stalled call 1 (no prior fp -> assume alive)" "$sl" "$tmp/stalled.fp" working 0
+sc_live "stalled call 2 (timmy exit 40, stable -> stalled -> stuck)" "$sl" "$tmp/stalled.fp" stuck 20
+unset MOSSY_TIMMY
+tmux kill-session -t "$sl" 2>/dev/null
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

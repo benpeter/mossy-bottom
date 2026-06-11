@@ -70,15 +70,25 @@ sleep 0.3
 if pane_has "$ss" 'WAKE-STUCK-XYZZY'; then ok "stuck beat 2: pane RECEIVED the stuck-recovery wake text"; else no "stuck beat 2: pane RECEIVED the stuck-recovery wake text"; fi
 
 # ============================================================================
-# WORKING: a spinner (busy). Two beats -> never nudged.
+# WORKING: a genuinely BUSY pane - an ANIMATING spinner (the frame + token count change
+# faster than timmy's INTERVAL), so timmy classifies it busy. This must NOT be a *static*
+# spinner: post-#25 a frozen spinner reads 'stalled', and post-#28 stalled -> stuck, so a
+# static fixture would (correctly) be recovered. A real working Claude pane animates
+# continuously, so this faithfully represents one. Two beats -> never nudged.
 # ============================================================================
 sw="hbt_work_$$"
-make_fixture "$sw" "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)"
+# The $(...) / $i / $((...)) run inside the pane's OWN shell (animate the spinner there), not
+# this test shell - single quotes are deliberate.
+# shellcheck disable=SC2016
+tmux new-session -d -s "$sw" -x 80 -y 24 \
+  'i=0; while :; do printf "\r%s Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %d tokens)" "$([ $((i%2)) = 0 ] && printf "\xe2\x97\x8f" || printf "\xe2\x97\x8b")" "$i"; i=$((i+1)); sleep 0.05; done' 2>/dev/null
+sessions="$sessions $sw"
+sleep 0.5
 pfw="$(fake_panes "$sw")"
 fpw="$tmp/work.fp"
 beat "$pfw" "$fpw"
 beat "$pfw" "$fpw"
-if log_has 'shaun STUCK'; then no "working: never logged stuck"; else ok "working: never logged stuck (spinner -> working)"; fi
+if log_has 'shaun STUCK'; then no "working: never logged stuck"; else ok "working: never logged stuck (animating spinner -> busy -> working)"; fi
 if pane_has "$sw" 'WAKE-STUCK-XYZZY'; then no "working: pane never woken"; else ok "working: pane never woken"; fi
 
 # ============================================================================
