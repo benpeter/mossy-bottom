@@ -61,3 +61,44 @@ proof green; what remains is shaun verifying and accepting it, the artifacts and
 landing on origin, and the queue carrying forward. The lesson banks under Safety and
 Robustness: a self-evolving harness has to treat its own test cleanup as part of the
 blast radius, because here it was.
+
+---
+
+## 2026-06-11 ~05:06-05:15 - resume: #21 accepted+closed, a misdirected #12 hand recovered, #22 derived
+
+Fresh shaun booted after the 00:40 friendly-fire kill. bitzer's go directed a
+VERIFY-AND-ACCEPT of #21 slice 1 (already in the working tree): I re-proved it from
+the outside - shellcheck + bash -n clean, the hermetic suite 42/42 green including
+case H (the four HB-window collision paths), and barn.sh up --plan exit 0 with the
+heartbeat line intact - then committed 934ffea, staging only the two bin/ files. The
+Farmer's two folded edits (raise the HB window at "${session}:" not "${session}"; guard
+the test trap on [ -n "$hb_sess" ] so case H can never kill the live session) rode in
+that one commit, sharing the files and the green suite. bitzer had already pushed to
+0efb43e, so 934ffea was on origin and I closed #21 citing it.
+
+Then I made an error worth recording. I picked the next slice from the open queue by
+age (#8 oldest) without first reading the recent TICKS tail and ESCALATIONS, handed
+shirley a #12 slice, and only afterward read the run-state that prior-shaun had left:
+#12 is Farmer-blocked - its operational half landed long ago (85e0607) and its only
+residual is a binding GUARDRAILS sequencing invariant, escalated at 19:09 as something
+shaun cannot resolve from below; the 00:26 STANDBY said in plain words "do NOT work
+#12/#11". shirley, behaving correctly, had already built and committed her slice
+(bin/onorigin.sh + a hermetic test, 0efb43e) and bitzer had pushed it before I caught
+the mistake. I did not rewrite the published history - that is bitzer's domain and the
+guard is harmless - but #12 stays OPEN and blocked: an on-origin guard script does not
+answer the binding question, so the now-public onorigin.sh sits unused, parked for
+bitzer's #12 decision. The lesson banks under Legibility and Safety: the queue is not
+the whole picture; the blocked-issue flags live in TICKS/ESCALATIONS and must be read
+BEFORE selecting, not after the hand. A faster fix here would have cost shirley nothing.
+
+With #21 closed and the entire open queue unworkable (#12/#11 Farmer-blocked, #8 the
+Farmer-operated live-boot tracker), the never-empty-queue rule required a derived
+frontier. I picked the weakest quality with the highest leverage: Robustness of timmy,
+the load-bearing liveness classifier the whole tick loop rests on. The documented
+narrow-pane idle residual (#17, parked under #8 for a live CHECK) has an in-chain,
+hermetic FIX, so I filed #22 and handed slice 1 - reproduce the narrow-idle
+misclassification as a failing assertion against a throwaway ~40-column idle-box
+fixture (no claude launch), then make idle detection robust at that width without
+regressing the wide-pane cases. I compacted shirley first (clearing the spent #12
+context), waited for idle, passed the usage gate (5h 8%, weekly 4%), then handed. She
+is working it now; I STANDBY with resume = monitor, not re-hand.
