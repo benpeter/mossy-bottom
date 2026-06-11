@@ -20,6 +20,7 @@ hb="$here/heartbeat.sh"
 export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.3}" # timmy runs inside stuck-check AND send-verified inside heartbeat
 export SV_POLLS="${SV_POLLS:-3}"               # send-verified polls per delivery attempt (bound the failure path)
 export SV_SETTLE="${SV_SETTLE:-0.2}"           # send-verified text->Enter settle (short for a fast suite)
+export MOSSY_HEARTBEAT_TRIGGER='NUDGE-BITZER-XYZZY'      # distinctive marker: bitzer sustain nudge (#33)
 export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: shaun stuck-recovery (#20)
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
 
@@ -87,6 +88,14 @@ fake_panes() {
 fake_panes2() {
   local f="$tmp/panes2_$1_$2"
   printf 'shaun=%s\nshirley=%s\n' "$1" "$2" >"$f"
+  printf '%s' "$f"
+}
+
+# fake_panes_bitzer <sess> - write a .barn-panes whose bitzer= points at the fixture (no shaun, so
+# the shaun-aware branches return quietly). Echoes the panes-file path. For the #33 bitzer cases.
+fake_panes_bitzer() {
+  local f="$tmp/panesb_$1"
+  printf 'bitzer=%s\n' "$1" >"$f"
   printf '%s' "$f"
 }
 
@@ -246,6 +255,50 @@ pfwb="$(fake_panes2 "$wb_shaun" "$wb_shirley")"
 beat "$pfwb" "$tmp/wb_shaun.fp" "$tmp/wb_worker.fp"
 beat "$pfwb" "$tmp/wb_shaun.fp" "$tmp/wb_worker.fp"
 if pane_has "$wb_shaun" 'WAKE-WORKER-XYZZY'; then no "worker-stalled+shaun-active: busy shaun never alerted/interrupted"; else ok "worker-stalled+shaun-active: busy shaun never alerted/interrupted"; fi
+
+# ============================================================================
+# #33 BITZER TRIGGER delivered AND verified: an idle bitzer (wakeable pane) is nudged; the nudge
+# transitions it idle->busy and send-verified CONFIRMS it. ONE beat suffices - the trigger fires
+# on the first idle classification (no cross-beat fingerprint). The verified-delivery LOG is the
+# robust signal (the nudge text scrolls off as the busy loop runs); we also assert timmy now busy.
+# ============================================================================
+bz="hbt_bz_$$"
+make_wakeable "$bz" "\xe2\x8f\xba waiting for input.\n${idle_box}"
+pfbz="$(fake_panes_bitzer "$bz")"
+beat "$pfbz" "$tmp/bz_shaun.fp"
+if log_has 'bitzer idle'; then ok "bitzer-trigger: idle bitzer classified + nudged"; else no "bitzer-trigger: idle bitzer nudged ($OUT)"; fi
+if log_has 'nudged + verified'; then ok "bitzer-trigger: nudge DELIVERED + VERIFIED (idle->busy submission confirmed)"; else no "bitzer-trigger: nudge delivered + verified ($OUT)"; fi
+if log_has 'FAILED'; then no "bitzer-trigger: must NOT log a delivery failure"; else ok "bitzer-trigger: no delivery failure logged"; fi
+"$here/../timmy/bin/timmy" --pane "$bz" >/dev/null 2>&1; bzrc=$?
+if [ "$bzrc" -eq 10 ]; then ok "bitzer-trigger: pane is now BUSY (the nudge started the poll)"; else no "bitzer-trigger: pane should be busy after a verified nudge (timmy rc=$bzrc)"; fi
+
+# ============================================================================
+# #33 BITZER TRIGGER retry / delivery failure: an idle bitzer whose pane never goes busy
+# (make_counter stays visually static -> timmy idle on every poll). send-verified's first delivery
+# does not take -> clear + retry once -> fail. The fixture records each delivered line to a file,
+# so the count == 2 (initial + one retry). The heartbeat logs a CLEAR failure and degrades
+# gracefully (the loop is not crashed); the next beat self-heals.
+# ============================================================================
+bzr="hbt_bzr_$$"
+bzgot="$tmp/bz_deliveries.log"
+make_counter "$bzr" "\xe2\x8f\xba waiting for input.\n${idle_box}" "$bzgot"
+pfbzr="$(fake_panes_bitzer "$bzr")"
+beat "$pfbzr" "$tmp/bzr_shaun.fp"
+if log_has 'nudge FAILED to submit after retry'; then ok "bitzer-retry: clear delivery-FAILED log (not a silent no-op)"; else no "bitzer-retry: expected a clear FAILED log ($OUT)"; fi
+if log_has 'nudged + verified'; then no "bitzer-retry: must NOT claim a verified success"; else ok "bitzer-retry: did not falsely claim success"; fi
+bzdn="$(grep -c . "$bzgot" 2>/dev/null || printf 0)"
+if [ "$bzdn" -eq 2 ]; then ok "bitzer-retry: delivered EXACTLY twice (initial + one retry)"; else no "bitzer-retry: expected 2 deliveries, got $bzdn"; fi
+
+# ============================================================================
+# #33 BITZER GATING preserved: a BUSY bitzer (animating spinner) is NEVER nudged - the trigger
+# stays gated on idle, so send-verified is never even invoked mid-turn (no stacking).
+# ============================================================================
+bzb="hbt_bzb_$$"
+animating "$bzb"
+pfbzb="$(fake_panes_bitzer "$bzb")"
+beat "$pfbzb" "$tmp/bzb_shaun.fp"
+if log_has 'skip (no mid-turn stacking)'; then ok "bitzer-gating: busy bitzer SKIPPED (no mid-turn nudge)"; else no "bitzer-gating: busy bitzer skipped ($OUT)"; fi
+if log_has 'nudged'; then no "bitzer-gating: busy bitzer must NOT be nudged"; else ok "bitzer-gating: busy bitzer never nudged"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

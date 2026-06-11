@@ -180,13 +180,17 @@ shirley_pane() {
   awk -F= '$1=="shirley"{print $2; ok=1} END{exit !ok}' "$1"
 }
 
-# send_trigger <pane> - literal text, a short beat, then a SEPARATE Enter. This is the
-# established tmux send mechanics (docs/smoke-test.md): -l sends verbatim, and the Enter
-# is its own call so the text lands before it is submitted.
+# send_trigger <pane> - deliver the bitzer sustain nudge and CONFIRM it submitted (#33, the last
+# send-verified adoption gap). The trigger drives the ENTIRE poll loop every beat; a silently
+# buffered-unsent nudge (the 06:39 race) skips one whole sustain cycle. We route it through
+# send-verified.sh - same as #32's recovery wakes - so the nudge is confirmed (bitzer idle->busy)
+# and retried ONCE before we give up. NO leading C-u here (unlike send_wake): beat_bitzer only
+# calls this when bitzer is timmy-idle, so its input box is empty - there is no partial fragment
+# to clear, and the original send_trigger sent none. We pass MOSSY_TIMMY so send-verified uses the
+# SAME timmy heartbeat resolved. The ~2s verify is <1% of the 300s beat - negligible vs every
+# sustain cycle actually firing. Returns send-verified's exit code so beat_bitzer logs the outcome.
 send_trigger() {
-  tmux send-keys -l -t "$1" -- "$TRIGGER"
-  sleep 0.5
-  tmux send-keys -t "$1" Enter
+  MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$1" "$TRIGGER"
 }
 
 # send_wake <pane> <trigger> - deliver a recovery wake and CONFIRM it submitted (#32). Mirrors
@@ -208,9 +212,12 @@ send_wake() {
   MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$pane" "$trigger"
 }
 
-# beat_bitzer - the poll nudge. Read bitzer's id, classify with timmy, nudge IFF idle
-# (exit 0), otherwise skip. Never dies on a single bad beat - the loop must outlive transient
-# trouble (a momentarily gone pane, a panes file not yet written).
+# beat_bitzer - the poll nudge. Read bitzer's id, classify with timmy, nudge IFF idle (exit 0),
+# otherwise skip. The idle nudge is delivered VIA send-verified (#33): confirmed-submitted +
+# retried once, logged whether it took. A failed nudge degrades gracefully - we log and move on,
+# never crashing the loop (this beat's poll is skipped, but the next beat self-heals). Never dies
+# on a single bad beat - the loop must outlive transient trouble (a momentarily gone pane, a panes
+# file not yet written).
 beat_bitzer() {
   local id state rc
   id="$(bitzer_pane "$panes_file")" \
@@ -218,7 +225,13 @@ beat_bitzer() {
   state="$("$TIMMY" --pane "$id" 2>/dev/null)"
   rc=$?
   case "$rc" in
-    0) send_trigger "$id"; log "bitzer idle (${id}) -> nudged" ;;
+    0)
+      if send_trigger "$id"; then
+        log "bitzer idle (${id}) -> nudged + verified"
+      else
+        log "bitzer idle (${id}) -> nudge FAILED to submit after retry - poll skipped this beat (self-heals next beat)"
+      fi
+      ;;
     10 | 20 | 30) log "bitzer ${state:-busy} (${id}, rc=${rc}) -> skip (no mid-turn stacking)" ;;
     *) log "timmy could not classify ${id} (rc=${rc}) -> skip (pane gone?)" ;;
   esac
