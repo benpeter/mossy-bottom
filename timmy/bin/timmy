@@ -38,8 +38,9 @@ AWAIT_TIMEOUT_DEFAULT=120
 # across all of them. 2 means "the initial diff plus 2 more consecutive diffs" - enough to
 # outlast a brief boot-chrome flicker (the reason the box overrode motion pre-#23) while still
 # catching a continuously advancing pane. The window costs SUSTAIN_SAMPLES*INTERVAL, paid ONLY
-# in the rare idle_box-AND-differ case.
-readonly SUSTAIN_SAMPLES=2
+# in the rare idle_box-AND-differ case. Overridable via TIMMY_SUSTAIN_SAMPLES so the test suite
+# can shrink the confirm window to milliseconds; the default 2 keeps production byte-unchanged.
+readonly SUSTAIN_SAMPLES="${TIMMY_SUSTAIN_SAMPLES:-2}"
 
 usage() {
   cat <<'EOF'
@@ -85,7 +86,8 @@ States and exit codes (single-shot):
 Exit codes (multi-poll): 65 capture failed (gone pane), 66 --await timeout (no change).
 
 Environment:
-  TIMMY_INTERVAL   seconds between the two snapshots (default: 2)
+  TIMMY_INTERVAL          seconds between the two snapshots (default: 2)
+  TIMMY_SUSTAIN_SAMPLES   extra snapshot pairs the motion/freeze confirm takes (default: 2)
 EOF
 }
 
@@ -112,6 +114,11 @@ done
 [ -n "$pane" ] || die "--pane is required (see --help)"
 case "$timeout" in
   ''|*[!0-9]*) die "--timeout needs a non-negative integer (seconds)" ;;
+esac
+# SUSTAIN_SAMPLES feeds an arithmetic for-loop; an empty/non-integer override would wedge it,
+# so guard it here (production never sets it; the test suite passes a small integer).
+case "$SUSTAIN_SAMPLES" in
+  ''|*[!0-9]*) die "TIMMY_SUSTAIN_SAMPLES must be a non-negative integer" ;;
 esac
 
 snapshot() { tmux capture-pane -p -t "$pane"; }
@@ -628,8 +635,8 @@ fi
 classify_once || die "capture-pane failed for pane '$pane'"
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$spinner_frozen" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s,"sustain_samples":%s}}\n' \
+    "$state" "$differ" "$spinner" "$spinner_frozen" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL" "$SUSTAIN_SAMPLES"
 else
   printf '%s\n' "$state"
 fi
