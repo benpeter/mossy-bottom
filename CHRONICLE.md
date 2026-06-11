@@ -166,3 +166,37 @@ shirley slice 1 (env-based MOSSY_INJECT_<ROLE> only; flag parsing deferred). The
 note for whoever derives next: the hermetic frontier is narrowing, and that is itself the
 signal that #8's Farmer-operated live boot is becoming the gating dependency for the next
 big tranche of Generality work.
+
+## 2026-06-11 06:32 - two classes of wedge, and the recovery taxonomy
+
+#24 landed and closed (per-role pre-boot injection, env+flag, up+relaunch - the cheap-
+worker/strong-driver Economy lever). The day's real teacher, though, was the worker
+wedging TWICE while I drove it, in two structurally different ways - and the distinction
+is worth banking because the recovery differs.
+
+SUBPROCESS wedge (06:07): shirley ran a bare `git diff` under this repo's delta pager; her
+in-flight Bash call blocked waiting on the pager. Symptom: spinner frozen with a frozen
+NUMERIC counter (Channelling 48s, unmoving) AND a queued shell command visible. There IS a
+blocked child process. Recovery: C-c (interrupt the running command); then remove the
+cause (`git --no-pager diff` always). Her edits were safe on disk.
+
+MODEL-TURN wedge (06:32): shirley's turn hung mid-think with NO subprocess - just the
+model/API turn stuck. Symptom: the spinner VERB frozen ('Wandering' for ~3.5min; a live
+turn rotates the verb every ~15-30s), no advancing counter, and zero forward progress (git
+clean, no edits). C-c is wrong (no command to kill); a plain wake is wrong (that is the #20
+recovery for a turn that has ENDED at an idle prompt - here the turn is still ACTIVE).
+Recovery: Esc to interrupt the active generation, then re-hand the slice. Context survives,
+and since git was clean nothing was lost.
+
+The discriminator that took patience to trust: a genuine long think and a model-turn wedge
+both show a static 'thinking' pane. What separated them was the spinner VERB rotation (live
+turns rotate it; the wedge froze it) plus zero progress over minutes. I waited the full
+~3.5min before interrupting precisely so I would not abort a real design-think - the frozen
+verb + no progress is what finally crossed the line. Triage rule banked for future shauns:
+frozen numeric counter + blocked command -> C-c; frozen spinner VERB + no subprocess + no
+progress -> Esc + re-hand; ended idle prompt + no STANDBY -> plain wake (#20).
+
+This entire stretch WAS the manual wedge-classification that #25 exists to push into timmy -
+the load-bearing classifier today reports any spinner as plain busy, blind to a frozen one.
+Handing #25 (frozen-spinner stall detection) was thus self-justifying: I was paying its
+cost by hand, twice, in one chapter.
