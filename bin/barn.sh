@@ -326,21 +326,27 @@ pane_cwds() {
 #   MOSSY_REPO_DIR   the control-plane repo root - where control-plane tools (timmy,
 #                    prompts) live. Always REPO_ROOT, even in target mode, because the
 #                    harness drives the target from here; it is the twin of STATE_DIR.
+# Plus one constant (#27): GIT_PAGER=cat, so a worker's bare `git diff`/`log`/`show` emits
+# to stdout instead of blocking on the host's interactive pager (delta, less) and wedging
+# the pane's turn. Env-only - it never touches the user's git config, and it is byte-equal
+# on every host regardless of that host's core.pager. (The worker-prompt "always
+# --no-pager" guidance stays as belt-and-suspenders.)
 # The env prefix is applied by the same shell tmux already uses to split CLAUDE_CMD into
 # argv, so it exports to claude. Single-quoted to survive spaces in the paths. Dogfood
 # passes REPO_ROOT for both; MOSSY_REPO_DIR stays inert until shaun.md consumes it.
 launch_cmd() {
-  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' %s" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
+  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
 }
 
 # heartbeat_cmd <state_dir> - the bin/heartbeat.sh command for the background heartbeat
 # window. It carries the same MOSSY_STATE_DIR / MOSSY_REPO_DIR as the panes (so it reads
-# THIS run's .barn-panes and finds timmy) plus the resolved cadence. Single source for
-# both the real spawn and the --plan preview, so the plan cannot drift from what up runs.
-# Paths single-quoted to survive spaces. No claude binary - it is a vanilla tmux+sleep
-# loop, so it does not go through launch_cmd.
+# THIS run's .barn-panes and finds timmy) plus the resolved cadence, and the same
+# GIT_PAGER=cat (#27) so any git the heartbeat path touches never blocks on a pager - it
+# does not go through launch_cmd, so it carries the guard itself. Single source for both
+# the real spawn and the --plan preview, so the plan cannot drift from what up runs. Paths
+# single-quoted to survive spaces. No claude binary - it is a vanilla tmux+sleep loop.
 heartbeat_cmd() {
-  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' MOSSY_HEARTBEAT_SECS=%s '%s/bin/heartbeat.sh'" \
+  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' MOSSY_HEARTBEAT_SECS=%s GIT_PAGER=cat '%s/bin/heartbeat.sh'" \
     "$1" "${REPO_ROOT}" "${HB_SECS}" "${REPO_ROOT}"
 }
 
@@ -443,6 +449,7 @@ cmd_up() {
     printf '  shirley  -c %s\n' "${shirley_cwd}"
     printf '  env      MOSSY_STATE_DIR=%s  (all three panes)\n' "${state_dir}"
     printf '  env      MOSSY_REPO_DIR=%s  (all three panes)\n' "${REPO_ROOT}"
+    printf '  env      GIT_PAGER=cat  (all three panes, #27 pager-safe)\n'
     printf '  panes    %s\n' "${panes_file}"
     printf '  window     %s (primary)\n' "${WINDOW}"
     printf '  heartbeat  window %s (background) -> %s\n' "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
@@ -628,7 +635,7 @@ cmd_relaunch() {
 
   # --plan: print this pane's spawn plan and exit. No panes read, no tmux, no claude.
   if [ "${plan}" -eq 1 ]; then
-    printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s MOSSY_REPO_DIR=%s (panes %s)\n' \
+    printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s MOSSY_REPO_DIR=%s GIT_PAGER=cat (panes %s)\n' \
       "${role}" "${dir}" "${state_dir}" "${REPO_ROOT}" "${panes_file}"
     if [ -n "${role_inject}" ]; then
       local _l

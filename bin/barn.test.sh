@@ -165,6 +165,59 @@ chk_eq "G: dogfood shaun   cwd = repo root" "$(plan_cwd "$planG" shaun)" "$expec
 chk_eq "G: dogfood shirley cwd = <repo>/timmy" "$(plan_cwd "$planG" shirley)" "$expected_repo/timmy"
 
 # ============================================================================
+# Case K - #27: GIT_PAGER=cat is injected into every launched pane AND the heartbeat, so a
+# worker's bare `git diff`/`log`/`show` emits to stdout instead of wedging the pane on the
+# host's interactive pager (delta, less). Hermetic: call launch_cmd/heartbeat_cmd directly
+# and read the captured `up --plan` text - no live launch. Env-only: asserts the launch
+# PREFIX, never the user's git config. CLAUDE_CMD/HB_SECS come from the sourced barn.sh, so
+# the byte-exact expectations pin the env ORDER, QUOTING, and GIT_PAGER position without
+# hardcoding the claude flags or the cadence.
+# ============================================================================
+k_target="$scratchF/.mossy"  # a target-mode state dir
+k_dogfood="$expected_repo"   # the dogfood state dir (the repo root itself)
+
+# (a) launch_cmd carries GIT_PAGER=cat in BOTH modes. cmd_up spawns bitzer/shaun/shirley
+# from ONE $launch, so a single guarded prefix means all three panes are guarded; dogfood
+# and target-mode share the function, so both carry it.
+chk_eq "K(a): launch_cmd (target) byte-exact with GIT_PAGER=cat" \
+  "$(launch_cmd "$k_target")" \
+  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+chk_eq "K(a): launch_cmd (dogfood) byte-exact with GIT_PAGER=cat" \
+  "$(launch_cmd "$k_dogfood")" \
+  "MOSSY_STATE_DIR='$k_dogfood' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+
+# (b) the heartbeat command guards itself (it bypasses launch_cmd) - byte-exact prefix.
+chk_eq "K(b): heartbeat_cmd byte-exact with GIT_PAGER=cat" \
+  "$(heartbeat_cmd "$k_target")" \
+  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' MOSSY_HEARTBEAT_SECS=$HB_SECS GIT_PAGER=cat '$expected_repo/bin/heartbeat.sh'"
+
+# (c) `up --plan` advertises GIT_PAGER=cat in the pane-env block, in BOTH modes, so the
+# preview never under-states the live launch env (the plan/live non-drift invariant). Uses
+# the planF (target) / planG (dogfood) captures from Cases F/G.
+chk_eq "K(c): up --plan (target) advertises GIT_PAGER=cat" "$(plan_env "$planF" GIT_PAGER)" "cat"
+chk_eq "K(c): up --plan (dogfood) advertises GIT_PAGER=cat" "$(plan_env "$planG" GIT_PAGER)" "cat"
+
+# (d) byte-stable addition: exactly ONE pane-env GIT_PAGER line (no duplication), reading
+# exactly as written - the plan grew by one well-formed line and nothing else moved.
+chk_eq "K(d): exactly one pane-env GIT_PAGER line" "$(grep -c '^  env .*GIT_PAGER=cat' <<<"$planF")" "1"
+if grep -qxF '  env      GIT_PAGER=cat  (all three panes, #27 pager-safe)' <<<"$planF"; then
+  ok "K(d): the GIT_PAGER plan line is byte-exact"
+else
+  no "K(d): the GIT_PAGER plan line is byte-exact"
+fi
+
+# (e) the plan's heartbeat line carries its own GIT_PAGER=cat (the heartbeat path).
+if grep -qF "MOSSY_HEARTBEAT_SECS=$HB_SECS GIT_PAGER=cat" <<<"$planF"; then
+  ok "K(e): up --plan heartbeat line carries GIT_PAGER=cat"
+else
+  no "K(e): up --plan heartbeat line carries GIT_PAGER=cat"
+fi
+
+# (f) relaunch --plan surfaces it too (relaunch's live path uses launch_cmd -> guarded).
+planKr="$(cmd_relaunch --plan shirley "$scratchF")"
+if grep -qF 'GIT_PAGER=cat' <<<"$planKr"; then ok "K(f): relaunch --plan surfaces GIT_PAGER=cat"; else no "K(f): relaunch --plan surfaces GIT_PAGER=cat"; fi
+
+# ============================================================================
 # Case I - per-role pre-boot injection (#24): MOSSY_INJECT_<ROLE> appends to the global list,
 # global-THEN-per-role, surfaced per pane in `up --plan`. Env source only (the per-role flag is
 # a deferred follow-up). All launch-free: dogfood `cmd_up --plan` returns before any tmux/claude.
