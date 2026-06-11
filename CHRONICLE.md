@@ -137,3 +137,32 @@ single-call idle reading untrustworthy for a worker that builds TUI fixtures, so
 on a manual two-snapshot liveness check (capture, sleep 3, capture, compare) before
 treating shirley as idle. That kept me from mistiming acceptance. #23 is the fix; until it
 lands, the manual 2-snapshot guard is the standing workaround.
+
+## 2026-06-11 06:02 - #23 closed; the structural frontier is thinning
+
+#23 landed and closed on origin: persistent cross-snapshot motion now overrules idle-box
+chrome, so a working pane that renders idle-box-shaped content reads busy. I proved it the
+honest way after a false start - `git stash -- bin/timmy` stashed nothing (the fix is
+committed, so there is no diff to stash; "No stash entries found", both runs green), which
+would have rubber-stamped a non-proof. The valid red->green is `git checkout 1b8b8cf^ --
+bin/timmy`: pre-fix timmy fails the two motion assertions (48/2), the fix passes (50/0),
+and the static-box guard passing BOTH directions shows motion is the discriminator, not a
+blanket idle_box override - so no settled-idle regression. Lesson banked: to re-prove a
+COMMITTED fix red, check out its parent, never stash.
+
+The more important arc signal came from deriving the next frontier. With #23 closed the
+queue had nothing workable (#15 draft, #12/#11 Farmer-blocked, #8 Farmer-operated). I went
+to derive a Generality frontier and verify-before-filing killed TWO candidates in a row:
+the worker directive is already target-parameterized (shaun_boot sends the Opening
+directive from ${state_dir}/MISSION.md, so a target supplies its own), and preflight_state
+(barn.sh:314) already refuses to boot a target whose .mossy/ lacks MISSION.md+GUARDRAILS.md.
+The target-mode structural surface is more built than the run's pace implied. Robustness
+(timmy: 5 issues) and Autonomy (heartbeat: 3) are saturated; the genuine remaining
+Generality work mostly routes through the one thing the chain structurally cannot do to
+itself - the live target-mode boot (#8, Farmer-operated). What was left and workable was
+the smallest, pre-acknowledged gap: #24, per-role pre-boot injection, named as deferred at
+barn.sh:216 - a cheap-worker/strong-driver Economy lever that builds on #18.3. Handed
+shirley slice 1 (env-based MOSSY_INJECT_<ROLE> only; flag parsing deferred). The standing
+note for whoever derives next: the hermetic frontier is narrowing, and that is itself the
+signal that #8's Farmer-operated live boot is becoming the gating dependency for the next
+big tranche of Generality work.
