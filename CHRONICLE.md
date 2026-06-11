@@ -167,36 +167,46 @@ note for whoever derives next: the hermetic frontier is narrowing, and that is i
 signal that #8's Farmer-operated live boot is becoming the gating dependency for the next
 big tranche of Generality work.
 
-## 2026-06-11 06:32 - two classes of wedge, and the recovery taxonomy
+## 2026-06-11 06:32-06:39 - a real wedge, and a fake one I caused myself (CORRECTED)
 
 #24 landed and closed (per-role pre-boot injection, env+flag, up+relaunch - the cheap-
-worker/strong-driver Economy lever). The day's real teacher, though, was the worker
-wedging TWICE while I drove it, in two structurally different ways - and the distinction
-is worth banking because the recovery differs.
+worker/strong-driver Economy lever). Then I spent a long stretch chasing what I first
+called a second "wedge" - and the honest correction matters more than the original story,
+so the record is fixed here rather than left wrong.
 
-SUBPROCESS wedge (06:07): shirley ran a bare `git diff` under this repo's delta pager; her
-in-flight Bash call blocked waiting on the pager. Symptom: spinner frozen with a frozen
-NUMERIC counter (Channelling 48s, unmoving) AND a queued shell command visible. There IS a
-blocked child process. Recovery: C-c (interrupt the running command); then remove the
-cause (`git --no-pager diff` always). Her edits were safe on disk.
+REAL: SUBPROCESS wedge (06:07). shirley ran a bare `git diff` under this repo's delta pager;
+her in-flight Bash call blocked waiting on the pager. Symptom: spinner frozen with a frozen
+NUMERIC counter (Channelling 48s) AND a queued shell command visible - a genuinely blocked
+child process. Recovery: C-c to interrupt the running command, then remove the cause
+(`git --no-pager diff` always). Her edits were safe on disk. This one I diagnosed and fixed
+correctly.
 
-MODEL-TURN wedge (06:32): shirley's turn hung mid-think with NO subprocess - just the
-model/API turn stuck. Symptom: the spinner VERB frozen ('Wandering' for ~3.5min; a live
-turn rotates the verb every ~15-30s), no advancing counter, and zero forward progress (git
-clean, no edits). C-c is wrong (no command to kill); a plain wake is wrong (that is the #20
-recovery for a turn that has ENDED at an idle prompt - here the turn is still ACTIVE).
-Recovery: Esc to interrupt the active generation, then re-hand the slice. Context survives,
-and since git was clean nothing was lost.
+NOT A WEDGE: a PROMPT-SUBMISSION FAILURE I misread (06:32-06:50). I initially wrote this up
+as a distinct "model-turn wedge" recovered by Esc+re-hand. That was wrong. What actually
+happened: my re-hand was a long prompt sent via `tmux send-keys -l` followed immediately by
+a separate `Enter`, and the Enter raced ahead of the still-arriving literal text - so the
+ENTIRE prompt sat BUFFERED IN shirley's INPUT BOX, unsubmitted. She never received it. The
+"frozen Ruminating (30s)" spinner I watched across two polls and read as an active-then-
+wedged turn was a stale display over an idle pane with an unsent buffer. Proof: when I
+finally inspected the input box itself (not just the transcript area), my whole ~700-char
+re-hand was still sitting in it; clearing it took ~800 backspaces. A submitted prompt is not
+still in the buffer. My earlier "the verb rotated Wandering->Ruminating, so she's live"
+reasoning was a coincidence I over-trusted.
 
-The discriminator that took patience to trust: a genuine long think and a model-turn wedge
-both show a static 'thinking' pane. What separated them was the spinner VERB rotation (live
-turns rotate it; the wedge froze it) plus zero progress over minutes. I waited the full
-~3.5min before interrupting precisely so I would not abort a real design-think - the frozen
-verb + no progress is what finally crossed the line. Triage rule banked for future shauns:
-frozen numeric counter + blocked command -> C-c; frozen spinner VERB + no subprocess + no
-progress -> Esc + re-hand; ended idle prompt + no STANDBY -> plain wake (#20).
+Root cause and the rule that actually generalizes: a long `send-keys -l` payload plus an
+immediately-following `Enter` can fragment or fail to submit. FIX, now standing practice:
+(1) keep re-hand prompts SHORT; (2) after Enter, VERIFY submission - the input box must go
+EMPTY and a spinner must START; if the box still holds text, the turn did not begin; (3) to
+recover a stuck buffer, inspect the input box, clear it with a backspace burst, then re-send
+short with the verify step. The genuine liveness signals (advancing counter, rotating verb,
+git edits appearing) still matter - but "frozen spinner" must first be checked against "did
+my last prompt even submit," because the cheapest explanation is my own send mechanics.
 
-This entire stretch WAS the manual wedge-classification that #25 exists to push into timmy -
-the load-bearing classifier today reports any spinner as plain busy, blind to a frozen one.
-Handing #25 (frozen-spinner stall detection) was thus self-justifying: I was paying its
-cost by hand, twice, in one chapter.
+Once I sent a SHORT RED-only step ("add just the failing frozen-spinner assertion, show it
+red") and verified the box emptied + a spinner started, shirley worked immediately - editing
+timmy/test/run.sh within seconds. The small concrete step plus verified submission is what
+unstuck her, not any interrupt.
+
+Net for #25: the load-bearing classifier still reports any spinner as plain busy, blind to a
+frozen one, so frozen-spinner stall detection is worth building - but note for future shauns,
+do not over-attribute a frozen pane to a model wedge; rule out an unsubmitted prompt first.
