@@ -45,6 +45,7 @@ readonly SUSTAIN_SAMPLES="${TIMMY_SUSTAIN_SAMPLES:-2}"
 usage() {
   cat <<'EOF'
 Usage: timmy --pane <pane-id> [--json]
+       timmy --selftest [-t <pane-id>]
        timmy --watch --pane <pane-id>
        timmy --await --pane <pane-id> [--timeout <secs>]
 
@@ -53,7 +54,13 @@ a short interval apart and comparing them.
 
 Options:
   --pane <id>       tmux pane/target to inspect (e.g. %2, or a session name)
+  -t <id>           alias for --pane
   --json            emit a JSON object with the state and the evidence used
+  --selftest        print a HUMAN-READABLE verdict for the pane (default: the
+                    invoking pane) - the state, its exit-code meaning, and the
+                    evidence in words. Presentation over the same classifier as
+                    --json; a #8 live-boot diagnostic ("does timmy read THIS
+                    host's TUI right, and why?"). Exits with the state's code.
   --watch           poll the pane forever; print one line per state CHANGE only
   --await           block until the state changes once, then print it and exit
   --timeout <secs>  --await heartbeat window (default 120); 0 disables waiting
@@ -97,19 +104,28 @@ pane=""
 json=0
 watch=0
 await=0
+selftest=0
 timeout="$AWAIT_TIMEOUT_DEFAULT"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
+    --pane|-t) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
     --json) json=1 ;;
     --watch) watch=1 ;;
     --await) await=1 ;;
+    --selftest) selftest=1 ;;
     --timeout) shift; [ $# -gt 0 ] || die "--timeout needs a value"; timeout="$1" ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
 done
+
+# --selftest defaults to the pane it is invoked FROM, so the Farmer can just run
+# `timmy --selftest` inside a pane at the #8 live boot. tmux exports the running pane's id as
+# $TMUX_PANE; only --selftest takes this default (every other mode still requires --pane).
+if [ "$selftest" -eq 1 ] && [ -z "$pane" ]; then
+  pane="${TMUX_PANE:-}"
+fi
 
 [ -n "$pane" ] || die "--pane is required (see --help)"
 case "$timeout" in
@@ -624,6 +640,78 @@ run_await() {
   exit "$EXIT_TIMEOUT"
 }
 
+# --selftest presentation (#34) - PURE PRESENTATION over classify_once: it re-prints the SAME
+# state, exit code, and evidence the --json path emits, in words, for a #8 live-boot human read
+# ("does timmy classify THIS host's real TUI correctly, and why?"). No new classification logic.
+# The verdict and the "because" key on the AUTHORITATIVE $state set by classify_once, so they can
+# never disagree with --json; the evidence vars only fill in the wording.
+
+# state_meaning <state> - the exit-code meaning, in one phrase.
+state_meaning() {
+  case "$1" in
+    idle)          printf 'settled - no turn in progress' ;;
+    busy)          printf 'a turn is in progress (live work)' ;;
+    waiting-input) printf 'blocked on a selection menu - needs a choice' ;;
+    question)      printf 'settled on a question - awaiting an answer' ;;
+    stalled)       printf 'a spinner is present but frozen - a wedged turn' ;;
+    *)             printf 'unknown state' ;;
+  esac
+}
+
+# state_reason - the one-line "because", keyed on $state (authoritative) with the decisive
+# evidence filling the wording. Mirrors classify_once's precedence WITHOUT re-deciding anything.
+state_reason() {
+  case "$state" in
+    stalled)
+      printf 'a spinner line is present but byte-identical across the confirm window (its counter frozen) - a wedged turn, not live work' ;;
+    busy)
+      if [ "$spinner" = "true" ]; then
+        printf 'an active spinner line is present at the bottom'
+      elif [ "$sustained" = "true" ]; then
+        printf 'an idle-box is rendered but the pane kept changing across samples (sustained motion) - still working'
+      else
+        printf 'the two snapshots differ (the pane is changing) and no settled idle box is present'
+      fi ;;
+    question)
+      if [ "$idle_suffix" = "true" ]; then
+        printf 'a settled idle box (the "for agents" suffix is present) whose last assistant line ends in a question'
+      else
+        printf 'a settled idle box whose last assistant line ends in a question'
+      fi ;;
+    waiting-input)
+      printf 'a numbered selection menu with a cursor is shown and the pane is static' ;;
+    idle)
+      if [ "$idle_suffix" = "true" ]; then
+        printf 'a settled idle box with the "for agents" suffix and a non-question last line'
+      elif [ "$idle_box" = "true" ]; then
+        printf 'a settled idle box and the last line is not a question'
+      else
+        printf 'the two snapshots are identical and no spinner / box / menu cue fired'
+      fi ;;
+    *) printf 'no cue fired' ;;
+  esac
+}
+
+# yesno <true|false> - render an evidence flag as a padded human word ('yes'/'no ', aligned).
+yesno() { if [ "$1" = "true" ]; then printf 'yes'; else printf 'no '; fi; }
+
+# print_selftest - the human-readable verdict block. Reads the globals classify_once set.
+print_selftest() {
+  printf 'timmy selftest\n\n'
+  printf '  pane:     %s\n' "$pane"
+  printf '  verdict:  %s  (exit %s - %s)\n\n' "$state" "$code" "$(state_meaning "$state")"
+  printf '  evidence (over %ss x %s confirm samples):\n' "$INTERVAL" "$SUSTAIN_SAMPLES"
+  printf '    snapshots_differ   %s   the two captures differed between snapshots\n'           "$(yesno "$differ")"
+  printf '    spinner            %s   an active spinner line at the bottom\n'                  "$(yesno "$spinner")"
+  printf '    spinner_frozen     %s   spinner byte-identical across the confirm window\n'      "$(yesno "$spinner_frozen")"
+  printf '    menu               %s   a numbered selection-menu shape is present\n'            "$(yesno "$menu")"
+  printf '    idle_box           %s   a rule-fenced empty input box is rendered\n'             "$(yesno "$idle_box")"
+  printf '    idle_suffix        %s   box mode line carries the settled "for agents" suffix\n' "$(yesno "$idle_suffix")"
+  printf '    sustained_motion   %s   idle-box pane kept changing across extra samples\n'      "$(yesno "$sustained")"
+  printf '    ends_in_question   %s   the last assistant line ends in a question\n'            "$(yesno "$ends_q")"
+  printf '\n  Looks like a %s pane because %s.\n' "$state" "$(state_reason)"
+}
+
 if [ "$watch" -eq 1 ]; then
   run_watch   # loops until a signal or a capture error; never returns
 fi
@@ -634,7 +722,9 @@ fi
 
 classify_once || die "capture-pane failed for pane '$pane'"
 
-if [ "$json" -eq 1 ]; then
+if [ "$selftest" -eq 1 ]; then
+  print_selftest
+elif [ "$json" -eq 1 ]; then
   printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s,"sustain_samples":%s}}\n' \
     "$state" "$differ" "$spinner" "$spinner_frozen" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL" "$SUSTAIN_SAMPLES"
 else

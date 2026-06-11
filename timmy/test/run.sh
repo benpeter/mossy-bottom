@@ -37,6 +37,27 @@ assert_state() {
   fi
 }
 
+# assert_selftest <session> <expected-word> <expected-exit> <evidence-regex> <label>
+# Drive the #34 human-readable --selftest path over the SAME fixture panes the --json tests use.
+# Asserts (a) the verdict word, (b) the preserved exit code (selftest is additive - it exits with
+# the state's code), (c) the one-line "Looks like a <state> ..." sentence, and (d) a decisive
+# evidence flag reads yes. So a fixture that --json calls idle also reads "idle" in the verdict
+# with the idle evidence, etc. Uses `-t` (the #34 alias) so that path is exercised too.
+assert_selftest() {
+  local sess="$1" want_word="$2" want_code="$3" eve="$4" label="$5"
+  local out code
+  out="$("$timmy" --selftest -t "$sess" 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq "$want_code" ] \
+    && printf '%s\n' "$out" | grep -q "verdict:  $want_word " \
+    && printf '%s\n' "$out" | grep -q "Looks like a $want_word pane because" \
+    && printf '%s\n' "$out" | grep -qE "$eve"; then
+    ok "$label (verdict $want_word, exit $code)"
+  else
+    no "$label (exit $code; out: $(printf '%s' "$out" | tr '\n' '|'))"
+  fi
+}
+
 # spawn_advancing <session> <width> <height> <printf-fmt-with-ONE-%d-in-the-spinner-counter>
 # Stand up a pane whose spinner is GENUINELY LIVE: redraw <fmt> from cursor-home every 0.03s with
 # an advancing counter, so the spinner's elapsed region changes between captures. The redraw is
@@ -794,6 +815,74 @@ else
 fi
 
 tmux kill-session -t "$def_sess" 2>/dev/null
+
+# --- #34: --selftest, the human-readable #8 live-boot verdict. PURE PRESENTATION over the same
+# classifier --json drives, so we assert it against the SAME fixture shapes the --json tests use:
+# a genuine idle box -> "idle" + idle evidence; an advancing spinner -> "busy" + spinner evidence;
+# an idle box ending in '?' -> "question" + question evidence. Each also pins the preserved exit
+# code (selftest is additive). All bounded by the shrunk TIMMY_INTERVAL like every other case. ---
+st_idle_sess="timmy_t_st_idle_$$"
+tmux new-session -d -s "$st_idle_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba All four states are wired up now.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_selftest "$st_idle_sess" idle 0 'idle_box +yes' "#34 --selftest on a genuine idle box -> idle verdict + idle evidence"
+
+tmux kill-session -t "$st_idle_sess" 2>/dev/null
+
+st_busy_sess="timmy_t_st_busy_$$"
+spawn_advancing "$st_busy_sess" 80 24 "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %dk tokens)\n"
+sleep "$settle"
+
+assert_selftest "$st_busy_sess" busy 10 'spinner +yes' "#34 --selftest on an advancing spinner -> busy verdict + spinner evidence"
+
+tmux kill-session -t "$st_busy_sess" 2>/dev/null
+
+st_q_sess="timmy_t_st_q_$$"
+tmux new-session -d -s "$st_q_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba Want me to take question next, or harden idle first?\n${idle_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_selftest "$st_q_sess" question 30 'ends_in_question +yes' "#34 --selftest on an idle box ending in '?' -> question verdict + question evidence"
+
+tmux kill-session -t "$st_q_sess" 2>/dev/null
+
+# #34: with no -t, --selftest defaults to the INVOKING pane ($TMUX_PANE) - the Farmer just runs
+# `timmy --selftest` inside the pane. Drive that default path by setting TMUX_PANE to a fixture.
+st_def_sess="timmy_t_st_def_$$"
+tmux new-session -d -s "$st_def_sess" -x 80 -y 24 \
+  "printf '\xe2\x8f\xba All settled.\n${idle_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+st_def_out="$(TMUX_PANE="$st_def_sess" "$timmy" --selftest 2>/dev/null)"
+st_def_code=$?
+if [ "$st_def_code" -eq 0 ] && printf '%s\n' "$st_def_out" | grep -q "verdict:  idle "; then
+  ok "#34 --selftest with no -t defaults to the invoking pane (TMUX_PANE) -> idle"
+else
+  no "#34 --selftest default-pane (exit $st_def_code; out: $(printf '%s' "$st_def_out" | tr '\n' '|'))"
+fi
+
+tmux kill-session -t "$st_def_sess" 2>/dev/null
+
+# #34: selftest is ADDITIVE - it must not perturb --json. On one idle pane, --json stays pure
+# JSON (leading '{', exit 0) and --selftest is the human block (leading "timmy selftest"), each
+# exiting with the same state code. Proves the two presentations coexist without drift.
+st_add_sess="timmy_t_st_add_$$"
+tmux new-session -d -s "$st_add_sess" -x 80 -y 24 \
+  'printf "\xe2\x9d\xaf\n"; sleep 600' 2>/dev/null
+sleep "$settle"
+
+st_add_json="$("$timmy" --pane "$st_add_sess" --json 2>/dev/null)"; st_add_jc=$?
+st_add_self="$("$timmy" --selftest -t "$st_add_sess" 2>/dev/null)"; st_add_sc=$?
+if [ "$st_add_jc" -eq 0 ] && [ "$st_add_sc" -eq 0 ] \
+  && [[ "$st_add_json" == '{"state":"idle",'* ]] \
+  && [[ "$st_add_self" == 'timmy selftest'* ]]; then
+  ok "#34 selftest is additive: --json still pure JSON, --selftest the human block, both exit 0"
+else
+  no "#34 selftest additive (json '$st_add_json' exit $st_add_jc; self exit $st_add_sc)"
+fi
+
+tmux kill-session -t "$st_add_sess" 2>/dev/null
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
