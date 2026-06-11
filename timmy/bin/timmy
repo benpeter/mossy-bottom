@@ -28,6 +28,14 @@ INTERVAL="${TIMMY_INTERVAL:-2}"
 # INTERVAL so a quiet pane is not woken needlessly; the shaun.md waker passes its own N.
 AWAIT_TIMEOUT_DEFAULT=120
 
+# #23: how many EXTRA snapshot pairs sustained_motion takes to confirm that an idle-box-shaped
+# pane is genuinely working (not just showing a one-off transient). The motion must persist
+# across all of them. 2 means "the initial diff plus 2 more consecutive diffs" - enough to
+# outlast a brief boot-chrome flicker (the reason the box overrode motion pre-#23) while still
+# catching a continuously advancing pane. The window costs SUSTAIN_SAMPLES*INTERVAL, paid ONLY
+# in the rare idle_box-AND-differ case.
+readonly SUSTAIN_SAMPLES=2
+
 usage() {
   cat <<'EOF'
 Usage: timmy --pane <pane-id> [--json]
@@ -404,8 +412,33 @@ ends_in_question() {
   '
 }
 
+# sustained_motion - confirm an idle-box-shaped pane is GENUINELY working, not just showing a
+# one-off transient (#23). is_idle_box fires for BOTH a settled idle box and a working pane
+# that merely renders idle-box chrome (a quoted box, the worker's own fixtures); when such a
+# pane is ALSO advancing (snapshots differ), trusting the bare box shape as "settled" is the
+# #23 false-idle - a still-working worker read as finished, the DANGEROUS direction (a driver
+# treats it as done). But a SINGLE diff is not enough to overrule the box: a real idle box can
+# show transient boot chrome that differs once then settles - exactly why the box overrode
+# motion before #23. So we require the motion to PERSIST: take SUSTAIN_SAMPLES more snapshot
+# pairs and return 0 (sustained -> working) only if EVERY consecutive pair differs; return 1
+# (settled -> trust the box) the moment any consecutive pair matches, i.e. the churn stopped.
+# A capture failure in the window returns 1 (settled), preserving the pre-#23 behavior (the box
+# decides) rather than inventing a new error path - classify_once already handles a gone pane
+# on its own two snapshots before this is ever reached.
+sustained_motion() {
+  local prev cur n
+  prev="$(snapshot)" || return 1
+  for ((n = 0; n < SUSTAIN_SAMPLES; n++)); do
+    sleep "$INTERVAL"
+    cur="$(snapshot)" || return 1
+    [ "$prev" = "$cur" ] && return 1
+    prev="$cur"
+  done
+  return 0
+}
+
 # Take one fresh pair of snapshots and classify them. Sets the globals `state`,
-# `code`, and the evidence vars (differ/spinner/menu/idle_box/ends_q). Returns
+# `code`, and the evidence vars (differ/spinner/menu/idle_box/sustained/ends_q). Returns
 # nonzero if a capture fails. Both the single-shot path and --watch call THIS, so
 # the two modes can never drift apart - there is one classifier, not two.
 #
@@ -421,11 +454,14 @@ ends_in_question() {
 #   1. a spinner is present                -> busy. A working pane is never a menu, so
 #      this is checked first; it vetoes a menu shape sitting in the working pane's text.
 #   2. a genuine idle box (the "⏵⏵" mode marker + empty "❯") is authoritative for the
-#      settled state, ABOVE the snapshot diff: a real idle box can still show transient
-#      boot chrome that makes two snapshots differ (proven against a live session), so
-#      the box overrides motion. A live menu has no empty "❯" (its "❯" carries an option
-#      number), so a settled box and a menu are mutually exclusive. Inside it, a trailing
-#      "?" means question, else idle.
+#      settled state, ABOVE a SINGLE snapshot diff: a real idle box can still show transient
+#      boot chrome that makes two snapshots differ (proven against a live session), so the box
+#      overrides a one-off diff. BUT if the diff is PERSISTENT (sustained_motion confirms the
+#      pane keeps advancing), the box is just chrome on a genuinely working pane (#23) and
+#      liveness wins -> busy. This closes the #22 decoy residual without flipping a settled box
+#      or a transient boot flicker to busy: only PERSISTENT motion overrides the box. A live
+#      menu has no empty "❯" (its "❯" carries an option number), so a settled box and a menu
+#      are mutually exclusive. With no sustained motion, a trailing "?" means question, else idle.
 #   3. the snapshots differ                -> busy. An advancing pane is working, not a
 #      static menu; deciding this before menu stops streamed numbered-list content from
 #      reading as a menu. A real selection menu waits for input, so it is static here.
@@ -444,6 +480,7 @@ classify_once() {
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
   if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
+  sustained="false"  # set true only when the idle_box+differ branch confirms persistent motion
 
   if [ "$idle_suffix" = "true" ]; then
     # settled-idle box confirmed by the "← for agents" suffix: beats the spinner, closing
@@ -457,7 +494,13 @@ classify_once() {
   elif [ "$spinner" = "true" ]; then
     state="busy"; code="$EXIT_BUSY"
   elif [ "$idle_box" = "true" ]; then
-    if [ "$ends_q" = "true" ]; then
+    # #23: the box shape fires for an idle box AND a working pane that renders idle-box
+    # chrome. If the pane is PERSISTENTLY advancing, it is the latter - liveness overrules
+    # the box -> busy. sustained_motion is called ONLY here (idle_box AND a diff), so a
+    # static box pays nothing, and a one-off boot-chrome diff settles -> stays idle.
+    if [ "$differ" = "true" ] && sustained_motion; then
+      sustained="true"; state="busy"; code="$EXIT_BUSY"
+    elif [ "$ends_q" = "true" ]; then
       state="question"; code="$EXIT_QUESTION"
     else
       state="idle"; code="$EXIT_IDLE"
@@ -536,8 +579,8 @@ fi
 classify_once || die "capture-pane failed for pane '$pane'"
 
 if [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"ends_in_question":%s,"interval":%s}}\n' \
-    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$idle_suffix" "$ends_q" "$INTERVAL"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s}}\n' \
+    "$state" "$differ" "$spinner" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL"
 else
   printf '%s\n' "$state"
 fi

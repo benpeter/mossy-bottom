@@ -317,6 +317,50 @@ fi
 
 tmux kill-session -t "$wrapi_sess" 2>/dev/null
 
+# --- #23 (the #22 decoy residual): a GENUINELY WORKING pane whose content RENDERS idle-box
+# chrome but whose content CHANGES across snapshots - the worker mid-slice, its own idle-box
+# fixtures in view, no Claude spinner. Pre-#23 is_idle_box (step 2) overrode the snapshot diff
+# unconditionally, so this read idle/0 (a FALSE-IDLE: a still-working worker reported finished,
+# the dangerous direction - a driver could hand the next slice into a live pane). The box has a
+# WORKING footer (no "← for agents"), so idle_suffix does not fire and it reaches the idle_box
+# branch. A counter line is redrawn every 0.1s ABOVE the box via home-cursor (no clear -> no
+# blank-frame race; the box is always present, so idle_box stays true) - so snapshots persist
+# in differing and sustained_motion confirms genuine work -> busy. '⏵⏵' = e2 8f b5 (no suffix).
+live_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  ~/timmy | Opus 4.8 | Context: 5%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'
+
+# RED before this slice: idle_box overrode the diff -> idle/0. After: persistent motion wins.
+motion_sess="timmy_t_motion_$$"
+tmux new-session -d -s "$motion_sess" -x 80 -y 24 \
+  "i=0; while true; do printf '\033[Hworking %d\033[K\n${live_box}' \"\$i\"; i=\$((i+1)); sleep 0.1; done" 2>/dev/null
+sleep 0.6  # let the first frame paint and the counter start advancing
+
+assert_state "$motion_sess" busy 10 "#23 working pane rendering idle-box chrome + persistent motion -> busy, not idle"
+
+# Pin the #23 path precisely: the box WAS recognised (idle_box=true) yet liveness won
+# (state busy, sustained_motion=true) - so this is the decoy fix, not a spinner firing.
+motion_json="$("$timmy" --pane "$motion_sess" --json 2>/dev/null)"
+motion_code=$?
+if [ "$motion_code" -eq 10 ] && [[ "$motion_json" == *'"state":"busy"'* ]] \
+  && [[ "$motion_json" == *'"idle_box":true'* ]] && [[ "$motion_json" == *'"sustained_motion":true'* ]]; then
+  ok "#23 idle-box chrome present yet persistent motion classified busy (idle_box=true, sustained_motion=true)"
+else
+  no "#23 idle-box chrome + persistent motion (got '$motion_json' exit $motion_code)"
+fi
+
+tmux kill-session -t "$motion_sess" 2>/dev/null
+
+# --- #23 GUARD (the discriminator is MOTION, not the box shape): the SAME no-suffix box,
+# STATIC. sustained_motion is never even called (differ=false), so the box decides -> idle.
+# Proves the fix flips ONLY on persistent motion and does NOT regress a settled idle box. ---
+still_sess="timmy_t_still_$$"
+tmux new-session -d -s "$still_sess" -x 80 -y 24 \
+  "printf 'all settled now.\n${live_box}'; sleep 600" 2>/dev/null
+sleep 0.5
+
+assert_state "$still_sess" idle 0 "#23 guard: the SAME box STATIC (no motion) stays idle - motion is the discriminator"
+
+tmux kill-session -t "$still_sess" 2>/dev/null
+
 # A MULTI-LINE assistant turn (reconstructed from a verbatim live capture): the
 # question is an indented CONTINUATION line (no "⏺" prefix), followed by the
 # "✻ ... for Ns" post-turn timer and a tip footer. The last content line of the
