@@ -210,3 +210,47 @@ unstuck her, not any interrupt.
 Net for #25: the load-bearing classifier still reports any spinner as plain busy, blind to a
 frozen one, so frozen-spinner stall detection is worth building - but note for future shauns,
 do not over-attribute a frozen pane to a model wedge; rule out an unsubmitted prompt first.
+
+## 2026-06-11 08:18 CEST - The chain mechanizes its own worker-stall supervision, end to end (bitzer)
+
+The morning's wedges were not just incidents to survive - they became the chain's
+work-list. Three times a worker turn froze (a subprocess blocked on the host git
+pager; a test suite hung on an unbounded wait; a bare model turn stalled with no
+subprocess), and each was recovered by hand - shaun running a liveness discriminator,
+sending Esc or C-c, re-handing the slice. Bitzer added a false alarm of its own,
+reading a stale, non-repainting pane as a frozen one. The lesson from all of it: the
+elapsed counter on a pane is an unreliable liveness signal; process activity and forward
+progress are the trustworthy ones.
+
+Over the next two hours the chain turned that hard-won judgement into a mechanical arc,
+one frontier at a time, each proven on origin before the next:
+
+- Detection (#25): timmy learned to classify a frozen spinner as a distinct "stalled"
+  state (exit 40), separate from busy, with a multi-sample confirm so a slow repaint
+  never mis-fires and genuine work never reads stalled.
+- Speed (#26): the new confirm windows had made the test suite run ~55s; their timing
+  became env-overridable so tests use tiny windows (suite back to ~20s) while production
+  defaults stay byte-unchanged.
+- Prevention (#27): the pager-wedge class was removed at the root - the launcher now
+  injects GIT_PAGER=cat into every pane and the heartbeat, so no worker can wedge on a
+  stray git command on any host, regardless of the user's git config.
+- Recovery, driver side (#28): the heartbeat's stuck-check now maps "stalled" to stuck,
+  so a frozen driver turn actually triggers the existing recovery wake - detection #25
+  had been silently defeated by a recovery loop that did not know the new state.
+- Recovery, worker side (#29): the heartbeat now watches the worker pane too and alerts
+  the driver when the worker stalls - the symmetric half. It only alerts (mechanical
+  recovery stays the driver's judgement, since a re-hand needs slice context), and it is
+  gated to never wake a busy driver and proven disjoint from the driver-stall path.
+
+The arc closes a real gap: the worker-stall supervision that took a human eye three times
+this run now runs in the dumb heartbeat. It takes effect at the next launch - this session
+still runs the booted prompts - and will self-confirm then.
+
+One steering flag stands above the incremental work. The chain has now hardened a long
+hermetic stretch (timmy classification, launch safety, the recovery loop), and the
+remaining hermetic frontiers are getting incremental. The highest-value quality left -
+Generality, actually driving a real external target - is gated on a live target-mode boot
+that only the Farmer can run (a chain cannot launch a nested live chain to self-verify it).
+The chain is not idle on this: it filed #30 to preflight the launch prerequisites so that
+Farmer-operated boot fails fast with one clear message instead of a confusing mid-boot
+failure. The on-ramp is being built; the boot itself waits on the Farmer's word.

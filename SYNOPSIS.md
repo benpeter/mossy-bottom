@@ -83,9 +83,26 @@ decisive real-vs-false discriminator: a 06:39 "wedge" was actually an unsent buf
 prompt (a long send-keys + immediate Enter raced) - so keep re-hands SHORT and VERIFY
 submission (box empties + spinner starts) before calling a frozen pane a wedge.
 
-**In flight:** #25 - timmy classifies a frozen spinner (wedged turn) as stalled (new
-exit 40), not plain busy - moving the manual wedge-check into the dumb tool. Economy +
-Robustness.
+**The stall-recovery arc (#25-#29, all CLOSED).** Driving the worker surfaced three
+real wedges (hand-recovered) + a bitzer false alarm, then the chain mechanized the
+supervision end to end: #25 timmy detects a frozen spinner as "stalled" (exit 40,
+multi-sample confirm); #26 made the confirm timing env-overridable so the suite stays
+fast (production byte-unchanged); #27 injects GIT_PAGER=cat into every pane + heartbeat
+so no worker wedges on the host pager (Generality - any host); #28 stuck-check maps
+stalled->stuck so a frozen driver triggers recovery; #29 the heartbeat alerts the driver
+when the WORKER stalls (alert-only, disjoint from the driver path). Takes effect at the
+next launch. Lesson banked: the pane elapsed counter is an unreliable liveness signal -
+trust process activity + forward progress.
+
+**In flight:** #30 - preflight the launch prerequisites on a live `up` (claude/tmux/git
+on PATH, target is a git work tree) so the Farmer-operated #8 boot fails fast with one
+clear message. The on-ramp to #8; does not replace it. Generality + Robustness.
+
+**Standing steering flag (for the Farmer).** The hermetic surface is thinning - the
+remaining in-chain frontiers are incremental. The highest-value quality, Generality
+(driving a real external target), is gated on the live target-mode boot under #8, which
+only the Farmer can run (a chain cannot self-verify a nested live boot). #30 lowers the
+friction of that boot; the boot itself awaits the Farmer's word.
 
 **Open / parked / pending the Farmer:**
 - #12 - close-vs-push: operational half landed (gate close on proving-commit-on-
