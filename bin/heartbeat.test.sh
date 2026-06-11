@@ -24,6 +24,7 @@ export MOSSY_HEARTBEAT_TRIGGER='NUDGE-BITZER-XYZZY'      # distinctive marker: b
 export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: shaun stuck-recovery (#20)
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
 export MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER='WAKE-DONE-XYZZY' # distinctive marker: worker-done wake to shaun (#36)
+export MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER='WAKE-INPUT-XYZZY' # distinctive marker: worker-needs-input wake (#36 sl.2)
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/heartbeat-test-XXXXXX")"
 sessions=""
@@ -340,6 +341,8 @@ beat "$pfwbz" "$tmp/wbz_shaun.fp" "$tmp/wbz_worker.fp"
 beat "$pfwbz" "$tmp/wbz_shaun.fp" "$tmp/wbz_worker.fp"
 if log_has 'shirley DONE'; then no "worker-busy: a busy worker is never 'done' (the economy win)"; else ok "worker-busy: busy worker never logged done (animating -> busy -> no wake: the economy win)"; fi
 if pane_has "$wbz_shaun" 'WAKE-DONE-XYZZY'; then no "worker-busy: shaun never woken"; else ok "worker-busy: shaun never woken (busy worker = no event)"; fi
+if log_has 'shirley NEEDS-INPUT'; then no "worker-busy: a busy worker is never 'needs-input' (#36 sl.2)"; else ok "worker-busy: busy worker never logged needs-input (busy != blocked-on-input)"; fi
+if pane_has "$wbz_shaun" 'WAKE-INPUT-XYZZY'; then no "worker-busy: shaun never woken with the input nudge"; else ok "worker-busy: shaun never woken with the input nudge"; fi
 
 # ============================================================================
 # #36 WORKER-DONE + SHAUN-ACTIVE: a finished (idle) worker but a BUSY shaun -> NEVER a wake (never
@@ -356,6 +359,64 @@ beat "$pfwda" "$tmp/wda_shaun.fp" "$tmp/wda_worker.fp"
 beat "$pfwda" "$tmp/wda_shaun.fp" "$tmp/wda_worker.fp"
 if log_has 'shirley DONE'; then no "worker-done+shaun-active: a busy shaun is never woken (done-wake gates on STANDBY)"; else ok "worker-done+shaun-active: busy shaun never woken/interrupted (done-wake gates on STANDBY)"; fi
 if pane_has "$wda_shaun" 'WAKE-DONE-XYZZY'; then no "worker-done+shaun-active: busy shaun never woken"; else ok "worker-done+shaun-active: busy shaun never woken"; fi
+
+# ============================================================================
+# #36 sl.2 WORKER-NEEDS-INPUT (waiting-input): a worker showing a SELECTION MENU (timmy waiting-input,
+# exit 20 - the same trust-gate shape the timmy suite uses) + shaun parked on a STANDBY -> shaun is WOKEN
+# on his own pane with the worker-input nudge. needs-input is a STABLE state detected single-beat, but the
+# wake still waits for shaun to be CONFIRMED parked (stuck-check standby needs changed=0), so it fires on
+# beat 2 - and is DISJOINT from done(idle)/stalled(#29)/stuck-recovery(#20). shaun is make_wakeable so the
+# idle->busy submission verifies; the worker is a static menu (stays waiting-input throughout).
+# ============================================================================
+wi_shaun="hbt_wi_shaun_$$"
+make_wakeable "$wi_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wi_shirley="hbt_wi_shirley_$$"
+make_fixture "$wi_shirley" "\xe2\x9d\xaf 1. Yes, I trust this folder\n  2. No, exit\n Enter to confirm \xc2\xb7 Esc to cancel\n"
+pfwi="$(fake_panes2 "$wi_shaun" "$wi_shirley")"
+
+beat "$pfwi" "$tmp/wi_shaun.fp" "$tmp/wi_worker.fp"   # beat 1: shaun not yet confirmed standby -> no wake
+if pane_has "$wi_shaun" 'WAKE-INPUT-XYZZY'; then no "worker-input(menu) beat 1: shaun NOT yet woken"; else ok "worker-input(menu) beat 1: shaun NOT yet woken (shaun standby not yet confirmed)"; fi
+
+beat "$pfwi" "$tmp/wi_shaun.fp" "$tmp/wi_worker.fp"   # beat 2: worker waiting-input + shaun standby -> wake
+if log_has 'shirley NEEDS-INPUT'; then ok "worker-input(menu) beat 2: heartbeat logged 'shirley NEEDS-INPUT' (selection menu = waiting-input)"; else no "worker-input(menu) beat 2: heartbeat logged 'shirley NEEDS-INPUT' ($OUT)"; fi
+if log_has 'worker-input wake delivered + verified'; then ok "worker-input(menu) beat 2: wake DELIVERED + VERIFIED to shaun (idle->busy submission confirmed)"; else no "worker-input(menu) beat 2: wake delivered + verified ($OUT)"; fi
+if log_has 'shirley DONE'; then no "worker-input(menu) beat 2: NOT the worker-done wake (disjoint, needs-input != done)"; else ok "worker-input(menu) beat 2: NOT the worker-done wake (disjoint, needs-input != done)"; fi
+if log_has 'worker-alert'; then no "worker-input(menu) beat 2: NOT the #29 worker-alert (disjoint, needs-input != stalled)"; else ok "worker-input(menu) beat 2: NOT the #29 worker-alert (disjoint, needs-input != stalled)"; fi
+if log_has 'stuck-recovery'; then no "worker-input(menu) beat 2: NOT the #20 stuck-recovery (disjoint)"; else ok "worker-input(menu) beat 2: NOT the #20 stuck-recovery (disjoint)"; fi
+
+# ============================================================================
+# #36 sl.2 WORKER-NEEDS-INPUT (question): a worker whose idle box ends in a '?' (timmy question, exit 30)
+# + shaun parked on a STANDBY -> shaun is WOKEN with the worker-input nudge. Same structure/gate as the
+# menu case; proves BOTH waiting-input(20) AND question(30) route to the single 'needs-input' verdict.
+# ============================================================================
+wq_shaun="hbt_wq_shaun_$$"
+make_wakeable "$wq_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wq_shirley="hbt_wq_shirley_$$"
+make_fixture "$wq_shirley" "\xe2\x8f\xba Want me to take question next, or harden idle first?\n${idle_box}"
+pfwq="$(fake_panes2 "$wq_shaun" "$wq_shirley")"
+
+beat "$pfwq" "$tmp/wq_shaun.fp" "$tmp/wq_worker.fp"   # beat 1: shaun not yet confirmed standby -> no wake
+if pane_has "$wq_shaun" 'WAKE-INPUT-XYZZY'; then no "worker-input(question) beat 1: shaun NOT yet woken"; else ok "worker-input(question) beat 1: shaun NOT yet woken (shaun standby not yet confirmed)"; fi
+
+beat "$pfwq" "$tmp/wq_shaun.fp" "$tmp/wq_worker.fp"   # beat 2: worker question + shaun standby -> wake
+if log_has 'shirley NEEDS-INPUT'; then ok "worker-input(question) beat 2: heartbeat logged 'shirley NEEDS-INPUT' (idle box ending '?' = question)"; else no "worker-input(question) beat 2: heartbeat logged 'shirley NEEDS-INPUT' ($OUT)"; fi
+if log_has 'worker-input wake delivered + verified'; then ok "worker-input(question) beat 2: wake DELIVERED + VERIFIED to shaun (idle->busy submission confirmed)"; else no "worker-input(question) beat 2: wake delivered + verified ($OUT)"; fi
+if log_has 'shirley DONE'; then no "worker-input(question) beat 2: NOT the worker-done wake (disjoint)"; else ok "worker-input(question) beat 2: NOT the worker-done wake (disjoint, question != done)"; fi
+
+# ============================================================================
+# #36 sl.2 WORKER-NEEDS-INPUT + SHAUN-ACTIVE: a worker blocked on input but a BUSY shaun -> NEVER a wake
+# (gates on shaun PARKED on a STANDBY; never interrupt a mid-turn shaun). Shaun is an animating spinner ->
+# stuck-check 'working' (rc 0), not STANDBY (10). Two beats; shaun is never woken though the worker waits.
+# ============================================================================
+wia_shaun="hbt_wia_shaun_$$"
+animating "$wia_shaun"
+wia_shirley="hbt_wia_shirley_$$"
+make_fixture "$wia_shirley" "\xe2\x9d\xaf 1. Yes, I trust this folder\n  2. No, exit\n Enter to confirm \xc2\xb7 Esc to cancel\n"
+pfwia="$(fake_panes2 "$wia_shaun" "$wia_shirley")"
+beat "$pfwia" "$tmp/wia_shaun.fp" "$tmp/wia_worker.fp"
+beat "$pfwia" "$tmp/wia_shaun.fp" "$tmp/wia_worker.fp"
+if log_has 'shirley NEEDS-INPUT'; then no "worker-input+shaun-active: a busy shaun is never woken (gates on STANDBY)"; else ok "worker-input+shaun-active: busy shaun never woken/interrupted (input-wake gates on STANDBY)"; fi
+if pane_has "$wia_shaun" 'WAKE-INPUT-XYZZY'; then no "worker-input+shaun-active: busy shaun never woken"; else ok "worker-input+shaun-active: busy shaun never woken"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

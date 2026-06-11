@@ -51,6 +51,14 @@
 # wake - the economy win). The wake goes to SHAUN's pane (we never type into shirley); recovery/direction
 # is shaun's. NOTE this lands only at the next launch - the running chain keeps its current wake model.
 #
+# Worker-needs-input event wake (Issue #36 slice 2): each beat ALSO wakes shaun when the WORKER is BLOCKED
+# on input - timmy's waiting-input (exit 20, a selection menu) or question (exit 30, an idle box whose last
+# line ends in '?'). These are STABLE 'shirley needs an answer' states (they do not flicker like a momentary
+# idle), so they are detected single-beat - no two-beat confirm. They ride the SAME worker_verdict: they
+# come through stuck-check's 'working' path (non-idle, non-stalled), so a single raw timmy read splits them
+# out as the 'needs-input' verdict, DISJOINT from done(idle)/stalled/alive. The wake (also to SHAUN's pane,
+# gated on shaun PARKED) lets shaun's judgment answer or redirect her; we never type into shirley.
+#
 # Lifecycle: this loop is meant to run inside the tmux session as a background window
 # (the wiring is barn.sh's job - a later slice), so it lives and dies with the chain,
 # which is the correct lifecycle: a dead session has no bitzer to nudge. It has no timed
@@ -72,6 +80,7 @@
 #   MOSSY_HEARTBEAT_STUCK_TRIGGER  override the shaun stuck-recovery wake text
 #   MOSSY_HEARTBEAT_WORKER_TRIGGER override the worker-stalled alert text sent to shaun (#29)
 #   MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER override the worker-done wake text sent to shaun (#36)
+#   MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER override the worker-needs-input wake text sent to shaun (#36 sl.2)
 #   MOSSY_SHAUN_FP               shaun's cross-beat fingerprint file (default: STATE_DIR/.shaun-fp)
 #   MOSSY_WORKER_FP              shirley's cross-beat fingerprint file (default: STATE_DIR/.shirley-fp)
 #
@@ -131,6 +140,14 @@ WORKER_TRIGGER="${MOSSY_HEARTBEAT_WORKER_TRIGGER:-${DEFAULT_WORKER_TRIGGER}}"
 readonly DEFAULT_WORKER_DONE_TRIGGER='[heartbeat] worker-done: shirley looks finished (idle, no progress across two beats - slice complete or awaiting your hand). Check her pane - verify her last slice and hand the next from MISSION.md, or send STANDBY if the queue is empty. This is an event wake; direction is yours.'
 WORKER_DONE_TRIGGER="${MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER:-${DEFAULT_WORKER_DONE_TRIGGER}}"
 
+# A DISTINCT worker-NEEDS-INPUT wake for shaun (#36 slice 2). Tagged "[heartbeat] worker-input" so it is
+# legible in logs and unmistakable from the bitzer poll, shaun's stuck-recovery, the worker-stalled alert,
+# and the worker-done wake. It fires only when shirley is BLOCKED on input (a selection menu or a question)
+# and shaun is PARKED, so shaun's judgment answers or redirects her. It only WAKES shaun on HIS pane; it
+# never types into shirley, and direction is shaun.md's, not ours.
+readonly DEFAULT_WORKER_INPUT_TRIGGER='[heartbeat] worker-input: shirley looks blocked on input (a selection menu or a question on her pane - she needs an answer). Check her pane and answer or redirect her, or hand the next slice from MISSION.md. This is an event wake; direction is yours.'
+WORKER_INPUT_TRIGGER="${MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER:-${DEFAULT_WORKER_INPUT_TRIGGER}}"
+
 die() { printf 'heartbeat: %s\n' "$1" >&2; exit 64; }
 log() { printf 'heartbeat %s | %s\n' "$(date '+%H:%M:%S')" "$1"; }
 
@@ -147,19 +164,21 @@ Each beat does three INDEPENDENT things from .barn-panes:
     (idle, stable across two ticks, no STANDBY) clear his input line and send a stuck-recovery
     wake VIA send-verified (#32) - confirmed-submitted + retried once, logged if it still fails.
     working/standby do nothing. Skipped quietly if there is no shaun pane yet.
-  - shirley: classify the worker ONCE across beats (worker_verdict) and partition by state, two
+  - shirley: classify the worker ONCE across beats (worker_verdict) and partition by state, three
     disjoint event-wakes to SHAUN's pane (never typing into shirley), each only when shaun is
     parked on a STANDBY: (#29) STALLED (a frozen spinner stable across two ticks) -> alert shaun
     his worker is wedged; (#36) DONE (idle, stable across two beats) -> wake shaun to verify the
-    finished slice and hand the next. A BUSY worker does nothing (the economy win). Disjoint from
-    the shaun branch (that owns a STUCK shaun) and from each other (stalled vs done), so no
-    double-wake.
+    finished slice and hand the next; (#36 sl.2) NEEDS-INPUT (waiting-input/question - shirley is
+    blocked on a prompt) -> wake shaun to answer/redirect her. A BUSY worker does nothing (the
+    economy win). Disjoint from the shaun branch (that owns a STUCK shaun) and from each other
+    (stalled vs done vs needs-input), so no double-wake.
 No timed expiry.
 
 Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
      MOSSY_HEARTBEAT_SECS (cadence, default 300), MOSSY_HEARTBEAT_TRIGGER (poll text),
      MOSSY_HEARTBEAT_STUCK_TRIGGER (stuck-recovery text), MOSSY_HEARTBEAT_WORKER_TRIGGER
      (worker-alert text), MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER (worker-done text),
+     MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER (worker-needs-input text),
      MOSSY_SHAUN_FP / MOSSY_WORKER_FP (fingerprint files).
 EOF
 }
@@ -291,33 +310,40 @@ beat_shaun() {
 }
 
 # worker_verdict - classify the WORKER (shirley) pane ONCE per beat and echo "<wid> <state>", where
-# state is one of: done|stalled|alive|other. This single classification is SHARED by both worker-event
-# branches and partitioned by STATE, so they are disjoint and can never double-wake. stuck-check is the
-# cross-beat authority (it owns the WORKER_FP fingerprint, so its 'stuck' verdict already demands
-# changed=0 - content STABLE across two beats - which IS the two-beat confirm #36 needs and the #29
-# stall needs). But stuck-check collapses two different dead-stable states into one exit 20: a stalled
-# frozen spinner (timmy 40, #25/#28) AND an idle-done worker (timmy 0, idle + stable + no STANDBY). So
-# ONLY on that exit-20 path we re-read the now-static pane with timmy ONCE to split it back: idle(0) ->
-# 'done' (a finished slice awaiting the next hand, #36), stalled(40) -> 'stalled' (a wedged turn, #29).
-# Any other state -> 'alive' (working/waiting/question - genuinely advancing, no wake this slice). Echoes
-# nothing (empty) when there is no shirley pane or no stuck-check. Never dies: a read failure falls toward
-# 'alive', never a spurious done/stalled (a pane we cannot read is never provably finished or wedged).
+# state is one of: done|stalled|needs-input|alive|other. This single classification is SHARED by all the
+# worker-event branches and partitioned by STATE, so they are disjoint and can never double-wake.
+# stuck-check is the cross-beat STABILITY authority (it owns the WORKER_FP fingerprint, so its 'stuck'
+# verdict already demands changed=0 - content STABLE across two beats - which IS the two-beat confirm #36
+# done needs and the #29 stall needs). timmy's RAW state (read once, unconditionally) is the discriminator
+# stuck-check's collapsed verdict hides:
+#   - stuck-check exit 20 = a DEAD-STABLE turn, but it lumps two states (#25/#28): a stalled frozen
+#     spinner (timmy 40) AND an idle-done worker (timmy 0, idle + stable + no STANDBY). The raw read
+#     splits them: idle(0) -> 'done' (finished, awaiting the next hand, #36), stalled(40) -> 'stalled'
+#     (a wedged turn, #29).
+#   - otherwise the pane is ALIVE this beat; waiting-input(20)/question(30) are STABLE 'shirley needs an
+#     answer' states (#36 slice 2), detected single-beat (they do not flicker like a momentary idle, so
+#     no two-beat confirm) -> 'needs-input'; anything else (busy/advancing) -> 'alive', no wake.
+# Echoes nothing (empty) when there is no shirley pane or no stuck-check. Never dies: a read failure falls
+# toward 'alive', never a spurious done/stalled/needs-input (a pane we cannot read is never provably so).
 worker_verdict() {
   local wid wrc trc
   [ -x "$STUCK_CHECK" ] || return 0
   wid="$(shirley_pane "$panes_file")" || return 0
   MOSSY_TIMMY="$TIMMY" "$STUCK_CHECK" --pane "$wid" --fingerprint-file "$WORKER_FP" >/dev/null 2>&1
   wrc=$?
+  "$TIMMY" --pane "$wid" >/dev/null 2>&1
+  trc=$?
   if [ "$wrc" -eq 20 ]; then
-    "$TIMMY" --pane "$wid" >/dev/null 2>&1
-    trc=$?
     case "$trc" in
       0) printf '%s done' "$wid" ;;
       40) printf '%s stalled' "$wid" ;;
       *) printf '%s other' "$wid" ;;
     esac
   else
-    printf '%s alive' "$wid"
+    case "$trc" in
+      20 | 30) printf '%s needs-input' "$wid" ;;
+      *) printf '%s alive' "$wid" ;;
+    esac
   fi
 }
 
@@ -361,12 +387,32 @@ beat_worker_done() {
   fi
 }
 
+# beat_worker_needs <shaun_id> <shaun_rc> <wid> <wstate> - the #36-slice-2 worker-needs-input wake,
+# reading the SHARED worker_verdict. When the worker is 'needs-input' (timmy waiting-input(20) or
+# question(30) - shirley is blocked on a prompt/question, a STABLE state detected single-beat) AND shaun
+# is parked on a STANDBY (shaun_rc=10), WAKE shaun on HIS pane so his judgment answers/redirects her -
+# NEVER typing into shirley. DISJOINT from beat_worker_done ('done'), beat_worker ('stalled'), and
+# beat_shaun (shaun_rc=20) by the state/verdict gates - so no double-wake, and a busy shaun (rc=0) is
+# never interrupted. Skipped QUIETLY when there is no worker verdict or no shaun.
+beat_worker_needs() {
+  local shaun_id="$1" shaun_rc="$2" wid="$3" wstate="$4"
+  [ -n "$shaun_id" ] || return 0
+  [ -n "$wid" ] || return 0
+  if [ "$wstate" = "needs-input" ] && [ "$shaun_rc" = "10" ]; then
+    if send_wake "$shaun_id" "$WORKER_INPUT_TRIGGER"; then
+      log "shirley NEEDS-INPUT (${wid}) + shaun parked (${shaun_id}) -> worker-input wake delivered + verified to shaun"
+    else
+      log "shirley NEEDS-INPUT (${wid}) + shaun parked (${shaun_id}) -> worker-input wake FAILED to submit after retry"
+    fi
+  fi
+}
+
 # beat - one heartbeat: the bitzer poll nudge, then the shaun-aware and worker-aware branches. Shaun is
-# classified ONCE (shaun_verdict), shared by beat_shaun (#20, owns shaun STUCK) and the two worker
-# branches' STANDBY gate. The WORKER is also classified ONCE (worker_verdict), shared by beat_worker
-# (#29, owns 'stalled') and beat_worker_done (#36, owns 'done'), partitioned by state so all four wakes
-# are mutually disjoint and can never double-wake. Each branch is self-contained and resilient, so one
-# bad branch never stops the others or the loop.
+# classified ONCE (shaun_verdict), shared by beat_shaun (#20, owns shaun STUCK) and the worker branches'
+# STANDBY gate. The WORKER is also classified ONCE (worker_verdict), shared by beat_worker (#29, owns
+# 'stalled'), beat_worker_done (#36, owns 'done'), and beat_worker_needs (#36 sl.2, owns 'needs-input'),
+# partitioned by state so all the wakes are mutually disjoint and can never double-wake. Each branch is
+# self-contained and resilient, so one bad branch never stops the others or the loop.
 beat() {
   beat_bitzer
   local sv shaun_id shaun_rc
@@ -378,6 +424,7 @@ beat() {
   read -r wid wstate <<<"$wv"
   beat_worker "$shaun_id" "$shaun_rc" "$wid" "$wstate"
   beat_worker_done "$shaun_id" "$shaun_rc" "$wid" "$wstate"
+  beat_worker_needs "$shaun_id" "$shaun_rc" "$wid" "$wstate"
 }
 
 if [ "$once" -eq 1 ]; then
