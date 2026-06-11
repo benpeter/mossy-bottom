@@ -284,9 +284,40 @@ case - it is a positive "not applicable", logged once and quietly, not a blind s
   then one Enter submits the whole block as one message.
 - Compose the whole message and submit at once. Never leave partial text in her
   box - there is no reliable one-key clear.
+- **Keep hand prompts SHORT.** A long prompt sent via `send-keys -l` plus an
+  immediately-following Enter can RACE - the Enter lands before the literal text has
+  finished arriving, so the whole prompt sits BUFFERED in the input box, unsubmitted,
+  and looks for all the world like a wedge. Short hands do not fragment. (Run 3 lost
+  ~10min to one long prompt misdiagnosed this way.)
+- **Verify submission - do not assume it.** A hand is SUBMITTED only when the input
+  box goes EMPTY *and* a FRESH spinner starts. "A spinner is present" is NOT enough:
+  a prior turn's still-finishing spinner (a settling `● Cooked/Cogitated Nm…`) fools
+  the check, so a never-submitted prompt reads as working. Confirm both - box cleared,
+  new spinner begun - before you trust the hand landed.
 - To interrupt: `tmux send-keys -t $SHIRLEY Escape`. Escape also restores her last
   prompt back into the box, so after interrupting, overwrite rather than append -
   send your text and submit immediately.
+- **Buffered-prompt vs. wedge vs. work - rule out in this order before you act.**
+  When shirley looks stuck, discriminate first; do not jump to Esc:
+  1. **Input box NON-EMPTY** -> a buffered, unsubmitted prompt. Clear it with a
+     backspace burst (`C-u` does NOT clear a multi-line buffer here), then re-send a
+     SHORTER hand and re-verify FRESH (box empties, new spinner).
+  2. **Advancing counter, OR changing pane content, OR new git edits** -> she is
+     working. Leave her alone.
+  3. **Box empty AND verified-fresh AND no content change AND no git edits AND the
+     counter frozen across a fresh long window** -> a real wedge: Esc, then a short
+     re-hand and verify.
+- **`ps` is UNRELIABLE for isolating shirley.** A `ps` grep matches the chain's OWN
+  infrastructure - the `mossy` session, `heartbeat.sh`, `sleep 300` - so "a process
+  is running" is NOT proof shirley is working. The reliable liveness signals are
+  CONTENT-CHANGE (her pane evolving across snapshots) and NEW git edits. Re-read the
+  counter FRESH each time - a stale display shows a phantom-frozen value.
+- **Recovery key by case** (match the case, do not guess the key):
+  - **Buffered prompt** (box non-empty) -> clear with a backspace burst, re-send shorter.
+  - **Running a blocked command** (a frozen numeric counter under a shown command) ->
+    `C-c` (`tmux send-keys -t $SHIRLEY C-c`).
+  - **Stuck model-turn** (box empty, frozen, no progress) -> `Escape`.
+  - **Ended at idle-prompt with no STANDBY** -> a plain wake (#20).
 
 ## Kickoff (after bitzer's go - not before)
 
