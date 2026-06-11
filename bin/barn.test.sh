@@ -368,5 +368,104 @@ fi
 tmux kill-session -t "$hb_sess" 2>/dev/null
 hb_sess=""
 
+# ============================================================================
+# Case L - #30: live-path launch preflight (preflight_tools). On a fresh host the chain's
+# prerequisites (claude, tmux, git) may be absent or the target may not be a git repo; a LIVE
+# up must fail fast with one 'barn: missing <X> - ...' line BEFORE any pane/window is created,
+# while --plan stays launch-free (never gated). Per-branch coverage is function-level with a
+# PATH scoped to each call inside $() (preflight_tools uses only command -v + git internally,
+# so a 3-tool PATH is enough and the scoped PATH cannot leak into the harness's own grep/awk).
+# The 'no session/window created' guarantee is proven once end-to-end by a real subprocess up
+# whose gate fires before ensure_session - structural for every branch (the gate precedes the
+# first side effect in cmd_up).
+# ============================================================================
+real_tmux="$(command -v tmux)"
+real_git="$(command -v git)"
+# pfbin <dir> <tool...> - a PATH dir holding ONLY the named tools (real tmux/git via symlink,
+# a no-op claude stub), so a scoped PATH can present/withhold each prerequisite precisely.
+pfbin() {
+  local d="$1"; shift; mkdir -p "$d"; local t
+  for t in "$@"; do
+    case "$t" in
+      tmux) ln -s "$real_tmux" "$d/tmux" ;;
+      git) ln -s "$real_git" "$d/git" ;;
+      claude) printf '#!/bin/sh\nexit 0\n' >"$d/claude"; chmod +x "$d/claude" ;;
+    esac
+  done
+}
+pf_all="$tmp/pf-all"; pfbin "$pf_all" tmux git claude
+pf_no_tmux="$tmp/pf-notmux"; pfbin "$pf_no_tmux" git claude
+pf_no_git="$tmp/pf-nogit"; pfbin "$pf_no_git" tmux claude
+pf_no_claude="$tmp/pf-nocla"; pfbin "$pf_no_claude" tmux git
+scratchL="$(new_scratch_repo repoL)" # a real git work tree (positive target)
+plainL="$tmp/plainL-not-git"; mkdir -p "$plainL" # a non-repo target (negative)
+
+# pf_run <PATHdir> <target> [unset_claude] - run preflight_tools with a scoped PATH (and
+# optionally MOSSY_CLAUDE unset, to reach the claude branch) inside a subshell so neither the
+# PATH nor the unset leaks into the harness. Captures OUT and CODE.
+pf_run() {
+  if [ "${3:-}" = "unset_claude" ]; then
+    OUT="$(unset MOSSY_CLAUDE; PATH="$1" preflight_tools "$2" 2>&1)"; CODE=$?
+  else
+    OUT="$(PATH="$1" preflight_tools "$2" 2>&1)"; CODE=$?
+  fi
+}
+
+printf '\n== #30 launch preflight (preflight_tools) ==\n'
+
+# (a) all prerequisites present + a git-repo target -> passes silently (rc 0, no message).
+pf_run "$pf_all" "$scratchL"
+chk_eq "L(a): all present + git target -> passes (rc 0)" "$CODE" "0"
+chk_eq "L(a): a pass is silent (no message)" "$OUT" ""
+# dogfood positive: the repo root itself is a git work tree.
+pf_run "$pf_all" "$expected_repo"
+chk_eq "L(a): dogfood repo-root target -> passes (rc 0)" "$CODE" "0"
+
+# (b) missing tmux -> nonzero, names tmux in the 'barn: missing <X> -' form.
+pf_run "$pf_no_tmux" "$scratchL"
+if [ "$CODE" -ne 0 ]; then ok "L(b): missing tmux -> nonzero"; else no "L(b): missing tmux -> nonzero (got $CODE)"; fi
+if grep -qF 'barn: missing tmux -' <<<"$OUT"; then ok "L(b): names tmux"; else no "L(b): names tmux (got '$OUT')"; fi
+
+# (c) missing git -> nonzero, names git.
+pf_run "$pf_no_git" "$scratchL"
+if [ "$CODE" -ne 0 ]; then ok "L(c): missing git -> nonzero"; else no "L(c): missing git -> nonzero (got $CODE)"; fi
+if grep -qF 'barn: missing git -' <<<"$OUT"; then ok "L(c): names git"; else no "L(c): names git (got '$OUT')"; fi
+
+# (d) all tools present but a NON-repo target -> nonzero, names the work tree AND the target.
+pf_run "$pf_all" "$plainL"
+if [ "$CODE" -ne 0 ]; then ok "L(d): non-repo target -> nonzero"; else no "L(d): non-repo target -> nonzero (got $CODE)"; fi
+if grep -qF 'barn: missing git work tree -' <<<"$OUT"; then ok "L(d): names 'git work tree'"; else no "L(d): names work tree (got '$OUT')"; fi
+if grep -qF "$plainL" <<<"$OUT"; then ok "L(d): message includes the offending target"; else no "L(d): message includes target (got '$OUT')"; fi
+
+# (e) missing claude (no MOSSY_CLAUDE override, claude not on PATH) -> nonzero, names claude.
+pf_run "$pf_no_claude" "$scratchL" unset_claude
+if [ "$CODE" -ne 0 ]; then ok "L(e): missing claude -> nonzero"; else no "L(e): missing claude -> nonzero (got $CODE)"; fi
+if grep -qF 'barn: missing claude -' <<<"$OUT"; then ok "L(e): names claude"; else no "L(e): names claude (got '$OUT')"; fi
+# ...and MOSSY_CLAUDE set is honored: an override need not be on PATH (claude branch skipped).
+pf_run "$pf_no_claude" "$scratchL" # MOSSY_CLAUDE still = stub
+chk_eq "L(e): MOSSY_CLAUDE override skips the claude PATH check (rc 0)" "$CODE" "0"
+
+# (f) END-TO-END 'no session/window created': a real subprocess `up` on a non-repo target,
+# all tools present, fails at preflight_tools BEFORE ensure_session - so the unique session is
+# never created and no stray .mossy is left. Hermetic: MOSSY_CLAUDE=stub, the gate fires before
+# any claude/tmux spawn (no real launch).
+pf_sess="barn_pf_l_$$"
+out="$(MOSSY_CLAUDE="$stub" MOSSY_SESSION="$pf_sess" "$barn" up "$plainL" 2>&1)"; code=$?
+if [ "$code" -ne 0 ]; then ok "L(f): live up on a non-repo target exits nonzero"; else no "L(f): live up on a non-repo target exits nonzero (got $code)"; fi
+if grep -qF 'barn: missing git work tree -' <<<"$out"; then ok "L(f): prints the work-tree miss"; else no "L(f): prints the work-tree miss (got '$out')"; fi
+if tmux has-session -t "$pf_sess" 2>/dev/null; then
+  no "L(f): NO session created by a gated up"
+  tmux kill-session -t "$pf_sess" 2>/dev/null
+else
+  ok "L(f): NO session created by a gated up"
+fi
+if [ -d "$plainL/.mossy" ]; then no "L(f): NO stray .mossy left behind"; else ok "L(f): NO stray .mossy left behind"; fi
+
+# (g) --plan is NEVER gated: `up --plan` on the SAME non-repo target still succeeds and emits a
+# plan (launch-free, byte-stable - the preflight is a live-path gate only).
+planL="$(cmd_up --plan "$plainL")"; code=$?
+chk_eq "L(g): --plan on a non-repo target still succeeds (no live gate)" "$code" "0"
+if grep -qF 'plan (no spawn)' <<<"$planL"; then ok "L(g): --plan still emits its plan despite a non-repo target"; else no "L(g): --plan still emits its plan"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -37,6 +37,11 @@
 # Preflight: 'up' refuses to spawn unless the resolved state dir already holds
 # Farmer-authored MISSION.md and GUARDRAILS.md. barn never creates them. Dogfood
 # (state dir = repo root) passes silently. '--plan' reports readiness but never blocks.
+# A LIVE up ALSO preflights the launch prerequisites (#30): claude, tmux and git must be
+# callable and the resolved target must be inside a git work tree, else it prints one
+# 'barn: missing <X> - ...' line and exits nonzero BEFORE any pane/window is created -
+# so #8's Farmer boot on an unverified host fails fast and legibly instead of deep in the
+# three-pane spawn. Both gates are live-path only; '--plan' stays launch-free and byte-stable.
 #
 # Config via env:
 #   MOSSY_SESSION       target tmux session (default: attached session, else "mossy")
@@ -375,6 +380,36 @@ preflight_state() {
   return 1
 }
 
+# preflight_tools <target> - LIVE-path launch gate (#30). #8's Farmer boot is meant to run on
+# a host the chain has NOT self-verified, where a missing claude/tmux/git or a non-repo target
+# otherwise surfaces as a confusing failure deep in the three-pane spawn. Before any side
+# effect, verify the launch prerequisites are present and the resolved target is inside a git
+# work tree; on the FIRST failure print one 'barn: missing <X> - <what to do>' line and return
+# 1, so the boot fails fast and legibly. Reads only (command -v, git rev-parse); creates
+# nothing. The claude check honors MOSSY_CLAUDE: an explicit override need not be on PATH
+# (barn already validated its executability at load), so only a real fresh-host PATH miss is
+# reported. Additive to preflight_state; --plan never calls it.
+preflight_tools() {
+  local target="$1"
+  if [ -z "${MOSSY_CLAUDE:-}" ] && ! command -v claude >/dev/null 2>&1; then
+    echo "barn: missing claude - install Claude Code so 'claude' is on PATH (or set MOSSY_CLAUDE)" >&2
+    return 1
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "barn: missing tmux - install tmux and put it on PATH" >&2
+    return 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "barn: missing git - install git and put it on PATH" >&2
+    return 1
+  fi
+  if ! git -C "${target}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "barn: missing git work tree - target '${target}' is not inside a git repository (run 'git init' there or point at a repo)" >&2
+    return 1
+  fi
+  return 0
+}
+
 # seed_target_exclude <target> - keep the target repo's history clean of the harness's
 # per-run .mossy/ state. The doc promises an unconditional clean-history guarantee, but
 # this repo's tracked .gitignore only reaches targets NESTED inside it - an external
@@ -476,8 +511,13 @@ cmd_up() {
     return 0
   fi
 
-  # Preflight before any side effect: refuse to boot against an unauthored state dir,
-  # and do it before mkdir so a missing-state target leaves no stray .mossy behind.
+  # Preflight before any side effect (both gates run before the first mkdir/tmux, so a refusal
+  # creates nothing - no stray .mossy, no session/window):
+  #   #30 launch prerequisites - on a fresh host claude/tmux/git may be absent or the target
+  #        may not be a git repo; fail fast and legibly before the three-pane spawn. Run first
+  #        so its message wins on attribution when the host is genuinely unprepared.
+  #   state gate          - refuse to boot against an unauthored state dir.
+  preflight_tools "${target}" || exit 1
   preflight_state "${state_dir}" || exit 1
 
   mkdir -p "${state_dir}"
