@@ -228,6 +228,32 @@ send_prompt() {
   tmux send-keys -t "${pane}" Enter
 }
 
+# bin/send-verified.sh delivers a prompt AND confirms it actually submitted (the pane goes
+# busy), retrying once. Role boot prompts route through it (#35); the #18.3 inject lines do NOT.
+SEND_VERIFIED="${SCRIPT_DIR}/send-verified.sh"
+
+# send_role_prompt <pane> <label> <text> - deliver a ROLE BOOT prompt and CONFIRM it submitted
+# (#35), via send-verified. A role prompt STARTS a turn, so the pane goes idle->busy and
+# send-verified's busy-confirmation fits exactly: type, settle, Enter, poll timmy, and on a
+# still-idle pane clear + retry ONCE before giving up. This closes the 06:39 race for the LAST
+# unverified prompt-send in the harness - on a fresh #8 host a role prompt that silently failed to
+# submit would boot a pane WITHOUT its role, a quiet, confusing launch failure. On failure we log
+# LOUDLY and return nonzero (a roleless pane is a compromised launch); the caller degrades
+# gracefully (|| true) rather than aborting a half-raised chain.
+#
+# The #18.3 inject lines deliberately stay on plain send_prompt (inject_into): a slash-command
+# like /model or /fast may apply INSTANTLY and leave the pane IDLE, which send-verified would
+# wrongly read as 'not submitted' and retry/fail. So the adoption is SELECTIVE - role prompts
+# only. timmy is the same classifier the rest of the harness uses (passed via MOSSY_TIMMY).
+send_role_prompt() {
+  local pane="$1" label="$2" text="$3"
+  if MOSSY_TIMMY="${TIMMY_DIR}/bin/timmy" "${SEND_VERIFIED}" "${pane}" "${text}"; then
+    return 0
+  fi
+  echo "barn: WARNING - ${label} role prompt did not submit into pane ${pane} after retry - the pane may be booting WITHOUT its role (compromised launch); inspect and relaunch ${label}" >&2
+  return 1
+}
+
 # resolve_inject [<flag-line>...] - echo the ordered pre-role injection list, one line each:
 # the newline-separated MOSSY_INJECT env lines FIRST, then the --inject flag lines (passed
 # as args) in order. Empty lines are left for the consumer to skip. Pure - reads only env
@@ -604,8 +630,11 @@ cmd_up() {
   fi
 
   echo "barn: delivering role prompts (shirley gets none)..."
-  send_prompt "${bitzer}" "$(bitzer_boot "${state_dir}")"
-  send_prompt "${shaun}" "$(shaun_boot "${state_dir}")"
+  # #35: confirm each role prompt actually submitted (idle->busy), retry once, log loudly on
+  # failure. || true so a miss degrades gracefully (loud warning) instead of aborting the
+  # already-raised chain mid-launch under set -e.
+  send_role_prompt "${bitzer}" bitzer "$(bitzer_boot "${state_dir}")" || true
+  send_role_prompt "${shaun}" shaun "$(shaun_boot "${state_dir}")" || true
   # shirley: intentionally nothing.
 
   cat <<EOF
@@ -698,9 +727,11 @@ cmd_relaunch() {
   if [ -n "${role_inject}" ]; then
     inject_into "${id}" "${role_inject}"
   fi
+  # #35: the respawned role prompt is verified-delivered too (idle->busy, retry once, loud on
+  # failure); || true degrades gracefully under set -e. shirley still gets nothing.
   case "${role}" in
-    bitzer) send_prompt "${id}" "$(bitzer_boot "${state_dir}")" ;;
-    shaun) send_prompt "${id}" "$(shaun_boot "${state_dir}")" ;;
+    bitzer) send_role_prompt "${id}" bitzer "$(bitzer_boot "${state_dir}")" || true ;;
+    shaun) send_role_prompt "${id}" shaun "$(shaun_boot "${state_dir}")" || true ;;
     shirley) : ;; # no prompt - the asymmetry holds on relaunch too
   esac
   echo "barn: relaunched ${role} in pane ${id}"

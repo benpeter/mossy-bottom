@@ -467,5 +467,77 @@ planL="$(cmd_up --plan "$plainL")"; code=$?
 chk_eq "L(g): --plan on a non-repo target still succeeds (no live gate)" "$code" "0"
 if grep -qF 'plan (no spawn)' <<<"$planL"; then ok "L(g): --plan still emits its plan despite a non-repo target"; else no "L(g): --plan still emits its plan"; fi
 
+# ============================================================================
+# Case M - #35: ROLE boot prompts route through send-verified (confirm idle->busy, retry once,
+# log loudly on failure) while the #18.3 INJECT lines stay on plain send_prompt. Completes
+# verified-delivery across the harness. The two live e2e cases use REAL fixture panes (a
+# `read`-loop / a `sleep`, NO claude) classified by the REAL timmy via the REAL send-verified;
+# the routing + launch-free proofs use spy seams. Bounded: short send-verified poll knobs keep
+# each delivery attempt sub-second, and timmy self-terminates.
+# ============================================================================
+printf '\n== #35 role prompts via send-verified ==\n'
+# Fast + bounded, exactly like send-verified.test.sh: a short snapshot interval and few polls.
+export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.3}" SV_POLLS="${SV_POLLS:-3}" SV_SETTLE="${SV_SETTLE:-0.2}"
+
+# (a) LIVE e2e SUCCESS: send_role_prompt delivers into a pane that goes idle->busy and returns 0.
+# Fixture (the send-verified idiom): blocked on `read` (static -> idle), then on receiving the
+# prompt+Enter it loops emitting changing output (-> busy). The REAL send-verified + REAL timmy
+# (resolved from the sourced barn.sh's SEND_VERIFIED / TIMMY_DIR) confirm the busy transition.
+m_ok="barn_m_ok_$$"
+# shellcheck disable=SC2016  # $RANDOM must expand in the FIXTURE shell tmux launches, not here
+tmux new-session -d -s "$m_ok" -x 80 -y 24 'read x; while :; do printf "tick %s\n" "$RANDOM"; sleep 0.05; done' 2>/dev/null
+sleep 0.5
+if send_role_prompt "$m_ok" bitzer 'assume your role now' >/dev/null 2>&1; then
+  ok "M(a): role prompt routed through send-verified, idle->busy pane confirmed (rc 0)"
+else
+  no "M(a): role prompt on an idle->busy pane should return 0"
+fi
+tmux kill-session -t "$m_ok" 2>/dev/null
+
+# (b) LIVE e2e FAILURE: a pane that IGNORES input (`sleep`, static -> idle forever). send-verified
+# retries once, then send_role_prompt must return nonzero AND log the loud compromised-launch
+# warning (never silently boot a roleless pane).
+m_bad="barn_m_bad_$$"
+tmux new-session -d -s "$m_bad" -x 80 -y 24 'sleep 600' 2>/dev/null
+sleep 0.5
+m_err="$(send_role_prompt "$m_bad" shaun 'assume your role now' 2>&1 >/dev/null)"; m_code=$?
+if [ "$m_code" -ne 0 ]; then ok "M(b): an unsubmittable role prompt returns nonzero (rc $m_code)"; else no "M(b): expected nonzero on a static input-ignoring pane (got $m_code)"; fi
+if grep -qF 'barn: WARNING' <<<"$m_err" && grep -qF 'compromised launch' <<<"$m_err" && grep -qF 'shaun' <<<"$m_err"; then
+  ok "M(b): failure logs the loud compromised-launch warning, naming the role"
+else
+  no "M(b): expected the loud compromised-launch warning (got '$m_err')"
+fi
+tmux kill-session -t "$m_bad" 2>/dev/null
+
+# (c) SELECTIVE routing: inject lines use PLAIN send_prompt (never send-verified); role prompts
+# use send-verified. Spy on both seams - a send-verified spy script (via the SEND_VERIFIED global)
+# and a send_prompt stub - and count calls. No tmux pane needed: both seams are stubbed.
+sv_spy="$tmp/sv-spy"; sv_log="$tmp/sv-spy.log"
+# shellcheck disable=SC2016  # $1 must expand in the SPY's /bin/sh when it runs, not here
+printf '#!/bin/sh\nprintf "SV %%s\\n" "$1" >> "%s"\nexit 0\n' "$sv_log" >"$sv_spy"; chmod +x "$sv_spy"
+# shellcheck disable=SC2034  # consumed by the sourced send_role_prompt (indirect use)
+SEND_VERIFIED="$sv_spy"               # redirect role-prompt delivery to the spy
+sp_log="$tmp/sp-spy.log"; : >"$sp_log"; : >"$sv_log"
+# shellcheck disable=SC2329  # invoked indirectly by inject_into (the sourced seam)
+send_prompt() { printf 'SP %s\n' "$2" >>"$sp_log"; }   # stub: count plain sends, send nothing
+
+inject_into DUMMY "$(printf '/model default\n/fast on')"
+chk_eq "M(c): inject lines use plain send_prompt (2 calls)" "$(wc -l <"$sp_log" | tr -d ' ')" "2"
+chk_eq "M(c): inject lines NEVER touch send-verified (0 calls)" "$(wc -l <"$sv_log" | tr -d ' ')" "0"
+
+: >"$sv_log"; : >"$sp_log"
+send_role_prompt DUMMY bitzer 'assume your role now' >/dev/null 2>&1
+chk_eq "M(c): a role prompt IS routed through send-verified (1 call)" "$(wc -l <"$sv_log" | tr -d ' ')" "1"
+chk_eq "M(c): a role prompt does NOT use plain send_prompt (0 calls)" "$(wc -l <"$sp_log" | tr -d ' ')" "0"
+
+# (d) --plan stays LAUNCH-FREE: a plan run reaches NEITHER seam (the role send and inject both
+# live below the --plan early return). Spies still installed; assert zero calls and a real plan.
+: >"$sv_log"; : >"$sp_log"
+planM="$(cmd_up --plan "$scratchL" 2>/dev/null)"
+chk_eq "M(d): --plan invokes send-verified 0 times (launch-free)" "$(wc -l <"$sv_log" | tr -d ' ')" "0"
+chk_eq "M(d): --plan invokes send_prompt 0 times (launch-free)" "$(wc -l <"$sp_log" | tr -d ' ')" "0"
+if grep -qF 'plan (no spawn)' <<<"$planM"; then ok "M(d): --plan still emits its plan"; else no "M(d): --plan still emits its plan"; fi
+if grep -qiF 'send-verified' <<<"$planM"; then no "M(d): --plan surface byte-stable (no send-verified leakage)"; else ok "M(d): --plan surface byte-stable (no send-verified leakage)"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
