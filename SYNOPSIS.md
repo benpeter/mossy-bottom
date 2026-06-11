@@ -53,11 +53,26 @@ and #18 deferred bits get checked during that boot.
 
 ## 2026-06-11 - Run 3 continued: timmy robustness, the wedge taxonomy, send-verified driving, event-driven Economy
 
-Detail in the live TICKS/CHRONICLE (seals to chapter `2026-06-11.md` at the next
-rotation). The chain relaunched this morning on the evolved prompts after a 00:40
-self-kill: case H's own EXIT trap ran `tmux kill-session` with an empty `-t`, which
+Detail sealed in chapter `ticks/archive/2026-06-11.md` + `chronicle/archive/2026-06-11.md`
+(rotated 2026-06-12 00:24). The chain relaunched this morning on the evolved prompts after
+a 00:40 self-kill: case H's own EXIT trap ran `tmux kill-session` with an empty `-t`, which
 resolves to the live session - the harness killed itself via its own new test. Both
 Farmer fixes (trap guard + the `${session}:` HB-window target) rode in with #21.
+
+## 2026-06-12 - Run 3 continued: the day-turn, and the engine holding for the Farmer
+
+Live TICKS/CHRONICLE start fresh this chapter. The 2026-06-11 day-turn surfaced a genuine
+bug and the engine worked it before settling back to the Farmer-gated hold:
+- #39 - rotate.sh sealed the chapter under the wall-clock date, so a day-turn rotation (the
+  common case) mislabelled the prior day's work under tomorrow. Fixed: explicit chapter-date
+  arg (precedence) + infer-from-last-tick fallback, no-arg same-day default preserved; hermetic
+  day-turn test. Found and fixed in operation, then dogfooded on the first real rotation (this
+  06-11 seal used the explicit arg). Legibility + Robustness.
+
+**The standing Farmer-gated hold (unchanged).** The in-chain frontier is exhausted; the two
+high-value moves both need the Farmer: the #8 live target-mode boot (Generality) and the #36
+relaunch-review (event-driven wake faithfulness already evidenced via live timmy --selftest).
+One Farmer session activates both. bitzer holds, polling; no padding, act on the Farmer's word.
 
 **CLOSED this chapter (proof on origin before each close):**
 - #20 - sustain loop detects+recovers a stuck shaun turn (no STANDBY/spinner, pane
