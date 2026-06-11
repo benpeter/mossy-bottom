@@ -17,9 +17,15 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 hb="$here/heartbeat.sh"
 
-export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.3}" # timmy runs inside stuck-check AND send-verified inside heartbeat
+export TIMMY_INTERVAL="${TIMMY_INTERVAL:-0.1}" # timmy's confirm window inside stuck-check AND send-verified (#37:
+                                               # 0.1 = the timmy-suite-proven value; the 0.05 animating fixtures
+                                               # still tick FASTER than this, so motion is always seen. Default 2
+                                               # in production - heartbeat.sh bakes in nothing; it only inherits.)
 export SV_POLLS="${SV_POLLS:-3}"               # send-verified polls per delivery attempt (bound the failure path)
 export SV_SETTLE="${SV_SETTLE:-0.2}"           # send-verified text->Enter settle (short for a fast suite)
+settle="${TIMMY_SETTLE:-0.1}"                  # post-new-session fixture paint settle (#37: was a hardcoded 0.5;
+                                               # mirror the timmy suite's 0.1). Test-only - production never spawns
+                                               # these fixtures, so this never touches the running chain.
 export MOSSY_HEARTBEAT_TRIGGER='NUDGE-BITZER-XYZZY'      # distinctive marker: bitzer sustain nudge (#33)
 export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: shaun stuck-recovery (#20)
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
@@ -50,7 +56,7 @@ idle_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x
 make_fixture() {
   tmux new-session -d -s "$1" -x 80 -y 24 "printf '$2'; sleep 600" 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # make_wakeable <sess> <printf-content> - a WAKE-EXPECTING pane: it shows the canned content and
@@ -62,7 +68,7 @@ make_wakeable() {
   local cmd="printf '$2'; read x; while :; do printf 'tick %s\\n' \"\$RANDOM\"; sleep 0.05; done"
   tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # make_counter <sess> <printf-content> <logfile> - a DELIVERY-FAILING pane: it shows the canned
@@ -75,7 +81,7 @@ make_counter() {
   local cmd="printf '$2'; while IFS= read -r x; do printf '%s\\n' \"\$x\" >> '$3'; done"
   tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # make_silent <sess> <printf-content> <logfile> - a PARKED pane that stays BYTE-IDENTICAL across captures
@@ -88,7 +94,7 @@ make_silent() {
   local cmd="printf '$2'; while IFS= read -rs x; do printf '%s\\n' \"\$x\" >> '$3'; done"
   tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # fake_panes <sess> - write a .barn-panes whose shaun= points at the fixture (no bitzer entry,
@@ -121,7 +127,7 @@ stalled_worker() {
   tmux new-session -d -s "$1" -x 80 -y 24 \
     'printf "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1234 tokens)\n"; sleep 600' 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # animating <sess> - an ANIMATING spinner (frame + counter change faster than timmy's INTERVAL),
@@ -132,7 +138,7 @@ animating() {
   tmux new-session -d -s "$1" -x 80 -y 24 \
     'i=0; while :; do printf "\r%s Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %d tokens)" "$([ $((i%2)) = 0 ] && printf "\xe2\x97\x8f" || printf "\xe2\x97\x8b")" "$i"; i=$((i+1)); sleep 0.05; done' 2>/dev/null
   sessions="$sessions $1"
-  sleep 0.5
+  sleep "$settle"
 }
 
 # beat <panes-file> <shaun-fp> [worker-fp] [backstop-fp] - run a single heartbeat; OUT captures its log.
@@ -205,7 +211,7 @@ sw="hbt_work_$$"
 tmux new-session -d -s "$sw" -x 80 -y 24 \
   'i=0; while :; do printf "\r%s Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %d tokens)" "$([ $((i%2)) = 0 ] && printf "\xe2\x97\x8f" || printf "\xe2\x97\x8b")" "$i"; i=$((i+1)); sleep 0.05; done' 2>/dev/null
 sessions="$sessions $sw"
-sleep 0.5
+sleep "$settle"
 pfw="$(fake_panes "$sw")"
 fpw="$tmp/work.fp"
 beat "$pfw" "$fpw"
@@ -472,6 +478,37 @@ if log_has 'stuck-recovery'; then no "backstop beat 4: NOT the #20 stuck-recover
 beat "$pfbs" "$tmp/bs_shaun.fp" "$tmp/bs_worker.fp" "$bs_fp"   # beat 5: streak 4 (> K) -> de-duped, no re-fire
 if log_has 'backstop'; then no "backstop beat 5: must NOT fire again (de-duped, no wake-loop)"; else ok "backstop beat 5 (streak 4 > K): NOT fired again (de-duped, woken once not every beat)"; fi
 if [ "$(bs_lines)" -eq 2 ]; then ok "backstop beat 5: still EXACTLY one delivery total (no wake-loop)"; else no "backstop beat 5: delivery count must stay 2, got $(bs_lines)"; fi
+
+# ============================================================================
+# #37 PRODUCTION DEFAULTS UNCHANGED: the whole suite runs with tiny TIMMY_INTERVAL / TIMMY_SETTLE
+# overrides so the multi-beat cases resolve in ms, but production must be BYTE-UNCHANGED. heartbeat.sh
+# bakes in NO fast timing - it inherits its confirm-window timing from the (unset, production-default)
+# timmy env and owns only the cadence + backstop-K knobs, with their production values as defaults. We
+# assert both, mirroring the timmy suite's own #26 defaults-unchanged guard:
+#   - backstop K: BEHAVIORALLY. With MOSSY_HEARTBEAT_BACKSTOP_BEATS UNSET (production default 4), a chain
+#     frozen long enough to reach unchanged-STREAK 3 must NOT fire the backstop (3 < 4) - and streak 3 is
+#     exactly where the fast-test's K=3 DOES fire, so a no-fire here proves the production default did not
+#     silently become 3. (The case above proved firing AT K; this proves the default is not <= 3.) The
+#     streak starts at beat 2 (beat 1 only confirms shaun's STANDBY), so streak 3 is the 4th beat. We must
+#     unset first - the backstop case above exported K=3.
+#   - cadence: by the documented default. The 300s cadence only manifests as a loop sleep, which cannot be
+#     probed without a real wait or a leaked sleep child (bash defers the TERM trap until the 300s sleep
+#     returns), so we guard the documented production default instead - instant, hermetic, no leak.
+# ============================================================================
+unset MOSSY_HEARTBEAT_BACKSTOP_BEATS   # restore the production default (4); the backstop case above set 3
+dk_shaun="hbt_dk_shaun_$$"
+dk_log="$tmp/dk_deliveries.log"
+make_silent "$dk_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}" "$dk_log"
+dk_shirley="hbt_dk_shirley_$$"
+make_fixture "$dk_shirley" "$idle_box"
+pfdk="$(fake_panes2 "$dk_shaun" "$dk_shirley")"
+dk_fp="$tmp/dk_backstop.fp"
+beat "$pfdk" "$tmp/dk_shaun.fp" "$tmp/dk_worker.fp" "$dk_fp"   # beat 1: confirm shaun STANDBY (streak not yet started)
+beat "$pfdk" "$tmp/dk_shaun.fp" "$tmp/dk_worker.fp" "$dk_fp"   # beat 2: streak 1 (done-wake, not backstop)
+beat "$pfdk" "$tmp/dk_shaun.fp" "$tmp/dk_worker.fp" "$dk_fp"   # beat 3: streak 2
+beat "$pfdk" "$tmp/dk_shaun.fp" "$tmp/dk_worker.fp" "$dk_fp"   # beat 4: streak 3 == fast-test K, but < default K=4
+if grep -q 'WAKE-BACKSTOP-XYZZY' "$dk_log" 2>/dev/null; then no "defaults: backstop must NOT fire by streak 3 under the default K=4 (default silently lowered to 3?)"; else ok "defaults: default backstop K=4 - no fire through streak 3 (production default unchanged; K=3 would have fired here)"; fi
+if "$hb" -h 2>&1 | grep -q 'cadence, default 300'; then ok "defaults: production cadence default documented 300s (no MOSSY_HEARTBEAT_SECS override -> the fixed interval the #36 redesign is measured against)"; else no "defaults: 300s cadence default not documented in --help"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
