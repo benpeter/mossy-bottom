@@ -23,6 +23,7 @@ export SV_SETTLE="${SV_SETTLE:-0.2}"           # send-verified text->Enter settl
 export MOSSY_HEARTBEAT_TRIGGER='NUDGE-BITZER-XYZZY'      # distinctive marker: bitzer sustain nudge (#33)
 export MOSSY_HEARTBEAT_STUCK_TRIGGER='WAKE-STUCK-XYZZY'   # distinctive marker: shaun stuck-recovery (#20)
 export MOSSY_HEARTBEAT_WORKER_TRIGGER='WAKE-WORKER-XYZZY' # distinctive marker: worker-alert to shaun (#29)
+export MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER='WAKE-DONE-XYZZY' # distinctive marker: worker-done wake to shaun (#36)
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/heartbeat-test-XXXXXX")"
 sessions=""
@@ -299,6 +300,62 @@ pfbzb="$(fake_panes_bitzer "$bzb")"
 beat "$pfbzb" "$tmp/bzb_shaun.fp"
 if log_has 'skip (no mid-turn stacking)'; then ok "bitzer-gating: busy bitzer SKIPPED (no mid-turn nudge)"; else no "bitzer-gating: busy bitzer skipped ($OUT)"; fi
 if log_has 'nudged'; then no "bitzer-gating: busy bitzer must NOT be nudged"; else ok "bitzer-gating: busy bitzer never nudged"; fi
+
+# ============================================================================
+# #36 WORKER-DONE event wake: a FINISHED worker (a static idle box, NO STANDBY marker - shirley does
+# not print STANDBY) + shaun parked on a STANDBY -> shaun is WOKEN on his own pane with the worker-done
+# nudge. Beat 1 stores both fingerprints / NO wake (a single idle beat is a transient idle - the
+# two-beat confirm is unmet), beat 2 (worker stable-idle, shaun stable-standby) fires. The wake is
+# DISJOINT from #29 (no 'worker-alert') and #20 (no 'stuck-recovery'). shaun is make_wakeable so the
+# idle->busy submission verifies; the worker is a plain static idle box (stays idle/done throughout).
+# ============================================================================
+wd_shaun="hbt_wd_shaun_$$"
+make_wakeable "$wd_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wd_shirley="hbt_wd_shirley_$$"
+make_fixture "$wd_shirley" "$idle_box"
+pfwd="$(fake_panes2 "$wd_shaun" "$wd_shirley")"
+
+beat "$pfwd" "$tmp/wd_shaun.fp" "$tmp/wd_worker.fp"   # beat 1: store fps, transient one-beat idle -> NO wake
+if log_has 'shirley DONE'; then no "worker-done beat 1: one-beat idle must NOT wake (two-beat confirm unmet)"; else ok "worker-done beat 1: transient one-beat idle NOT woken (fps just stored)"; fi
+if pane_has "$wd_shaun" 'WAKE-DONE-XYZZY'; then no "worker-done beat 1: shaun NOT yet woken"; else ok "worker-done beat 1: shaun NOT yet woken"; fi
+
+beat "$pfwd" "$tmp/wd_shaun.fp" "$tmp/wd_worker.fp"   # beat 2: worker idle x2 + shaun standby -> wake
+if log_has 'shirley DONE'; then ok "worker-done beat 2: heartbeat logged 'shirley DONE' (idle confirmed across two beats)"; else no "worker-done beat 2: heartbeat logged 'shirley DONE' ($OUT)"; fi
+if log_has 'worker-done wake delivered + verified'; then ok "worker-done beat 2: wake DELIVERED + VERIFIED to shaun (idle->busy submission confirmed)"; else no "worker-done beat 2: wake delivered + verified ($OUT)"; fi
+if log_has 'worker-alert'; then no "worker-done beat 2: shaun NOT given the #29 worker-alert (disjoint, done != stalled)"; else ok "worker-done beat 2: shaun NOT given the #29 worker-alert (disjoint, done != stalled)"; fi
+if log_has 'stuck-recovery'; then no "worker-done beat 2: shaun NOT given the #20 stuck-recovery (disjoint)"; else ok "worker-done beat 2: shaun NOT given the #20 stuck-recovery (disjoint)"; fi
+if log_has 'FAILED'; then no "worker-done beat 2: must NOT log a delivery failure"; else ok "worker-done beat 2: no delivery failure logged"; fi
+
+# ============================================================================
+# #36 WORKER-BUSY: an ANIMATING (busy) worker + shaun parked on STANDBY -> NEVER a done-wake, whatever
+# shaun is doing. This is the economy win: a worker mid-slice is busy, not done, so shaun stays parked
+# (no turn, no tokens). Two beats; shaun is never woken with the done nudge.
+# ============================================================================
+wbz_shaun="hbt_wbz_shaun_$$"
+make_fixture "$wbz_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wbz_shirley="hbt_wbz_shirley_$$"
+animating "$wbz_shirley"
+pfwbz="$(fake_panes2 "$wbz_shaun" "$wbz_shirley")"
+beat "$pfwbz" "$tmp/wbz_shaun.fp" "$tmp/wbz_worker.fp"
+beat "$pfwbz" "$tmp/wbz_shaun.fp" "$tmp/wbz_worker.fp"
+if log_has 'shirley DONE'; then no "worker-busy: a busy worker is never 'done' (the economy win)"; else ok "worker-busy: busy worker never logged done (animating -> busy -> no wake: the economy win)"; fi
+if pane_has "$wbz_shaun" 'WAKE-DONE-XYZZY'; then no "worker-busy: shaun never woken"; else ok "worker-busy: shaun never woken (busy worker = no event)"; fi
+
+# ============================================================================
+# #36 WORKER-DONE + SHAUN-ACTIVE: a finished (idle) worker but a BUSY shaun -> NEVER a wake (never
+# interrupt a mid-turn shaun; the done-wake gates on shaun PARKED on a STANDBY). Shaun is an animating
+# spinner -> stuck-check 'working' (rc 0), not the STANDBY (10) the gate requires. Two beats; shaun is
+# never woken even though the worker is genuinely done.
+# ============================================================================
+wda_shaun="hbt_wda_shaun_$$"
+animating "$wda_shaun"
+wda_shirley="hbt_wda_shirley_$$"
+make_fixture "$wda_shirley" "$idle_box"
+pfwda="$(fake_panes2 "$wda_shaun" "$wda_shirley")"
+beat "$pfwda" "$tmp/wda_shaun.fp" "$tmp/wda_worker.fp"
+beat "$pfwda" "$tmp/wda_shaun.fp" "$tmp/wda_worker.fp"
+if log_has 'shirley DONE'; then no "worker-done+shaun-active: a busy shaun is never woken (done-wake gates on STANDBY)"; else ok "worker-done+shaun-active: busy shaun never woken/interrupted (done-wake gates on STANDBY)"; fi
+if pane_has "$wda_shaun" 'WAKE-DONE-XYZZY'; then no "worker-done+shaun-active: busy shaun never woken"; else ok "worker-done+shaun-active: busy shaun never woken"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
