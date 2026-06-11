@@ -221,6 +221,56 @@ unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
 planIe="$(cmd_up --plan)"
 if grep -qxF '  inject   (none)' <<<"$planIe"; then ok "I(e): all sources absent -> 'inject (none)'"; else no "I(e): all sources absent -> 'inject (none)'"; fi
 
+# --- #24 slice 2: the per-role FLAG source (--inject-<role>) and full precedence ---
+# (f) global --inject still fans out to ALL THREE panes (parallel to the global env): no
+# per-role leakage, byte-stable with the global behaviour.
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+planIf="$(cmd_up --plan --inject '/fast on')"
+chk_eq "I(f): global --inject -> bitzer"  "$(plan_injects "$planIf" bitzer)"  "/fast on"
+chk_eq "I(f): global --inject -> shaun"   "$(plan_injects "$planIf" shaun)"   "/fast on"
+chk_eq "I(f): global --inject -> shirley" "$(plan_injects "$planIf" shirley)" "/fast on"
+
+# (g) per-role FLAG only: only the named role gets it; others stay empty.
+planIg="$(cmd_up --plan --inject-shirley '/fast on')"
+chk_eq "I(g): per-role flag only -> shirley" "$(plan_injects "$planIg" shirley)" "/fast on"
+chk_eq "I(g): per-role flag only -> bitzer none" "$(plan_injects "$planIg" bitzer)" ""
+
+# (h) per-role env THEN per-role flag (flag appended after the role's env).
+planIh="$(MOSSY_INJECT_SHIRLEY='/model sonnet' cmd_up --plan --inject-shirley '/fast on')"
+chk_eq "I(h): shirley = per-role env THEN per-role flag" "$(plan_injects "$planIh" shirley)" "$(printf '/model sonnet\n/fast on')"
+
+# (i) the FULL documented precedence, all four steps in order:
+#     [global env, global --inject] THEN [per-role env, --inject-<role>].
+planIi="$(MOSSY_INJECT='/model default' MOSSY_INJECT_SHIRLEY='/model sonnet' \
+  cmd_up --plan --inject '/fast off' --inject-shirley '/fast on')"
+chk_eq "I(i): shirley full precedence [g-env, g-flag, r-env, r-flag]" \
+  "$(plan_injects "$planIi" shirley)" "$(printf '/model default\n/fast off\n/model sonnet\n/fast on')"
+chk_eq "I(i): bitzer = global env+flag only (no per-role)" \
+  "$(plan_injects "$planIi" bitzer)" "$(printf '/model default\n/fast off')"
+
+# (j) --inject-<role> is repeatable and appends in order.
+planIj="$(cmd_up --plan --inject-shirley '/a' --inject-shirley '/b')"
+chk_eq "I(j): repeatable per-role flag appends in order" "$(plan_injects "$planIj" shirley)" "$(printf '/a\n/b')"
+
+# ============================================================================
+# Case J - relaunch wiring (#24 slice 2): `relaunch --plan <role>` resolves the SAME
+# global+per-role list cmd_up would give that pane, via the shared resolve_inject_for. Dogfood
+# (no target) so it is launch-free - the --plan block returns before any panes file is read.
+# ============================================================================
+unset MOSSY_INJECT MOSSY_INJECT_BITZER MOSSY_INJECT_SHAUN MOSSY_INJECT_SHIRLEY
+# (a) per-role ENV on relaunch: global THEN the role's per-role env.
+planJa="$(MOSSY_INJECT='/model default' MOSSY_INJECT_SHIRLEY='/model sonnet' cmd_relaunch --plan shirley)"
+chk_eq "J(a): relaunch shirley = global THEN per-role env" "$(plan_injects "$planJa" shirley)" "$(printf '/model default\n/model sonnet')"
+# (b) another role's per-role source does NOT leak into this relaunch.
+planJb="$(MOSSY_INJECT_BITZER='/model opus' cmd_relaunch --plan shirley)"
+chk_eq "J(b): relaunch shirley ignores bitzer's per-role source" "$(plan_injects "$planJb" shirley)" ""
+# (c) per-role FLAG on relaunch, appended after the role's env.
+planJc="$(MOSSY_INJECT_SHIRLEY='/model sonnet' cmd_relaunch --plan --inject-shirley '/fast on' shirley)"
+chk_eq "J(c): relaunch shirley = per-role env THEN per-role flag" "$(plan_injects "$planJc" shirley)" "$(printf '/model sonnet\n/fast on')"
+# (d) a different role relaunches with ITS own global+per-role.
+planJd="$(MOSSY_INJECT='/model default' MOSSY_INJECT_BITZER='/model opus' cmd_relaunch --plan bitzer)"
+chk_eq "J(d): relaunch bitzer = global THEN per-role env" "$(plan_injects "$planJd" bitzer)" "$(printf '/model default\n/model opus')"
+
 # ============================================================================
 # Case H - heartbeat-window collision-safety (#21): resolve_hb_window over a REAL throwaway
 # session. No claude: windows are plain `sleep` placeholders, torn down with the session.

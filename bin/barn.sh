@@ -16,9 +16,9 @@
 # so it is reaped by kill-session with the chain and survives a bitzer relaunch.
 #
 # Usage:
-#   bin/barn.sh up [--plan] [--window <name>] [--inject "<text>"]... [<target-repo>]   raise the chain
+#   bin/barn.sh up [--plan] [--window <name>] [--inject "<text>"]... [--inject-<role> "<text>"]... [<target-repo>]   raise the chain
 #   bin/barn.sh resolve [<target>]            dry-run: print target + state dir
-#   bin/barn.sh relaunch [--plan] [--window <name>] [--inject "<text>"]... <role> [<target>]  respawn one pane
+#   bin/barn.sh relaunch [--plan] [--window <name>] [--inject "<text>"]... [--inject-<role> "<text>"]... <role> [<target>]  respawn one pane
 #
 # --plan prints the exact spawn plan (the -c <cwd> and injected MOSSY_STATE_DIR each
 # pane would get) and exits without creating or launching anything - a launch-free
@@ -52,10 +52,17 @@
 #   MOSSY_INJECT_<ROLE> per-role lines (ROLE = BITZER|SHAUN|SHIRLEY), appended AFTER the global
 #                       MOSSY_INJECT list for that pane ONLY - so a target can boot one role
 #                       differently, e.g. MOSSY_INJECT_SHIRLEY="/model sonnet" runs the worker
-#                       cheaper than the driver. Order is deterministic: global first, then
-#                       per-role. In 'up' each pane gets global+its-own; --plan lists the
-#                       resolved per-pane lines. Env source only for now (#24); a per-role flag
-#                       is a deferred follow-up.
+#                       cheaper than the driver. Repeatable --inject-<role> "<text>" appends
+#                       more per-role lines AFTER that role's env. In 'up' each pane gets its
+#                       global+per-role list; in 'relaunch' the one respawned role does.
+#
+# Per-pane injection precedence (deterministic, documented), each step appended in order:
+#   1. global env       MOSSY_INJECT
+#   2. global flags     --inject "<text>" (in order)
+#   3. per-role env     MOSSY_INJECT_<ROLE>
+#   4. per-role flags   --inject-<role> "<text>" (in order)
+# So a later step can override an earlier one (e.g. a global "/model default" then a per-role
+# "/model sonnet"). --plan lists the resolved per-pane lines; the live path sends them.
 #
 # tva
 set -euo pipefail
@@ -237,19 +244,24 @@ inject_role_env() {
   if [ -n "${!var:-}" ]; then printf '%s\n' "${!var}"; fi
 }
 
-# resolve_inject_for <role> <global-list> - echo the full ordered inject list for ONE pane:
-# the GLOBAL list FIRST (resolve_inject's output, passed in so it is resolved once and shared),
-# THEN this pane's MOSSY_INJECT_<ROLE> lines appended (#24). The order is deterministic and
-# documented - global before per-role - so a per-role line can override an earlier global one
+# resolve_inject_for <role> <global-list> [<per-role-flag-line>...] - echo the full ordered
+# inject list for ONE pane, appended in the documented precedence:
+#   <global-list>                    (resolve_inject's output: global env then global --inject)
+#   MOSSY_INJECT_<ROLE>              this pane's per-role env lines
+#   <per-role-flag-line>... (args)   this pane's --inject-<role> lines, in order
+# The global list is passed in (resolved once and shared) so it cannot drift between panes;
+# the per-role env and flags are layered on top (#24). A later line can override an earlier one
 # (e.g. global "/model default" then per-role "/model sonnet" for shirley). Empty lines are
 # left for the consumer to skip. Pure: the same resolver feeds both the --plan preview and the
-# live send, so they cannot drift. Global-only (no per-role var) echoes exactly the global
-# list - byte-stable with the #18.3 behaviour.
+# live send, so they cannot drift. Global-only (no per-role env/flags) echoes exactly the
+# global list - byte-stable with the #18.3 behaviour.
 resolve_inject_for() {
-  local role="$1" global="$2" per
+  local role="$1" global="$2"; shift 2
+  local per l
   per="$(inject_role_env "${role}")"
   if [ -n "${global}" ]; then printf '%s\n' "${global}"; fi
   if [ -n "${per}" ]; then printf '%s\n' "${per}"; fi
+  for l in "$@"; do printf '%s\n' "${l}"; done
 }
 
 # inject_into <pane> <list> - send each NON-EMPTY line of a newline-separated list into one
@@ -394,17 +406,25 @@ cmd_resolve() {
 
 cmd_up() {
   local plan=0
-  local -a inject_flags=()
+  local -a inject_flags=() inject_bitzer=() inject_shaun=() inject_shirley=()
   while [ $# -gt 0 ]; do
     case "${1:-}" in
       --plan) plan=1; shift ;;
       --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
       --inject) shift; [ $# -gt 0 ] || { echo "barn: --inject needs a value" >&2; exit 1; }; inject_flags+=("$1"); shift ;;
+      --inject-bitzer) shift; [ $# -gt 0 ] || { echo "barn: --inject-bitzer needs a value" >&2; exit 1; }; inject_bitzer+=("$1"); shift ;;
+      --inject-shaun) shift; [ $# -gt 0 ] || { echo "barn: --inject-shaun needs a value" >&2; exit 1; }; inject_shaun+=("$1"); shift ;;
+      --inject-shirley) shift; [ $# -gt 0 ] || { echo "barn: --inject-shirley needs a value" >&2; exit 1; }; inject_shirley+=("$1"); shift ;;
       *) break ;;
     esac
   done
-  local inject_plan
+  # Resolve the global list once, then each pane's full list (global + per-role env + per-role
+  # flags) through the shared resolver, so --plan and the live send below cannot drift.
+  local inject_plan bitzer_inject shaun_inject shirley_inject
   inject_plan="$(resolve_inject ${inject_flags[@]+"${inject_flags[@]}"})"
+  bitzer_inject="$(resolve_inject_for bitzer "${inject_plan}" ${inject_bitzer[@]+"${inject_bitzer[@]}"})"
+  shaun_inject="$(resolve_inject_for shaun "${inject_plan}" ${inject_shaun[@]+"${inject_shaun[@]}"})"
+  shirley_inject="$(resolve_inject_for shirley "${inject_plan}" ${inject_shirley[@]+"${inject_shirley[@]}"})"
   local resolved target state_dir panes_file
   resolved="$(resolve_target "${1:-}")" || exit 1
   IFS=$'\t' read -r target state_dir <<<"${resolved}"
@@ -433,7 +453,11 @@ cmd_up() {
     fi
     local _p _l _list _any=0
     for _p in bitzer shaun shirley; do
-      _list="$(resolve_inject_for "${_p}" "${inject_plan}")"
+      case "${_p}" in
+        bitzer) _list="${bitzer_inject}" ;;
+        shaun) _list="${shaun_inject}" ;;
+        shirley) _list="${shirley_inject}" ;;
+      esac
       [ -n "${_list}" ] || continue
       while IFS= read -r _l; do
         [ -n "${_l}" ] || continue
@@ -521,13 +545,10 @@ cmd_up() {
   boot_pane "${shirley}" shirley || true
 
   # Pre-role-prompt injection (#18.3 global + #24 per-role): each pane gets the global inject
-  # list FIRST, then its own MOSSY_INJECT_<ROLE> lines appended - so slash commands like /model
-  # and /fast can differ per role (e.g. a cheaper model for shirley). Resolved per pane through
-  # the same resolve_inject_for the --plan preview uses, so live and plan cannot drift.
-  local bitzer_inject shaun_inject shirley_inject
-  bitzer_inject="$(resolve_inject_for bitzer "${inject_plan}")"
-  shaun_inject="$(resolve_inject_for shaun "${inject_plan}")"
-  shirley_inject="$(resolve_inject_for shirley "${inject_plan}")"
+  # list FIRST, then its own MOSSY_INJECT_<ROLE> env and --inject-<role> flag lines appended -
+  # so slash commands like /model and /fast can differ per role (e.g. a cheaper model for
+  # shirley). The three lists were resolved up top through resolve_inject_for, the same
+  # resolver --plan printed, so the live send cannot drift from the preview.
   if [ -n "${bitzer_inject}${shaun_inject}${shirley_inject}" ]; then
     echo "barn: injecting global + per-role lines into the panes..."
     inject_into "${bitzer}" "${bitzer_inject}"
@@ -557,22 +578,35 @@ EOF
 
 cmd_relaunch() {
   local plan=0
-  local -a inject_flags=()
+  local -a inject_flags=() inject_bitzer=() inject_shaun=() inject_shirley=()
   while [ $# -gt 0 ]; do
     case "${1:-}" in
       --plan) plan=1; shift ;;
       --window) shift; [ $# -gt 0 ] || { echo "barn: --window needs a value" >&2; exit 1; }; apply_window "$1"; shift ;;
       --inject) shift; [ $# -gt 0 ] || { echo "barn: --inject needs a value" >&2; exit 1; }; inject_flags+=("$1"); shift ;;
+      --inject-bitzer) shift; [ $# -gt 0 ] || { echo "barn: --inject-bitzer needs a value" >&2; exit 1; }; inject_bitzer+=("$1"); shift ;;
+      --inject-shaun) shift; [ $# -gt 0 ] || { echo "barn: --inject-shaun needs a value" >&2; exit 1; }; inject_shaun+=("$1"); shift ;;
+      --inject-shirley) shift; [ $# -gt 0 ] || { echo "barn: --inject-shirley needs a value" >&2; exit 1; }; inject_shirley+=("$1"); shift ;;
       *) break ;;
     esac
   done
-  local inject_plan
-  inject_plan="$(resolve_inject ${inject_flags[@]+"${inject_flags[@]}"})"
   local role="${1:-}"
   case "${role}" in
     bitzer | shaun | shirley) ;;
     *) echo "barn: usage: bin/barn.sh relaunch [--plan] <bitzer|shaun|shirley> [<target-repo>]" >&2; exit 1 ;;
   esac
+  # The respawned role gets the SAME global+per-role treatment as up: global list, then this
+  # role's per-role env, then its --inject-<role> flags - resolved through the shared
+  # resolve_inject_for so a single-pane relaunch cannot diverge from how up boots that pane.
+  local inject_plan role_inject
+  local -a role_flags=()
+  inject_plan="$(resolve_inject ${inject_flags[@]+"${inject_flags[@]}"})"
+  case "${role}" in
+    bitzer) role_flags=(${inject_bitzer[@]+"${inject_bitzer[@]}"}) ;;
+    shaun) role_flags=(${inject_shaun[@]+"${inject_shaun[@]}"}) ;;
+    shirley) role_flags=(${inject_shirley[@]+"${inject_shirley[@]}"}) ;;
+  esac
+  role_inject="$(resolve_inject_for "${role}" "${inject_plan}" ${role_flags[@]+"${role_flags[@]}"})"
   # Resolve the panes file from STATE_DIR exactly as cmd_up writes it, so relaunch
   # reads back from the same place. No target = dogfood default (repo root), so the
   # live run's relaunch path is byte-identical to before.
@@ -596,12 +630,12 @@ cmd_relaunch() {
   if [ "${plan}" -eq 1 ]; then
     printf 'barn: plan (no spawn) - relaunch %s -c %s MOSSY_STATE_DIR=%s MOSSY_REPO_DIR=%s (panes %s)\n' \
       "${role}" "${dir}" "${state_dir}" "${REPO_ROOT}" "${panes_file}"
-    if [ -n "${inject_plan}" ]; then
+    if [ -n "${role_inject}" ]; then
       local _l
       while IFS= read -r _l; do
         [ -n "${_l}" ] || continue
         printf '  inject   %-7s <- %s\n' "${role}" "${_l}"
-      done <<<"${inject_plan}"
+      done <<<"${role_inject}"
     fi
     return 0
   fi
@@ -612,9 +646,10 @@ cmd_relaunch() {
 
   tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
   boot_pane "${id}" "${role}" || true
-  # Pre-role-prompt injection (#18.3): same seam as up, for the one respawned pane.
-  if [ -n "${inject_plan}" ]; then
-    inject_into "${id}" "${inject_plan}"
+  # Pre-role-prompt injection (#18.3 global + #24 per-role): same seam as up, for the one
+  # respawned pane - global, then this role's per-role env and --inject-<role> flag lines.
+  if [ -n "${role_inject}" ]; then
+    inject_into "${id}" "${role_inject}"
   fi
   case "${role}" in
     bitzer) send_prompt "${id}" "$(bitzer_boot "${state_dir}")" ;;
