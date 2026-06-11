@@ -68,3 +68,26 @@ Entry format:
   heartbeat-window 'index in use' collision). #8 stays open as the tracker for
   this Farmer-operated step. Meanwhile the chain keeps working the structural
   frontier filed alongside this (heartbeat-window collision-safety).
+
+## 2026-06-11 08:28 - The hermetic hardening frontier is worked down; recommend prioritizing the #8 live boot
+
+- What happened: across this run the chain closed a long hardening arc - #22/#23/#25 (timmy
+  classification robustness incl frozen-spinner stall detection), #24 (per-role inject),
+  #26 (fast timmy suite), #27 (pager-safe launch), #28+#29 (the stall-recovery loop:
+  detect -> map -> recover-shaun -> alert-on-worker), #30 (live-up preflight). timmy, the
+  recovery loop, and the launch path are now well-hardened and hermetically tested.
+- The situation: the highest-VALUE remaining quality is Generality #5 - actually driving a
+  real external target, several side by side - and its substantive work routes through the
+  one step the chain structurally cannot do to itself: the live 3-pane target-mode boot
+  (#8, Farmer-operated, ESCALATIONS 23:43). #30 just de-risked that boot (it now fails fast
+  with clear diagnostics on a fresh host). Remaining IN-CHAIN frontiers are
+  diminishing-return hardening (e.g. #31 send-verified, the driving-side analog of the
+  classification work - genuine but modest).
+- Why shaun raises it: not a blocker and not a stop (the engine keeps running; #31 is handed
+  to keep the queue non-empty). This is a STEERING flag for the Farmer to weigh: prioritize
+  the #8 live target-mode boot to unlock the Generality tranche, vs let the chain continue
+  modest hardening. The chain cannot self-run #8 (nested live chain forbidden, inv.1).
+- What would unblock the big tranche: the Farmer (or bitzer, out-of-band) runs
+  `bin/barn.sh up <scratch-target-repo>` on a host and drives one real slice there - now
+  with #30's preflight catching a misconfigured host up front. The #8 residuals (#19
+  API-only creds, #18 deferred bits) get checked during that boot.
