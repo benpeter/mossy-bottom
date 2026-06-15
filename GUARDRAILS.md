@@ -32,3 +32,8 @@ Standing invariants for the self-evolving harness:
 9. **Direction is shaun's, within the MISSION vision.** shirley reports proof
    and blockers; she does not pick the next slice. Frontiers outside the vision
    need a Farmer-filed issue or an escalation.
+10. **Close follows push.** An issue is closed only after its proving commit is
+    on origin. shaun closes (close-and-spawn); bitzer is the sole pusher; the
+    close is sequenced after the push so the public record never reads CLOSED
+    while its proof is still local-only. If a close is later found to precede its
+    push, reopen until the commit lands on origin. (Issue #12.)
