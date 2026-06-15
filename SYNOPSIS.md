@@ -69,10 +69,21 @@ bug and the engine worked it before settling back to the Farmer-gated hold:
   day-turn test. Found and fixed in operation, then dogfooded on the first real rotation (this
   06-11 seal used the explicit arg). Legibility + Robustness.
 
-**The standing Farmer-gated hold (unchanged).** The in-chain frontier is exhausted; the two
-high-value moves both need the Farmer: the #8 live target-mode boot (Generality) and the #36
-relaunch-review (event-driven wake faithfulness already evidenced via live timmy --selftest).
-One Farmer session activates both. bitzer holds, polling; no padding, act on the Farmer's word.
+## 2026-06-15 - Run 3 continued: the Farmer-gated hold breaks; three decisions land
+
+After a multi-day Farmer-gated hold (in-chain frontier exhausted, only Farmer-gated levers left),
+the Farmer ruled on all three open issues in one session:
+- #8 - accepted as PROVEN and CLOSED by bitzer. The live 3-pane target-mode boot is waived
+  (structural verification complete + on origin; a chain cannot self-verify a nested live boot).
+  Residuals (#17 narrow-pane, #19 API-only creds, #18 deferred bits) fold into any future live boot.
+- #12 - bitzer enshrined GUARDRAILS invariant 10 "Close follows push" on the Farmer's word: an issue
+  is closed only after its proving commit is on origin; shaun closes, bitzer is sole pusher, close
+  sequenced after push; reopen if a close precedes its push. Makes the operational shaun.md
+  precondition binding across relaunches. Committed + on origin. Legibility + Robustness.
+- #11 - UNBLOCKED (was coupled behind #12). Now the live frontier: event-driven up-chain completion
+  signals (shirley->shaun "done", shaun->bitzer "ready"), replacing self-set timeouts. Economy.
+
+The engine resumes normal operation: shaun verifies+closes #12 per the new invariant, then drives #11.
 
 **CLOSED this chapter (proof on origin before each close):**
 - #20 - sustain loop detects+recovers a stuck shaun turn (no STANDBY/spinner, pane
