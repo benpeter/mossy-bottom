@@ -82,5 +82,60 @@ else
   no "--parse malformed usage JSON -> exit 1 (got exit $bad_code)"
 fi
 
+# --- macOS keychain fallback: on darwin Claude Code keeps the credentials in the login
+# keychain and writes NO ~/.claude/.credentials.json at all, so a file-only reader is blind
+# and the usage gate fail-opens for the whole run. The creds source must fall back to
+# `security find-generic-password`. Exercised hermetically: MOSSY_CRED_FILE points at a
+# path that does not exist and a stub `security` on PATH emits the fixture. No real
+# keychain, no network. ---
+
+stub_n=0
+
+# keychain_case <keychain-json|NOTFOUND> <want-code> <label>: run --plan-check with NO file
+# arg, no creds file, and a stub `security` emitting <keychain-json> (or failing, for
+# NOTFOUND). Asserts the exit code AND that stdout stays empty (inv.7).
+keychain_case() {
+  local json="$1" want="$2" label="$3" out code bindir
+  stub_n=$((stub_n + 1))
+  bindir="$tmp/stub$stub_n"
+  mkdir -p "$bindir"
+  if [ "$json" = "NOTFOUND" ]; then
+    cat >"$bindir/security" <<'STUB'
+#!/usr/bin/env bash
+# stub: keychain item absent - `security` exits nonzero with nothing on stdout
+exit 44
+STUB
+  else
+    printf '%s' "$json" >"$bindir/creds.json"
+    cat >"$bindir/security" <<'STUB'
+#!/usr/bin/env bash
+# stub: emit the fixture creds JSON for `find-generic-password -s ... -w`
+cat "$(dirname "$0")/creds.json"
+STUB
+  fi
+  chmod +x "$bindir/security"
+  out="$(MOSSY_CRED_FILE="$tmp/no-such-creds.json" PATH="$bindir:$PATH" "$ur" --plan-check 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq "$want" ] && [ -z "$out" ]; then
+    ok "$label (exit $code, stdout empty)"
+  else
+    no "$label (exit $code want $want; stdout='$out' want empty)"
+  fi
+}
+
+# The real darwin shape: no creds file, a plan block in the keychain -> on a plan (exit 0).
+keychain_case '{"claudeAiOauth":{"accessToken":"FAKE","subscriptionType":"max"}}' 0 \
+  "keychain fallback: no creds file, plan block in keychain -> exit 0 (on a plan)"
+
+# The discriminating case: with no file, a populated NON-subscription keychain shape must
+# read as positively no-plan (exit 3). A file-only reader answers 0 here (blind), so this
+# is the test that fails before the fallback exists.
+keychain_case '{"apiKeyAuth":{"present":true}}' 3 \
+  "keychain fallback: no creds file, populated non-subscription keychain -> exit 3 (no plan)"
+
+# No file AND no keychain item -> ambiguous, never exit 3 (the safe direction holds).
+keychain_case NOTFOUND 0 \
+  "keychain fallback: no creds file, no keychain item -> exit 0, NOT no-plan (ambiguous)"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
