@@ -22,15 +22,20 @@
 # or no jq) it prints a "usage unavailable" line to stderr and exits nonzero. It never
 # decides clear-vs-pause - that fail-safe policy belongs to the wiring slice.
 #
+# CREDS STORE: two stores hold the same JSON shape. Linux and WSL use a FILE at
+# ~/.claude/.credentials.json; macOS uses the login KEYCHAIN and writes no file. read_creds
+# tries the file then the keychain, so the reader works on either. Override the file path
+# with MOSSY_CRED_FILE (tests).
+#
 # --plan-check (#19): some accounts have NO rolling usage window to wait out (API key /
 # pay-as-you-go - no OAuth subscription). For those the usage gate is meaningless and a
 # live fetch would only return junk to misread. This mode answers "is there a plan?" from
-# the LOCAL creds file - no network, no token spend - by EXIT CODE only (it prints no
+# the LOCAL creds - no network, no token spend - by EXIT CODE only (it prints no
 # stdout; at most one non-secret stderr reason):
-#   exit 3 (EXIT_NO_PLAN)  POSITIVELY no subscription: the creds file exists, is valid JSON,
-#                          is a NON-EMPTY object, and has NO .claudeAiOauth block at all.
+#   exit 3 (EXIT_NO_PLAN)  POSITIVELY no subscription: the creds read, are valid JSON,
+#                          are a NON-EMPTY object, and have NO .claudeAiOauth block at all.
 #   exit 0                 on a plan (the .claudeAiOauth block is present in any form), OR
-#                          AMBIGUOUS (file missing/unreadable/invalid JSON/empty object).
+#                          AMBIGUOUS (creds absent/unreadable/invalid JSON/empty object).
 # The skip is POSITIVE and one-directional: exit 3 ONLY on a populated non-subscription
 # shape. Every ambiguous or odd on-plan state returns 0, so the normal gate runs and
 # fail-opens on its own - a transient creds state can NEVER be mis-read as "no plan".
@@ -47,7 +52,9 @@
 set -uo pipefail
 
 readonly USAGE_ENDPOINT="https://api.anthropic.com/api/oauth/usage"
-readonly CRED_FILE="${HOME}/.claude/.credentials.json"
+readonly CRED_FILE="${MOSSY_CRED_FILE:-${HOME}/.claude/.credentials.json}"
+# macOS keeps the same creds JSON in the login keychain instead of a file (see read_creds).
+readonly KEYCHAIN_SERVICE="Claude Code-credentials"
 
 # --plan-check verdict: a populated creds file that positively carries NO OAuth
 # subscription block. Distinct from the existing 0 (ok) and 1 (unavailable), and from
@@ -97,6 +104,21 @@ parse_usage() {
   printf '%s\n' "${args}"
 }
 
+# read_creds - print the credentials JSON on stdout, from the first source that has it.
+# Two stores exist for the same shape: a FILE at ~/.claude/.credentials.json (Linux, WSL),
+# and the macOS login KEYCHAIN, where Claude Code writes no file at all. A file-only reader
+# is therefore blind on darwin, which fail-opens the usage gate for a whole run (#8 boot).
+# The file wins when present so MOSSY_CRED_FILE stays an honest override for tests.
+# Returns nonzero when neither store yields anything; callers treat that as unavailable.
+read_creds() {
+  if [ -f "${CRED_FILE}" ]; then
+    cat "${CRED_FILE}" 2>/dev/null
+    return $?
+  fi
+  command -v security >/dev/null 2>&1 || return 1
+  security find-generic-password -s "${KEYCHAIN_SERVICE}" -w 2>/dev/null
+}
+
 # plan_check - decide, from the LOCAL creds file alone (no network), whether this account
 # is on a plan. Verdict by EXIT CODE only: it prints NOTHING to stdout and at most one
 # non-secret reason to stderr - never a token, never the subscriptionType value, never the
@@ -114,16 +136,21 @@ parse_usage() {
 # Every ambiguous or odd-on-plan case falls to exit 0 so the normal gate runs and
 # fail-opens itself; a transient creds state can never be mis-read as "no plan".
 plan_check() {
-  local file="${1:-${CRED_FILE}}"
-  [ -f "${file}" ] || return 0   # missing/unreadable -> ambiguous -> normal path
+  local creds
+  if [ -n "${1:-}" ]; then
+    [ -f "${1}" ] || return 0             # missing/unreadable -> ambiguous -> normal path
+    creds="$(cat "${1}" 2>/dev/null)" || return 0
+  else
+    creds="$(read_creds)" || return 0     # no file and no keychain item -> ambiguous
+  fi
   local verdict
-  verdict="$(jq -er '
+  verdict="$(printf '%s' "${creds}" | jq -er '
     if type != "object" then "ambiguous"
     elif has("claudeAiOauth") then "plan"
     elif (keys | length) == 0 then "ambiguous"
     else "noplan"
     end
-  ' "${file}" 2>/dev/null)" || return 0   # invalid JSON / jq error -> ambiguous -> normal path
+  ' 2>/dev/null)" || return 0   # invalid JSON / jq error -> ambiguous -> normal path
   if [ "${verdict}" = "noplan" ]; then
     printf 'usage-read: no plan - no OAuth subscription block in credentials\n' >&2
     return "${EXIT_NO_PLAN}"
@@ -136,10 +163,11 @@ plan_check() {
 # ones the CLI binary uses for its oauth endpoints. Runs for real at the next launch;
 # the parser path never calls this.
 fetch_usage() {
-  [ -f "${CRED_FILE}" ] || { unavailable "no credentials file at ${CRED_FILE}"; return 1; }
-  local token
-  token="$(jq -er '.claudeAiOauth.accessToken' "${CRED_FILE}" 2>/dev/null)" \
-    || { unavailable "no OAuth access token in ${CRED_FILE}"; return 1; }
+  local creds token
+  creds="$(read_creds)" \
+    || { unavailable "no credentials (no file at ${CRED_FILE}, none in the macOS keychain)"; return 1; }
+  token="$(printf '%s' "${creds}" | jq -er '.claudeAiOauth.accessToken' 2>/dev/null)" \
+    || { unavailable "no OAuth access token in the credentials"; return 1; }
   curl -fsS --max-time 15 "${USAGE_ENDPOINT}" \
     -H "Authorization: Bearer ${token}" \
     -H "anthropic-beta: oauth-2025-04-20" \
