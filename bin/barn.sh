@@ -112,6 +112,28 @@ bitzer_boot() {
   printf '%s' "You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read ${REPO_ROOT}/prompts/bitzer.md, then ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm ${state_dir}/MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
 }
 
+# window_size - the COLSxROWS the primary window is sized to. A detached tmux window is
+# 80 columns, so a three-pane split leaves each role 26 columns and BOTH TUIs wrap their
+# footer onto a second line. boot_pane then greps for a marker that is no longer on one
+# line, waits out its whole timeout, and warns that panes which are in fact healthy never
+# reached their input box. 420 columns gives each pane ~139, which is comfortably past
+# where either footer wraps. Override with MOSSY_WINDOW_SIZE.
+window_size() {
+  printf '%s' "${MOSSY_WINDOW_SIZE:-420x55}"
+}
+
+# size_window <session> <window> - widen the window to window_size. Best effort: an old
+# tmux without resize-window, or a window that vanished, is a warning at most. Sizing is
+# a launch comfort, never a launch gate, so this always returns 0.
+size_window() {
+  local session="$1" win="$2" size cols rows
+  size="$(window_size)"
+  cols="${size%x*}"
+  rows="${size#*x}"
+  tmux resize-window -t "${session}:${win}" -x "${cols}" -y "${rows}" >/dev/null 2>&1 || true
+  return 0
+}
+
 # apply_window <name> - a --window flag wins over MOSSY_WINDOW and the default; re-derive
 # the heartbeat window as <window>-hb so the pair always stays in lockstep.
 apply_window() {
@@ -601,6 +623,9 @@ cmd_up() {
   shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${launch}")"
   shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${launch}")"
 
+  # Size before the layout so even-horizontal divides the FULL width, and before
+  # boot_pane so no footer is wrapped when the markers are grepped.
+  size_window "${session}" "${WINDOW}"
   tmux select-layout -t "${session}:${WINDOW}" even-horizontal
   tmux set-option -w -t "${session}:${WINDOW}" remain-on-exit on
   tmux set-option -w -t "${session}:${WINDOW}" pane-border-status top
