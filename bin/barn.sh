@@ -210,6 +210,14 @@ worker_dialect() {
   printf '%s/prompts/workers/%s.md' "${REPO_ROOT}" "$(driver_for shirley)"
 }
 
+# self_dialect <role> - the prompt fragment describing the agent this role RUNS, as opposed
+# to worker_dialect which describes the pane shaun WATCHES. The two selectors are independent:
+# a Copilot-driven shaun watching a Claude Code worker reads drivers/copilot.md for himself and
+# workers/claude.md for her.
+self_dialect() {
+  printf '%s/prompts/drivers/%s.md' "${REPO_ROOT}" "$(driver_for "$1")"
+}
+
 # boundary_for <role> - what happens to this role's context at a slice boundary.
 # compact keeps the accumulated read, fresh starts clean and is re-anchored by the layer
 # above. compact is the default, and an unrecognised value falls back to it: silently
@@ -229,11 +237,11 @@ boundary_for() {
 # reads point at exactly the same files as the old relative-path boot strings.
 shaun_boot() {
   local state_dir="$1"
-  printf '%s' "You are shaun, the driver in the Mossy Bottom deference chain. Read ${REPO_ROOT}/prompts/shaun.md and $(worker_dialect), then ${state_dir}/GUARDRAILS.md and ${state_dir}/MISSION.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you and will tell you when to begin. Assume the role now, confirm you are ready, and wait for bitzer's go signal. When bitzer tells you to begin, send shirley her opening prompt from ${state_dir}/MISSION.md and run your tick loop, re-reading ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
+  printf '%s' "You are shaun, the driver in the Mossy Bottom deference chain. Read ${REPO_ROOT}/prompts/shaun.md, $(self_dialect shaun) and $(worker_dialect), then ${state_dir}/GUARDRAILS.md and ${state_dir}/MISSION.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shirley is your worker - you type into her pane and read it with tmux, and no human ever types into shirley. bitzer is above you and will tell you when to begin. Assume the role now, confirm you are ready, and wait for bitzer's go signal. When bitzer tells you to begin, send shirley her opening prompt from ${state_dir}/MISSION.md and run your tick loop, re-reading ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md every tick. Anchor on the files, never on shirley's screen."
 }
 bitzer_boot() {
   local state_dir="$1"
-  printf '%s' "You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read ${REPO_ROOT}/prompts/bitzer.md, then ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm ${state_dir}/MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
+  printf '%s' "You are bitzer, the steering layer and the Farmer's interface in Mossy Bottom. Read ${REPO_ROOT}/prompts/bitzer.md and $(self_dialect bitzer), then ${state_dir}/MISSION.md and ${state_dir}/GUARDRAILS.md, and assume the role. Read ${state_dir}/.barn-panes for pane ids: shaun is the driver below you - you type into shaun's pane, and you never type into shirley. Confirm ${state_dir}/MISSION.md is set, then wait for the Farmer. When the Farmer says the run starts, nudge shaun to begin."
 }
 
 # window_size - the COLSxROWS the primary window is sized to. A detached tmux window is
