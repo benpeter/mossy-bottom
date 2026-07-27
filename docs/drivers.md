@@ -172,8 +172,15 @@ with spaces:
 | directory | Claude Code calls it | Copilot calls it |
 |---|---|---|
 | `eds-page-import` | `eds-page-import` | `page-import` |
-| `eds-docs-search` | `eds-docs-search` | `Searching AEM Documentation` |
-| `eds-content-driven-development` | `eds-content-driven-development` | `Using Content Driven Development` |
+| `eds-docs-search` | `eds-docs-search` | `Searching-AEM-Documentation` |
+| `eds-content-driven-development` | `eds-content-driven-development` | `Using-Content-Driven-Development` |
+
+Note the second transformation: Copilot also replaces SPACES WITH HYPHENS, so a
+frontmatter `name: Searching AEM Documentation` resolves as
+`Searching-AEM-Documentation`. Reading the frontmatter alone is not enough, and
+that mistake was made and caught here: a roster built from raw frontmatter listed
+three names that did not resolve, and the worker found it on her first
+post-relaunch check.
 
 So a driver that names a skill for its worker must use the name the WORKER's
 driver resolves, not the one it sees itself. Getting this wrong looks exactly
