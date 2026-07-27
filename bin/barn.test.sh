@@ -26,6 +26,11 @@ export MOSSY_CLAUDE="$stub"
 . "$barn"
 set +eo pipefail # relax the sourced strict mode for the harness assertions themselves
 
+# Hermetic default for the secrets scrub (section N): point at a path that does not exist,
+# so every test outside N sees the scrub as a no-op and the byte-exact expectations hold
+# regardless of whether THIS host has a ~/.secrets.
+export MOSSY_SECRETS_FILE="/nonexistent-mossy-test-secrets"
+
 pass=0
 fail=0
 ok() { printf 'ok   - %s\n' "$1"; pass=$((pass + 1)); }
@@ -538,6 +543,43 @@ chk_eq "M(d): --plan invokes send-verified 0 times (launch-free)" "$(wc -l <"$sv
 chk_eq "M(d): --plan invokes send_prompt 0 times (launch-free)" "$(wc -l <"$sp_log" | tr -d ' ')" "0"
 if grep -qF 'plan (no spawn)' <<<"$planM"; then ok "M(d): --plan still emits its plan"; else no "M(d): --plan still emits its plan"; fi
 if grep -qiF 'send-verified' <<<"$planM"; then no "M(d): --plan surface byte-stable (no send-verified leakage)"; else ok "M(d): --plan surface byte-stable (no send-verified leakage)"; fi
+
+# ============================================================================
+# N: the secrets scrub (run 4). The Farmer's ~/.secrets is auto-sourced by his shell
+# profile, so every pane and the heartbeat inherit machine credentials in env. Fixing the
+# profile is out of scope (broad impact); the harness scrubs instead: launch_cmd and
+# heartbeat_cmd prefix `env -u NAME` for every variable NAME assigned in the secrets file.
+# Names only - the scrub must never read or embed a value. Absent file = byte-identical
+# commands (proven implicitly by every pre-N test running under the /nonexistent default).
+# ============================================================================
+n_secrets="$scratchF/fake-secrets"
+cat >"$n_secrets" <<'EOF'
+# comment line, ignored
+export FOO_TOKEN=super-secret-value
+export BAR_KEY="quoted secret"
+PLAIN_VAR=also-scrubbed
+not an assignment line
+EOF
+
+n_launch="$(MOSSY_SECRETS_FILE="$n_secrets" launch_cmd "$k_target")"
+chk_eq "N(a): launch_cmd scrubs every secrets var by name" \
+  "$n_launch" \
+  "env -u BAR_KEY -u FOO_TOKEN -u PLAIN_VAR MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+
+n_hb="$(MOSSY_SECRETS_FILE="$n_secrets" heartbeat_cmd "$k_target")"
+chk_eq "N(b): heartbeat_cmd scrubs the same names" \
+  "$n_hb" \
+  "env -u BAR_KEY -u FOO_TOKEN -u PLAIN_VAR MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' MOSSY_HEARTBEAT_SECS=$HB_SECS GIT_PAGER=cat '$expected_repo/bin/heartbeat.sh'"
+
+if grep -qE "super-secret-value|quoted secret" <<<"$n_launch$n_hb"; then
+  no "N(c): no secret VALUE ever appears in a launch command"
+else
+  ok "N(c): no secret VALUE ever appears in a launch command"
+fi
+
+chk_eq "N(d): absent secrets file leaves launch_cmd byte-identical (no env prefix)" \
+  "$(MOSSY_SECRETS_FILE=/nonexistent-nope launch_cmd "$k_target")" \
+  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
