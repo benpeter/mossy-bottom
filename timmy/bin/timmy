@@ -358,8 +358,12 @@ has_idle_suffix() {
       # recognised by its context meter (▓░ glyphs) or its "NN% 1M"-shaped tail. Both
       # run only on lines BELOW a confirmed input box, so the meter glyphs cannot
       # collide with transcript content here.
+      # Copilot CLI, the worker in this fork, draws the same fenced box, but its footer reads
+      # "/ commands · ? help · tab next tab" (idle) or "Working ... esc interrupt" (busy),
+      # and its status line counts AI credits.
       return (s ~ /^[ \t]*$/ || s ~ /───/ \
         || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| / \
+        || s ~ /\/ commands|esc interrupt|AIC used/ \
         || s ~ /[▓░][▓░]/ || s ~ /[0-9]+% +[0-9.]+[KM]/)
     }
     END {
@@ -414,6 +418,9 @@ ends_in_question() {
       if (t ~ /^───/) return 1
       if (t ~ /^Tip:/) return 1
       if (t ~ /esc to interrupt|shift\+tab|ctrl\+|to show todos|to cycle|for agents/) return 1
+      # Copilot chrome: the key-hint footer, the working footer, and the status line
+      # that carries the cwd and the AI-credit counter.
+      if (t ~ /\/ commands|esc interrupt|AIC used/) return 1
       if (t ~ /^[^ -~]/ && t !~ /^⏺/ && t ~ /[0-9][smh]/) return 1
       # A hint footer joins its key/action pairs with "·", whatever the specific words, and
       # never ends in "?". So a "·"-bearing line that is NOT a question is a footer - this
@@ -428,7 +435,11 @@ ends_in_question() {
       hi = (box > 0) ? box - 1 : NR
 
       turn = 0
-      for (i = hi; i >= 1; i--) if (line[i] ~ /^[ \t]*⏺/) { turn = i; break }
+      # Claude marks an assistant turn with ⏺, Copilot with ●. Two anchored alternatives,
+      # never a bracket class: awk matches a bracket expression BYTE-wise, so [⏺●] also
+      # matches every other U+2xxx glyph in the pane (the box rules included) and the turn
+      # marker lands on chrome.
+      for (i = hi; i >= 1; i--) if (line[i] ~ /^[ \t]*⏺/ || line[i] ~ /^[ \t]*●/) { turn = i; break }
 
       last = ""
       if (turn > 0) {
