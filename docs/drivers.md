@@ -39,6 +39,23 @@ so an all-claude plan stays byte-stable while a mixed chain is previewable.
 Preflight asks for a driver's binary only when a role selects that driver. A host
 without `copilot` still raises an all-claude chain.
 
+## Verified live
+
+Booted 2026-07-28 against a throwaway target, in its own tmux session, with
+`MOSSY_DRIVER_SHIRLEY=copilot`:
+
+- All three panes reached their input box with no warning, so the Copilot ready
+  marker and its two-key trust gate both work. A wrong marker here does not fail
+  loudly: `boot_pane` waits out its whole timeout and leaves a pane running
+  without its role.
+- bitzer and shaun came up on Claude Code (Opus 5), shirley on Copilot CLI
+  (GPT-5.6 Sol), and shirley correctly received no prompt.
+- timmy classified all three with no configuration: the two Claude panes busy on
+  their role prompts, the Copilot pane idle at its prompt.
+- The two prompt selectors resolved independently in shaun's boot string:
+  `prompts/drivers/claude.md` for the agent he runs, `prompts/workers/copilot.md`
+  for the pane he watches.
+
 ## Models are gated by org policy
 
 Do not hardcode a model name. Which models exist depends on the GitHub org, and
