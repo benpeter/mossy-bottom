@@ -757,5 +757,48 @@ else
   no "Q(a): could not stand up a throwaway tmux session"
 fi
 
+
+# ---------------------------------------------------------------------------
+# R. The worker dialect. shaun drives the worker by reading her pane, so his prompt has to
+# describe the TUI she actually runs. Inlining Copilot facts into shaun.md makes one file
+# that must be right for two drivers at once, and the fork proved that goes stale. Split
+# it: shaun.md stays driver-agnostic and prompts/workers/<driver>.md carries the dialect,
+# picked by the WORKER's driver, not shaun's own.
+# ---------------------------------------------------------------------------
+
+chk_eq "R(a): the dialect defaults to the claude worker" \
+  "$(worker_dialect)" "$expected_repo/prompts/workers/claude.md"
+chk_eq "R(a): and follows shirley's driver, not shaun's" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot MOSSY_COPILOT=/usr/bin/true worker_dialect)" \
+  "$expected_repo/prompts/workers/copilot.md"
+chk_eq "R(a): shaun's own driver does not choose it" \
+  "$(MOSSY_DRIVER_SHAUN=copilot MOSSY_COPILOT=/usr/bin/true worker_dialect)" \
+  "$expected_repo/prompts/workers/claude.md"
+
+for r_d in claude copilot; do
+  if [ -f "$expected_repo/prompts/workers/$r_d.md" ]; then
+    ok "R(b): prompts/workers/$r_d.md exists"
+  else
+    no "R(b): prompts/workers/$r_d.md exists"
+  fi
+done
+
+case "$(shaun_boot "$k_target")" in
+  *"prompts/workers/claude.md"*) ok "R(c): shaun's boot prompt points at the worker dialect" ;;
+  *) no "R(c): shaun's boot prompt points at the worker dialect" ;;
+esac
+case "$(MOSSY_DRIVER_SHIRLEY=copilot MOSSY_COPILOT=/usr/bin/true shaun_boot "$k_target")" in
+  *"prompts/workers/copilot.md"*) ok "R(c): and switches with the worker's driver" ;;
+  *) no "R(c): and switches with the worker's driver" ;;
+esac
+
+# The dialect file is the ONLY place a driver-specific worker fact belongs. shaun.md
+# staying driver-agnostic is what keeps a second driver from being a rewrite.
+if grep -qiE 'copilot|AIC used|/ commands' "$expected_repo/prompts/shaun.md"; then
+  no "R(d): shaun.md carries no driver-specific worker facts"
+else
+  ok "R(d): shaun.md carries no driver-specific worker facts"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
