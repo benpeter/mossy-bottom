@@ -97,6 +97,122 @@ if [ -z "${CLAUDE}" ] || [ ! -x "${CLAUDE}" ]; then
 fi
 CLAUDE_CMD="${CLAUDE} --model opus --dangerously-skip-permissions"
 
+# ---------------------------------------------------------------------------
+# The driver table. A "driver" is the coding agent a role runs. timmy classifies either
+# TUI with no configuration, which is what makes one harness work, so the only thing that
+# has to vary per role is the launch command and the two boot markers.
+#
+# EVERY ROLE DEFAULTS TO CLAUDE, so an existing chain launches byte-identically.
+# The selector mirrors MOSSY_INJECT_<ROLE> exactly:
+#   MOSSY_DRIVER_<ROLE>    claude | copilot
+#   MOSSY_MODEL_<ROLE>     a model for that role, without redefining the whole command
+#   MOSSY_BOUNDARY_<ROLE>  compact | fresh, what happens to context at a slice boundary
+# ---------------------------------------------------------------------------
+
+# role_env <PREFIX> <role> - read MOSSY_<PREFIX>_<ROLE>, upper-casing the role the same
+# way inject_role_env does. Empty when unset, so every caller can apply its own default.
+#
+# The three real roles are upper-cased by a case map, NOT by tr. preflight_tools calls this
+# through driver_for, and preflight runs before the launch on a host whose PATH is not the
+# harness's business - the #30 tests scope PATH to exactly the tools preflight declares.
+# Shelling out to tr there made preflight print 'tr: command not found' and, worse, read
+# every role as claude, so a missing copilot passed the gate. Unknown roles keep the tr
+# fallback: they never reach the preflight loop.
+role_env() {
+  local var role_uc
+  case "$2" in
+    bitzer)  role_uc=BITZER ;;
+    shaun)   role_uc=SHAUN ;;
+    shirley) role_uc=SHIRLEY ;;
+    *)       role_uc="$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')" ;;
+  esac
+  var="MOSSY_$1_${role_uc}"
+  eval "printf '%s' \"\${${var}:-}\""
+}
+
+# driver_for <role> - the role's driver. An unrecognised value falls back to claude
+# rather than booting a pane with a command nobody can classify.
+driver_for() {
+  case "$(role_env DRIVER "$1")" in
+    copilot) printf 'copilot' ;;
+    *)       printf 'claude' ;;
+  esac
+}
+
+# driver_default_model <driver> - what the driver runs when the role names no model.
+driver_default_model() {
+  case "$1" in
+    copilot) printf 'gpt-5.6-sol' ;;
+    *)       printf 'opus' ;;
+  esac
+}
+
+# model_for <role> - MOSSY_MODEL_<ROLE>, else the driver's default. Kept separate from the
+# driver because the available models are gated by org policy: claude-opus-5 is NOT offered
+# on every org, so a model baked into the command is a bug waiting for somebody else's.
+model_for() {
+  local m
+  m="$(role_env MODEL "$1")"
+  if [ -n "${m}" ]; then printf '%s' "${m}"; else driver_default_model "$(driver_for "$1")"; fi
+}
+
+# driver_bin <driver> - the executable. claude was resolved and validated at load.
+driver_bin() {
+  case "$1" in
+    copilot) printf '%s' "${MOSSY_COPILOT:-$(command -v copilot || printf 'copilot')}" ;;
+    *)       printf '%s' "${CLAUDE}" ;;
+  esac
+}
+
+# driver_cmd <role> - the full launch command for that role.
+# Copilot's --yolo is the same flag as --allow-all (both expand to --allow-all-tools
+# --allow-all-paths --allow-all-urls). --no-ask-user stays OFF on purpose: answering the
+# worker's questions is what the driver above it is for, and disabling the ask tool
+# removes the thing the chain exists to do.
+driver_cmd() {
+  local role="$1" drv model bin
+  drv="$(driver_for "${role}")"
+  model="$(model_for "${role}")"
+  bin="$(driver_bin "${drv}")"
+  case "${drv}" in
+    copilot) printf '%s --model %s --effort %s --yolo' "${bin}" "${model}" "${MOSSY_EFFORT:-xhigh}" ;;
+    *)       printf '%s --model %s --dangerously-skip-permissions' "${bin}" "${model}" ;;
+  esac
+}
+
+# The two boot markers. A Claude marker used on a Copilot pane does not fail loudly:
+# boot_pane waits out its whole timeout and then leaves a pane running without its role.
+ready_pattern() {
+  case "$(driver_for "$1")" in
+    copilot) printf '/ commands' ;;
+    *)       printf 'bypass permissions on' ;;
+  esac
+}
+trust_pattern() {
+  case "$(driver_for "$1")" in
+    copilot) printf 'Confirm folder trust' ;;
+    *)       printf 'trust this folder' ;;
+  esac
+}
+# Copilot's trust gate defaults to the one-off answer; Down picks remember-this-folder.
+trust_keys() {
+  case "$(driver_for "$1")" in
+    copilot) printf 'Down Enter' ;;
+    *)       printf 'Enter' ;;
+  esac
+}
+
+# boundary_for <role> - what happens to this role's context at a slice boundary.
+# compact keeps the accumulated read, fresh starts clean and is re-anchored by the layer
+# above. compact is the default, and an unrecognised value falls back to it: silently
+# discarding a driver's context is the expensive direction to be wrong in.
+boundary_for() {
+  case "$(role_env BOUNDARY "$1")" in
+    fresh) printf 'fresh' ;;
+    *)     printf 'compact' ;;
+  esac
+}
+
 # Role bootstrap prompts. shirley is intentionally absent. These are builders, not
 # constants, because the paths resolve per run: prompts/*.md are control-plane assets
 # that always live at REPO_ROOT (they never move into the state dir), while the per-run
@@ -223,19 +339,24 @@ wait_for() {
 
 # boot_pane <pane> <label> - accept the trust gate, then wait for the input box.
 boot_pane() {
-  local pane="$1" label="$2" i out
+  local pane="$1" label="$2" role="${3:-bitzer}" i out ready trust keys
+  ready="$(ready_pattern "${role}")"
+  trust="$(trust_pattern "${role}")"
+  keys="$(trust_keys "${role}")"
   for ((i = 0; i < 20; i++)); do
     out="$(tmux capture-pane -p -t "${pane}" 2>/dev/null || true)"
-    if printf '%s' "${out}" | grep -q -- 'bypass permissions on'; then
+    if printf '%s' "${out}" | grep -qF -- "${ready}"; then
       return 0
     fi
-    if printf '%s' "${out}" | grep -q -- 'trust this folder'; then
-      tmux send-keys -t "${pane}" Enter
+    if printf '%s' "${out}" | grep -qF -- "${trust}"; then
+      # Unquoted on purpose: "Down Enter" must reach send-keys as two key names.
+      # shellcheck disable=SC2086
+      tmux send-keys -t "${pane}" ${keys}
       sleep 1
     fi
     sleep 1
   done
-  if ! wait_for "${pane}" 'bypass permissions on' 30; then
+  if ! wait_for "${pane}" "${ready}" 30; then
     echo "barn: warning - ${label} (${pane}) did not reach its input box" >&2
     return 1
   fi
@@ -405,7 +526,7 @@ secrets_scrub_prefix() {
 
 launch_cmd() {
   printf "%sMOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" \
-    "$(secrets_scrub_prefix)" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
+    "$(secrets_scrub_prefix)" "$1" "${REPO_ROOT}" "$(driver_cmd "${2:-bitzer}")"
 }
 
 # heartbeat_cmd <state_dir> - the bin/heartbeat.sh command for the background heartbeat
@@ -472,6 +593,19 @@ preflight_tools() {
     echo "barn: missing git work tree - target '${target}' is not inside a git repository (run 'git init' there or point at a repo)" >&2
     return 1
   fi
+  # A non-claude driver's binary is required only when a role actually asks for it, so a
+  # host without copilot still raises an all-claude chain.
+  local r
+  for r in bitzer shaun shirley; do
+    case "$(driver_for "${r}")" in
+      copilot)
+        if [ -z "${MOSSY_COPILOT:-}" ] && ! command -v copilot >/dev/null 2>&1; then
+          echo "barn: missing copilot - ${r} is set to the copilot driver but 'copilot' is not on PATH (or set MOSSY_COPILOT)" >&2
+          return 1
+        fi
+        ;;
+    esac
+  done
   return 0
 }
 
@@ -558,6 +692,16 @@ cmd_up() {
     else
       printf '  preflight MISSION.md/GUARDRAILS.md missing - up would refuse (author them first)\n'
     fi
+    # A role is listed only when it differs from the default, so an all-claude plan stays
+    # byte-identical to what it was before the table existed. A model override counts as a
+    # difference: a plan that hides which model a pane will run is not a preview.
+    local _d _dv _mv
+    for _d in bitzer shaun shirley; do
+      _dv="$(driver_for "${_d}")"
+      _mv="$(model_for "${_d}")"
+      if [ "${_dv}" = "claude" ] && [ "${_mv}" = "$(driver_default_model claude)" ]; then continue; fi
+      printf '  driver   %-7s <- %s (%s)\n' "${_d}" "${_dv}" "${_mv}"
+    done
     local _p _l _list _any=0
     for _p in bitzer shaun shirley; do
       case "${_p}" in
@@ -618,10 +762,10 @@ cmd_up() {
   # cwds come from pane_cwds: repo root / SHIRLEY_DIR in dogfood, the target otherwise.
   # All three carry the same MOSSY_STATE_DIR (the run's absolute state dir).
   local launch bitzer shaun shirley
-  launch="$(launch_cmd "${state_dir}")"
+  launch="$(launch_cmd "${state_dir}" bitzer)"
   bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${bitzer_cwd}" -PF '#{pane_id}' "${launch}")"
-  shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${launch}")"
-  shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${launch}")"
+  shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "$(launch_cmd "${state_dir}" shaun)")"
+  shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "$(launch_cmd "${state_dir}" shirley)")"
 
   # Size before the layout so even-horizontal divides the FULL width, and before
   # boot_pane so no footer is wrapped when the markers are grepped.
@@ -655,9 +799,9 @@ cmd_up() {
 
   echo "barn: panes -> bitzer=${bitzer} shaun=${shaun} shirley=${shirley}"
   echo "barn: booting claude in each pane..."
-  boot_pane "${bitzer}" bitzer || true
-  boot_pane "${shaun}" shaun || true
-  boot_pane "${shirley}" shirley || true
+  boot_pane "${bitzer}" bitzer bitzer || true
+  boot_pane "${shaun}" shaun shaun || true
+  boot_pane "${shirley}" shirley shirley || true
 
   # Pre-role-prompt injection (#18.3 global + #24 per-role): each pane gets the global inject
   # list FIRST, then its own MOSSY_INJECT_<ROLE> env and --inject-<role> flag lines appended -
@@ -762,8 +906,8 @@ cmd_relaunch() {
   id="$(pane_id_for "${role}" "${panes_file}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }
 
-  tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
-  boot_pane "${id}" "${role}" || true
+  tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}" "${role}")"
+  boot_pane "${id}" "${role}" "${role}" || true
   # Pre-role-prompt injection (#18.3 global + #24 per-role): same seam as up, for the one
   # respawned pane - global, then this role's per-role env and --inject-<role> flag lines.
   if [ -n "${role_inject}" ]; then
