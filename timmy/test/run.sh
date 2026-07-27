@@ -272,6 +272,33 @@ assert_state "$ib_sess" idle 0 "genuine idle box (ends in '.') classified idle"
 
 tmux kill-session -t "$ib_sess" 2>/dev/null
 
+# --- fixture: a Copilot CLI idle box. This fork runs the WORKER on Copilot, so shaun
+# classifies a Copilot pane with the same timmy. Copilot draws the same empty "❯" fenced
+# by rules, but its footer reads "/ commands · ? help · tab next tab" with the model name
+# on the right, and its status line counts AI credits. A footer timmy does not recognise
+# as box chrome sinks the whole box, and the pane reads busy forever. ---
+copilot_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n / commands \xc2\xb7 ? help \xc2\xb7 tab next tab                          GPT-5.6 Sol\n'
+
+cop_sess="timmy_t_cop_$$"
+tmux new-session -d -s "$cop_sess" -x 80 -y 24 \
+  "printf ' \xe2\x97\x8f The lint run and the full suite are green.\n /repo                                          Session: 15.1 AIC used\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$cop_sess" idle 0 "copilot idle box classified idle"
+
+tmux kill-session -t "$cop_sess" 2>/dev/null
+
+# --- fixture: the same Copilot box, last worker line ends in '?' -> question, so shaun
+# still gets told to answer rather than waiting the pane out. ---
+copq_sess="timmy_t_copq_$$"
+tmux new-session -d -s "$copq_sess" -x 80 -y 24 \
+  "printf ' \xe2\x97\x8f Should I fix the header first, or the footer?\n /repo                                          Session: 15.1 AIC used\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$copq_sess" question 30 "copilot box ending in '?' classified question"
+
+tmux kill-session -t "$copq_sess" 2>/dev/null
+
 # --- #17 the decoy gap: a SETTLED idle box (mode line carries the "← for agents" suffix)
 # with a DECOY spinner-shaped line immediately above its top fence, no content between.
 # Pre-#17 the spinner's structural anchor picked the decoy and read BUSY (false-positive
