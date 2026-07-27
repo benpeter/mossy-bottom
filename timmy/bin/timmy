@@ -218,6 +218,38 @@ has_spinner() {
     | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 }
 
+# has_worker_spinner - the Copilot busy cue, which sits BELOW the box, not above it.
+#
+# Claude Code renders its spinner as a line above the input box, so has_spinner looks
+# upward from the fence. Copilot keeps the composer box rendered for the whole turn and
+# changes only its FOOTER: the idle "/ commands · ? help · tab next tab" becomes
+# "◉ Working · 7.2 KiB esc interrupt". Nothing above the box moves, so has_spinner finds
+# nothing and the pane keeps the idle-box shape - which made a busy quiet worker read
+# idle. That is the dangerous direction: a driver believing it hands the worker a new
+# slice mid turn and corrupts the in-flight work. Found on the first live run.
+#
+# Anchored below the LAST rule-fenced box, the same position discipline has_spinner uses,
+# so a transcript quoting the word "Working" cannot fire it. Both the word and the
+# interrupt affordance are required.
+has_worker_spinner() {
+  printf '%s\n' "$1" \
+    | LC_ALL=C awk '
+        { line[NR] = $0 }
+        END {
+          last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+          if (last == 0) exit
+          box = 0
+          for (i = last; i >= 1; i--) {
+            if (line[i] !~ /^[ \t]*❯/) continue
+            j = i - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
+            if (j >= 1 && line[j] ~ /───/) { box = i; break }
+          }
+          if (box == 0) exit
+          for (i = box + 1; i <= last; i++) print line[i]
+        }' \
+    | LC_ALL=C grep -qE 'Working.*esc interrupt'
+}
+
 # A selection menu (smoke-test.md sections 1 and 9) is a NUMBERED OPTION LIST with a
 # cursor on one option:
 #   ❯ 1. Yes, I trust this folder
@@ -363,7 +395,7 @@ has_idle_suffix() {
       # and its status line counts AI credits.
       return (s ~ /^[ \t]*$/ || s ~ /───/ \
         || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| / \
-        || s ~ /\/ commands|esc interrupt|AIC used/ \
+        || s ~ /\/ commands|AIC used/ \
         || s ~ /[▓░][▓░]/ || s ~ /[0-9]+% +[0-9.]+[KM]/)
     }
     END {
@@ -552,7 +584,7 @@ classify_once() {
   snap2="$(snapshot)" || return 1
 
   if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
-  if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+  if has_spinner "$snap2" || has_worker_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
   if has_menu "$snap2"; then menu="true"; else menu="false"; fi
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
