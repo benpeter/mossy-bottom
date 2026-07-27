@@ -130,5 +130,41 @@ if [ "$code" -eq 64 ]; then ok "missing timmy -> usage error 64"; else no "missi
 "$sv" --help >/dev/null 2>&1; code=$?
 if [ "$code" -eq 0 ]; then ok "--help -> exit 0"; else no "--help -> expected 0, got $code"; fi
 
+
+# --- the Copilot slash-command double Enter (one-harness step 5) -------------------------------
+# Typing '/' in Copilot opens a filter palette. The FIRST Enter picks the highlighted entry out
+# of it; the SECOND submits. One Enter leaves the command sitting in the composer, which reads
+# exactly like a send that silently failed - so every slash command a Copilot-driven driver
+# sends would look delivered and do nothing.
+#
+# The second Enter must NOT fire on a Claude Code pane, where the command already submitted and
+# a stray Enter starts an empty turn. So the decision needs BOTH facts: the pane speaks Copilot,
+# and the text is a slash command. These drive the predicate seam directly, because "how many
+# Enters were sent" is not observable from a fixture pane.
+printf '\n== copilot slash-command double Enter ==\n'
+# shellcheck source=/dev/null
+. "$sv" >/dev/null 2>&1 || true
+
+cop_chrome=' / commands \xc2\xb7 ? help \xc2\xb7 tab next tab                          GPT-5.6 Sol\n /repo                                          Session: 15.1 AIC used\n'
+cc_chrome='  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\n'
+
+new_pane sv_cop "printf '${cop_chrome}'; sleep 600"
+cop_pane="$PANE"
+new_pane sv_cc "printf '${cc_chrome}'; sleep 600"
+cc_pane="$PANE"
+sleep 0.4
+
+if is_copilot_pane "$cop_pane"; then ok "a Copilot pane is recognised"; else no "a Copilot pane is recognised"; fi
+if is_copilot_pane "$cc_pane"; then no "a Claude Code pane is NOT read as Copilot"; else ok "a Claude Code pane is NOT read as Copilot"; fi
+
+if needs_double_enter "$cop_pane" '/compact'; then ok "copilot + slash command -> two Enters"; else no "copilot + slash command -> two Enters"; fi
+if needs_double_enter "$cop_pane" 'build the header'; then no "copilot + PROSE -> one Enter"; else ok "copilot + PROSE -> one Enter"; fi
+if needs_double_enter "$cc_pane" '/compact'; then no "claude + slash command -> one Enter (a stray Enter starts an empty turn)"; else ok "claude + slash command -> one Enter (a stray Enter starts an empty turn)"; fi
+if needs_double_enter "$cc_pane" 'build the header'; then no "claude + prose -> one Enter"; else ok "claude + prose -> one Enter"; fi
+
+# A pane that cannot be read is not Copilot: guessing wrong here sends a stray Enter into a
+# driver's pane, and an unexplained empty turn is worse than a slash command that needs a nudge.
+if is_copilot_pane 'no_such_pane_'"$$"; then no "an unreadable pane is not assumed to be Copilot"; else ok "an unreadable pane is not assumed to be Copilot"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
