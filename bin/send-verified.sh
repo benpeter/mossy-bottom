@@ -70,6 +70,30 @@ Environment:
 EOF
 }
 
+# is_copilot_pane <pane> - does this pane speak Copilot? Keyed on its chrome, the same
+# markers timmy anchors on: the key-hint footer and the AI-credit counter. An unreadable or
+# missing pane answers NO. Guessing yes there puts a stray Enter into a driver's pane, and an
+# unexplained empty turn is a worse failure than a slash command that needs a nudge.
+is_copilot_pane() {
+  local pane="$1" out
+  out="$(tmux capture-pane -p -t "${pane}" 2>/dev/null)" || return 1
+  [ -n "${out}" ] || return 1
+  printf '%s' "${out}" | grep -qE '/ commands|AIC used'
+}
+
+# needs_double_enter <pane> <text> - true only when BOTH facts hold: the pane speaks Copilot
+# and the text is a slash command. Copilot's '/' opens a filter palette, so the first Enter
+# only picks the highlighted entry out of it. On Claude Code the command already submitted and
+# a second Enter would start an empty turn, so both halves of the condition are load-bearing.
+needs_double_enter() {
+  local pane="$1" text="$2"
+  case "${text}" in
+    /*) : ;;
+    *) return 1 ;;
+  esac
+  is_copilot_pane "${pane}"
+}
+
 # deliver <pane> <text> - the smoke-test send rule (barn.sh send_prompt): literal text, a
 # settle, then a SEPARATE Enter. The settle is the first line of defence against the 06:39
 # race; the poll that follows is the confirmation that closes the gap the settle alone left.
@@ -78,6 +102,13 @@ deliver() {
   tmux send-keys -l -t "${pane}" -- "${text}"
   sleep "${SV_SETTLE}"
   tmux send-keys -t "${pane}" Enter
+  # Copilot's slash palette eats the first Enter; the second submits. Gated on the pane
+  # speaking Copilot AND the text being a slash command, so a Claude Code pane never
+  # receives the extra Enter.
+  if needs_double_enter "${pane}" "${text}"; then
+    sleep "${SV_SETTLE}"
+    tmux send-keys -t "${pane}" Enter
+  fi
 }
 
 # clear_input <pane> - empty the input box before a retry, so a partially-buffered first
