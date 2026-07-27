@@ -299,6 +299,35 @@ assert_state "$copq_sess" question 30 "copilot box ending in '?' classified ques
 
 tmux kill-session -t "$copq_sess" 2>/dev/null
 
+# --- Copilot signals BUSY in its FOOTER, below the box, not in a spinner line above it.
+# The composer box stays rendered the whole time a turn runs, so the pane keeps the idle-box
+# shape and only the footer changes: "/ commands ..." becomes "◉ Working · 7.2 KiB esc
+# interrupt". Reading that as idle is the dangerous direction: a driver that believes it
+# hands the worker a new slice mid turn, corrupting the in-flight work. Shaun caught exactly
+# this at 21:55, 21:56 and 21:57 on the first live run. ---
+copilot_busy_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n \xe2\x97\x89 Working \xc2\xb7 7.2 KiB esc interrupt                                    GPT-5.6 Sol\n'
+
+# A LIVE Copilot turn: the byte counter advances, so the snapshots differ -> busy.
+copbusy_sess="timmy_t_copbusy_$$"
+spawn_advancing "$copbusy_sess" 100 24 " \xe2\x97\x89 Reading files\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n \xe2\x97\x89 Working \xc2\xb7 %d KiB esc interrupt                    GPT-5.6 Sol\n"
+sleep "$settle"
+
+assert_state "$copbusy_sess" busy 10 "copilot working footer with an advancing counter classified busy"
+
+tmux kill-session -t "$copbusy_sess" 2>/dev/null
+
+# A FROZEN Copilot turn: the working footer is byte-identical across the window, so the turn
+# is wedged. That is the stalled signal, deliberately NOT idle - a caller can recover from
+# stalled, and never learns anything from a false idle.
+copfrozen_sess="timmy_t_copfrozen_$$"
+tmux new-session -d -s "$copfrozen_sess" -x 100 -y 24 \
+  "printf ' \xe2\x97\x89 Reading files\n${copilot_busy_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$copfrozen_sess" stalled 40 "copilot working footer, byte-identical, classified stalled not idle"
+
+tmux kill-session -t "$copfrozen_sess" 2>/dev/null
+
 # --- #17 the decoy gap: a SETTLED idle box (mode line carries the "← for agents" suffix)
 # with a DECOY spinner-shaped line immediately above its top fence, no content between.
 # Pre-#17 the spinner's structural anchor picked the decoy and read BUSY (false-positive
