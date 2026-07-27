@@ -328,6 +328,36 @@ assert_state "$copfrozen_sess" stalled 40 "copilot working footer, byte-identica
 
 tmux kill-session -t "$copfrozen_sess" 2>/dev/null
 
+# --- Copilot has a SECOND busy footer form: it swaps the current task name in where
+# "Working" would be, as in "● Committing failing header test · 8.9 KiB esc interrupt".
+# Requiring the word "Working" misses it, and the pane then falls back to motion, which
+# is exactly the signal the busy footer was added to stop depending on. A quiet tool call
+# under a labelled footer reads idle against a worker mid turn. Found live at 22:47.
+# The cue is the interrupt affordance, and it is safe to key on alone because the match is
+# anchored BELOW the last rule-fenced box: a transcript quoting the phrase sits above it. ---
+copilot_labelled_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n \xe2\x97\x8f Committing failing header test \xc2\xb7 8.9 KiB esc interrupt              GPT-5.6 Sol\n'
+
+coplab_sess="timmy_t_coplab_$$"
+tmux new-session -d -s "$coplab_sess" -x 100 -y 24 \
+  "printf ' \xe2\x97\x8f Writing the red test\n${copilot_labelled_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$coplab_sess" stalled 40 "copilot labelled busy footer (no word Working) is a busy cue, not idle"
+
+tmux kill-session -t "$coplab_sess" 2>/dev/null
+
+# --- Guard for the relaxed anchor: the phrase in TRANSCRIPT content, above a settled idle
+# box, must NOT fire the cue. This is why the match is position-anchored rather than a bare
+# grep over the pane. ---
+copquote_sess="timmy_t_copquote_$$"
+tmux new-session -d -s "$copquote_sess" -x 100 -y 24 \
+  "printf ' \xe2\x97\x8f I saw the footer read esc interrupt while it ran.\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$copquote_sess" idle 0 "esc interrupt quoted ABOVE the box does not fire the busy cue"
+
+tmux kill-session -t "$copquote_sess" 2>/dev/null
+
 # --- #17 the decoy gap: a SETTLED idle box (mode line carries the "← for agents" suffix)
 # with a DECOY spinner-shaped line immediately above its top fence, no content between.
 # Pre-#17 the spinner's structural anchor picked the decoy and read BUSY (false-positive
