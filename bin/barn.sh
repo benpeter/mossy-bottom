@@ -54,6 +54,16 @@
 #                       Repeatable --inject "<text>" appends more lines AFTER the env's.
 #                       In 'up' every line goes to all three panes (bitzer, shaun, shirley);
 #                       in 'relaunch' to the one respawned pane. --plan lists them, sends none.
+#   MOSSY_DRIVER_<ROLE> the coding agent this role runs: claude (default) or copilot.
+#                       ROLE = BITZER|SHAUN|SHIRLEY. Every role defaults to claude, so an
+#                       existing chain launches byte-identically. See docs/drivers.md.
+#   MOSSY_MODEL_<ROLE>  the model for that role, without redefining the whole command
+#                       (default: opus for claude, gpt-5.6-sol for copilot). Which models
+#                       exist is gated by org policy, so never hardcode one.
+#   MOSSY_BOUNDARY_<ROLE>  what happens to that role's context at a slice boundary:
+#                       compact (default, keeps the accumulated read) or fresh.
+#   MOSSY_COPILOT       path to the copilot binary (default: resolved from PATH). Required
+#                       only when some role selects the copilot driver.
 #   MOSSY_INJECT_<ROLE> per-role lines (ROLE = BITZER|SHAUN|SHIRLEY), appended AFTER the global
 #                       MOSSY_INJECT list for that pane ONLY - so a target can boot one role
 #                       differently, e.g. MOSSY_INJECT_SHIRLEY="/model sonnet" runs the worker

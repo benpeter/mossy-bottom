@@ -31,11 +31,18 @@ lives in shared files on disk.
 
 | Pane | Name | Role |
 |------|------|------|
-| worker | **shirley** | A full interactive Claude Code session that does the actual work. No human ever types here; every prompt arrives from shaun. |
+| worker | **shirley** | A full interactive coding-agent session that does the actual work. No human ever types here; every prompt arrives from shaun. |
 | driver | **shaun** | Watches shirley through `capture-pane`, classifies her state by judgment, and types into her: answers, course corrections, demands for evidence, and mission re-anchoring ("this is what we are building, and no, we are not done"). |
 | steering | **bitzer** | Policy layer and human interface. Translates the Farmer's intent into mission and guardrail edits and short steering messages typed into shaun. Owns the roadmap and the product-level chronicle. |
 
 The **Farmer** is the human. The Farmer talks only to bitzer.
+
+Each role runs Claude Code by default, and any role can run a different coding
+agent instead. `MOSSY_DRIVER_SHIRLEY=copilot` puts the worker on GitHub Copilot
+CLI under two Claude Code drivers, which is the configuration proven on the first
+live migration night. See [docs/drivers.md](docs/drivers.md) for the per-role
+driver, model and context-boundary settings, and for what differs between the two
+TUIs.
 
 ## The collusion inversion
 
