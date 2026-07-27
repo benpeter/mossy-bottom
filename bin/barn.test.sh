@@ -717,5 +717,45 @@ else
   ok "O(m): preflight fails when a role needs a driver binary that is absent"
 fi
 
+
+# ---------------------------------------------------------------------------
+# Q. The size has to SURVIVE. Sizing the window once is not enough: tmux resizes a window
+# to fit its clients unless the window is pinned, so attaching a laptop after a monitor,
+# or unplugging one, squeezes the panes back under the width where the footers wrap - and
+# a wrapped footer is what timmy reads to tell working from finished. tmux resize-window
+# pins window-size to manual as a side effect; these assertions hold that side effect to
+# account, because the harness depends on it and a tmux that stopped doing it would
+# silently reintroduce the bug.
+# ---------------------------------------------------------------------------
+
+q_sess="barn_t_pin_$$"
+tmux new-session -d -s "$q_sess" -x 80 -y 24 -n w 'sleep 600' 2>/dev/null
+if tmux has-session -t "$q_sess" 2>/dev/null; then
+  size_window "$q_sess" w
+  chk_eq "Q(a): sizing pins the window so clients cannot resize it" \
+    "$(tmux show-options -w -t "$q_sess:w" window-size | awk '{print $2}')" "manual"
+
+  # A second client of a DIFFERENT size is what a monitor hotplug looks like to tmux.
+  tmux new-session -d -s "${q_sess}b" -t "$q_sess" -x 100 -y 30 2>/dev/null
+  q_w="$(tmux display-message -p -t "$q_sess:w" '#{window_width}')"
+  if [ "${q_w:-0}" -ge 400 ]; then
+    ok "Q(b): a smaller client attaching does NOT shrink the window (got ${q_w})"
+  else
+    no "Q(b): a smaller client attaching does NOT shrink the window (got ${q_w})"
+  fi
+  tmux kill-session -t "${q_sess}b" 2>/dev/null
+
+  # Idempotent: re-asserting on a cadence must not drift the size or unpin it.
+  size_window "$q_sess" w
+  size_window "$q_sess" w
+  chk_eq "Q(c): re-asserting is idempotent (size)" \
+    "$(tmux display-message -p -t "$q_sess:w" '#{window_width}x#{window_height}')" "$(window_size)"
+  chk_eq "Q(c): re-asserting is idempotent (still pinned)" \
+    "$(tmux show-options -w -t "$q_sess:w" window-size | awk '{print $2}')" "manual"
+  tmux kill-session -t "$q_sess" 2>/dev/null
+else
+  no "Q(a): could not stand up a throwaway tmux session"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
