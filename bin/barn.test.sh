@@ -581,5 +581,48 @@ chk_eq "N(d): absent secrets file leaves launch_cmd byte-identical (no env prefi
   "$(MOSSY_SECRETS_FILE=/nonexistent-nope launch_cmd "$k_target")" \
   "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
 
+
+# ---------------------------------------------------------------------------
+# P. Window size. A detached tmux window is 80 columns wide, so a three-pane split
+# gives each role 26 columns and the TUI wraps its footer. boot_pane then greps for a
+# marker that is no longer on one line, waits out its whole timeout, and reports "did
+# not reach its input box" for panes that are in fact fine. This surfaced on a launch
+# with a Copilot worker, but nothing about it is Copilot-specific: 26 columns wraps the
+# Claude Code footer too. barn sizes the window itself rather than depending on a human
+# attaching a client.
+# ---------------------------------------------------------------------------
+
+chk_eq "P(a): default window size is wide enough for three panes" "$(window_size)" "420x55"
+chk_eq "P(b): MOSSY_WINDOW_SIZE overrides it" "$(MOSSY_WINDOW_SIZE=300x40 window_size)" "300x40"
+
+p_sess="barn_t_size_$$"
+tmux new-session -d -s "$p_sess" -x 80 -y 24 -n w 'sleep 600' 2>/dev/null
+if tmux has-session -t "$p_sess" 2>/dev/null; then
+  size_window "$p_sess" w
+  p_w="$(tmux display-message -p -t "$p_sess:w" '#{window_width}')"
+  if [ "${p_w:-0}" -ge 400 ]; then
+    ok "P(c): size_window widens a detached 80-column window (got ${p_w})"
+  else
+    no "P(c): size_window widens a detached 80-column window (got ${p_w})"
+  fi
+  # A pane in the widened window must clear the width where the footers wrap.
+  p_pw="$(tmux display-message -p -t "$p_sess:w" '#{pane_width}')"
+  if [ "${p_pw:-0}" -ge 400 ]; then
+    ok "P(d): the single pane inherits the width (got ${p_pw})"
+  else
+    no "P(d): the single pane inherits the width (got ${p_pw})"
+  fi
+  tmux kill-session -t "$p_sess" 2>/dev/null
+else
+  no "P(c): could not stand up a throwaway tmux session"
+fi
+
+# size_window never aborts a launch: an unusable target is a warning, not a failure.
+if size_window "no_such_session_$$" nope; then
+  ok "P(e): size_window returns 0 on a missing window (never blocks a launch)"
+else
+  no "P(e): size_window returns 0 on a missing window (never blocks a launch)"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
