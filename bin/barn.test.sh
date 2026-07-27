@@ -800,5 +800,59 @@ else
   ok "R(d): shaun.md carries no driver-specific worker facts"
 fi
 
+
+# ---------------------------------------------------------------------------
+# S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
+# middle of their procedure: '/compact <keep-string>' with a focus string, and a
+# 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
+# no focus string, and it reports AI credits instead of context percent.
+#
+# This is an OVERRIDE, not an extraction. prompts/workers/ could be a clean split because
+# shaun.md never held worker dialect; the driver's own dialect is woven through 600 lines of
+# live procedure, and rewriting that is a separate change with its own risk. So
+# prompts/drivers/<driver>.md states which passages of the role file still apply and what
+# replaces the ones that do not, and the role file is left alone.
+# ---------------------------------------------------------------------------
+
+chk_eq "S(a): a role's self dialect follows its OWN driver" \
+  "$(self_dialect shaun)" "$expected_repo/prompts/drivers/claude.md"
+chk_eq "S(a): and switches when that role runs copilot" \
+  "$(MOSSY_DRIVER_SHAUN=copilot MOSSY_COPILOT=/usr/bin/true self_dialect shaun)" \
+  "$expected_repo/prompts/drivers/copilot.md"
+chk_eq "S(a): the worker's driver does not choose the driver's own dialect" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot MOSSY_COPILOT=/usr/bin/true self_dialect bitzer)" \
+  "$expected_repo/prompts/drivers/claude.md"
+
+for s_d in claude copilot; do
+  if [ -f "$expected_repo/prompts/drivers/$s_d.md" ]; then
+    ok "S(b): prompts/drivers/$s_d.md exists"
+  else
+    no "S(b): prompts/drivers/$s_d.md exists"
+  fi
+done
+
+case "$(shaun_boot "$k_target")" in
+  *"prompts/drivers/claude.md"*) ok "S(c): shaun's boot prompt points at his own dialect" ;;
+  *) no "S(c): shaun's boot prompt points at his own dialect" ;;
+esac
+case "$(bitzer_boot "$k_target")" in
+  *"prompts/drivers/claude.md"*) ok "S(c): bitzer's boot prompt points at his own dialect" ;;
+  *) no "S(c): bitzer's boot prompt points at his own dialect" ;;
+esac
+case "$(MOSSY_DRIVER_BITZER=copilot MOSSY_COPILOT=/usr/bin/true bitzer_boot "$k_target")" in
+  *"prompts/drivers/copilot.md"*) ok "S(c): and switches with his driver" ;;
+  *) no "S(c): and switches with his driver" ;;
+esac
+
+# The copilot dialect has to answer BOTH load-bearing gaps, or a Copilot-driven driver
+# silently loses its compaction discipline.
+for s_k in 'compact' 'AIC'; do
+  if grep -qi "$s_k" "$expected_repo/prompts/drivers/copilot.md" 2>/dev/null; then
+    ok "S(d): the copilot dialect covers '$s_k'"
+  else
+    no "S(d): the copilot dialect covers '$s_k'"
+  fi
+done
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
