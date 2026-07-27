@@ -229,8 +229,15 @@ has_spinner() {
 # slice mid turn and corrupts the in-flight work. Found on the first live run.
 #
 # Anchored below the LAST rule-fenced box, the same position discipline has_spinner uses,
-# so a transcript quoting the word "Working" cannot fire it. Both the word and the
-# interrupt affordance are required.
+# so a transcript quoting the phrase cannot fire it.
+#
+# The cue is the INTERRUPT AFFORDANCE alone, not the word "Working". Copilot swaps the
+# current task name in where "Working" would be - "● Committing failing header test ·
+# 8.9 KiB esc interrupt" - so requiring the word missed a whole class of busy turns and
+# left the verdict resting on motion, which is the exact dependency the busy footer was
+# added to remove. The affordance is offered only while a turn can be interrupted, and
+# the idle footer reads "/ commands · ? help · tab next tab", so below the box the phrase
+# means busy and nothing else. The position anchor is what makes keying on it alone safe.
 has_worker_spinner() {
   printf '%s\n' "$1" \
     | LC_ALL=C awk '
@@ -247,7 +254,7 @@ has_worker_spinner() {
           if (box == 0) exit
           for (i = box + 1; i <= last; i++) print line[i]
         }' \
-    | LC_ALL=C grep -qE 'Working.*esc interrupt'
+    | LC_ALL=C grep -qE 'esc interrupt'
 }
 
 # A selection menu (smoke-test.md sections 1 and 9) is a NUMBERED OPTION LIST with a
