@@ -624,5 +624,98 @@ else
   no "P(e): size_window returns 0 on a missing window (never blocks a launch)"
 fi
 
+
+# ---------------------------------------------------------------------------
+# O. The driver table. A role can run either TUI, so the launch command and the pane
+# markers are no longer one global constant. The selector mirrors the MOSSY_INJECT_<ROLE>
+# seam exactly, so this is a pattern the harness already has rather than a new concept.
+#
+# EVERY ROLE DEFAULTS TO CLAUDE. That is the load-bearing property: an existing chain
+# must launch byte-identically after this change, which O(j) asserts directly and the
+# --plan comparison asserts end to end.
+#
+# A Claude marker used on a Copilot pane does not fail loudly: boot_pane waits out its
+# whole timeout and then leaves a pane running without its role.
+# ---------------------------------------------------------------------------
+
+chk_eq "O(a): bitzer defaults to the claude driver"  "$(driver_for bitzer)"  "claude"
+chk_eq "O(a): shaun defaults to the claude driver"   "$(driver_for shaun)"   "claude"
+chk_eq "O(a): shirley defaults to the claude driver" "$(driver_for shirley)" "claude"
+
+chk_eq "O(b): MOSSY_DRIVER_SHIRLEY selects the worker's driver" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot driver_for shirley)" "copilot"
+chk_eq "O(b): and leaves the other roles on claude" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot driver_for shaun)" "claude"
+
+chk_eq "O(c): the claude driver's default model" "$(model_for bitzer)" "opus"
+chk_eq "O(c): the copilot driver's default model" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot model_for shirley)" "gpt-5.6-sol"
+
+# A role picks a model without redefining the whole command. The org gates which models
+# exist (claude-opus-5 is NOT offered on this one), so a hardcoded model name is a bug
+# waiting for someone else's org.
+chk_eq "O(d): MOSSY_MODEL_<ROLE> overrides the model" \
+  "$(MOSSY_MODEL_SHAUN=sonnet model_for shaun)" "sonnet"
+case "$(MOSSY_MODEL_SHAUN=sonnet driver_cmd shaun)" in
+  *"--model sonnet"*) ok "O(d): and the override reaches the command" ;;
+  *) no "O(d): and the override reaches the command (got '$(MOSSY_MODEL_SHAUN=sonnet driver_cmd shaun)')" ;;
+esac
+
+chk_eq "O(e): a claude role's command is the unchanged CLAUDE_CMD" "$(driver_cmd bitzer)" "$CLAUDE_CMD"
+
+o_cop="$(MOSSY_DRIVER_SHIRLEY=copilot MOSSY_COPILOT=/usr/bin/true driver_cmd shirley)"
+case "$o_cop" in
+  *"--yolo"*) ok "O(f): the copilot command runs unattended (--yolo)" ;;
+  *) no "O(f): the copilot command runs unattended (got '$o_cop')" ;;
+esac
+case "$o_cop" in
+  *"--no-ask-user"*) no "O(f): the worker keeps its question tool so shaun can answer" ;;
+  *) ok "O(f): the worker keeps its question tool so shaun can answer" ;;
+esac
+
+chk_eq "O(g): ready_pattern for a claude role" "$(ready_pattern bitzer)" 'bypass permissions on'
+chk_eq "O(g): ready_pattern for a copilot role" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot ready_pattern shirley)" '/ commands'
+chk_eq "O(h): trust_pattern for a claude role" "$(trust_pattern shaun)" 'trust this folder'
+chk_eq "O(h): trust_pattern for a copilot role" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot trust_pattern shirley)" 'Confirm folder trust'
+chk_eq "O(i): a claude trust gate takes a bare Enter" "$(trust_keys bitzer)" 'Enter'
+chk_eq "O(i): copilot picks the remember-this-folder option" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot trust_keys shirley)" 'Down Enter'
+
+# The byte-identity guard: an all-claude chain must produce exactly what it produced
+# before the table existed, whether or not a role is named.
+chk_eq "O(j): launch_cmd with no role is unchanged" \
+  "$(launch_cmd "$k_target")" \
+  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+chk_eq "O(j): launch_cmd for a defaulted role is the SAME string" \
+  "$(launch_cmd "$k_target" shirley)" "$(launch_cmd "$k_target")"
+
+chk_eq "O(k): a copilot-driven role carries the copilot command" \
+  "$(MOSSY_DRIVER_SHIRLEY=copilot MOSSY_COPILOT=/usr/bin/true launch_cmd "$k_target" shirley)" \
+  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $o_cop"
+
+# Boundary policy (#the fresh-vs-compact question). compact is the default because the
+# driver's accumulated read on the worker IS the product; a worker may be cheaper fresh.
+chk_eq "O(l): a role's context boundary defaults to compact" "$(boundary_for shaun)" "compact"
+chk_eq "O(l): MOSSY_BOUNDARY_<ROLE> selects a fresh session" \
+  "$(MOSSY_BOUNDARY_SHIRLEY=fresh boundary_for shirley)" "fresh"
+chk_eq "O(l): an unrecognised boundary falls back to compact, never silently to fresh" \
+  "$(MOSSY_BOUNDARY_SHIRLEY=nonsense boundary_for shirley)" "compact"
+
+# A host without copilot must still raise an all-claude chain. Demanding every driver's
+# binary up front would break every existing launch.
+o_pf="$tmp/pf-nocopilot"; pfbin "$o_pf" tmux git claude
+if OUT="$(PATH="$o_pf" preflight_tools "$scratchF" 2>&1)"; then
+  ok "O(m): preflight passes without copilot when no role uses it"
+else
+  no "O(m): preflight passes without copilot when no role uses it (got '$OUT')"
+fi
+if OUT="$(unset MOSSY_COPILOT; PATH="$o_pf" MOSSY_DRIVER_SHIRLEY=copilot preflight_tools "$scratchF" 2>&1)"; then
+  no "O(m): preflight FAILS when a role needs a driver binary that is absent"
+else
+  ok "O(m): preflight fails when a role needs a driver binary that is absent"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
