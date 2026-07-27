@@ -163,6 +163,24 @@ skill under a prefixed directory name does not rename it. Those two facts masked
 each other for two hours on the first run: the session predated the symlinks, and
 the names would not have resolved anyway.
 
+**The two drivers disagree about what a skill is called, off the same directory.**
+Claude Code lists a skill by its DIRECTORY; Copilot registers it by the
+frontmatter `name:`. On this machine's shared `~/.claude/skills`, 19 of 34
+migration skills differ between the two, and three register under prose titles
+with spaces:
+
+| directory | Claude Code calls it | Copilot calls it |
+|---|---|---|
+| `eds-page-import` | `eds-page-import` | `page-import` |
+| `eds-docs-search` | `eds-docs-search` | `Searching AEM Documentation` |
+| `eds-content-driven-development` | `eds-content-driven-development` | `Using Content Driven Development` |
+
+So a driver that names a skill for its worker must use the name the WORKER's
+driver resolves, not the one it sees itself. Getting this wrong looks exactly
+like a failed relaunch: the worker reports the skill missing and both sides are
+reading a real directory. Generate the mapping and hand over the resolved column
+rather than assuming they agree.
+
 **Commits get a `Co-authored-by: Copilot` trailer**, built in the commit command
 with no setting to disable it. If a project bans tool attribution, say so in the
 guardrails and check before the first push, because removing it afterwards is a
