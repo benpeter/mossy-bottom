@@ -884,5 +884,38 @@ fi
 
 tmux kill-session -t "$st_add_sess" 2>/dev/null
 
+# --- the MODERN footer (Claude Code >= 2.1.2xx): no "Context:" label, no " | " separators.
+# The status line reads "  Opus 5   ~/path   main   ▓▓▓▓░░░░ 52% 1M" and the mode line can
+# carry a shell-count segment: "⏵⏵ bypass permissions on · 5 shells · ← for agents". The
+# has_idle_suffix chrome allowlist predates this footer, so the settled-suffix override never
+# fired on ANY modern pane: the one authoritative idle signal was dead in production (run 4,
+# the 2026-07-27 wake gap). Both fixtures below use the modern footer verbatim. ---
+modern_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  Opus 5   ~/dev/adobe/x   main   \xe2\x96\x93\xe2\x96\x93\xe2\x96\x93\xe2\x96\x93\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91 52%% 1M\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on \xc2\xb7 5 shells \xc2\xb7 \xe2\x86\x90 for agents\n'
+
+# Static modern-footer idle box: the state reads idle either way (identical snapshots), so the
+# assertion that carries the regression is the EVIDENCE: idle_suffix must read yes.
+mf_sess="timmy_t_modernfooter_$$"
+tmux new-session -d -s "$mf_sess" -x 90 -y 24 \
+  "printf '\xe2\x8f\xba Learn club merged and proven.\n${modern_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_selftest "$mf_sess" idle 0 "idle_suffix +yes" \
+  "modern footer (meter, no Context label, shells segment) -> suffix RECOGNISED"
+
+tmux kill-session -t "$mf_sess" 2>/dev/null
+
+# The production wake-gap repro: modern-footer idle box with STREAMING output above it, the
+# shape a finished turn leaves when background shells keep printing (poll loops). Motion is
+# real but the turn is over; only the suffix override can call this idle. Pre-fix verdict:
+# busy via sustained_motion, which is the false-busy that held the run's wake for an hour.
+mfs_sess="timmy_t_modernshells_$$"
+spawn_advancing "$mfs_sess" 90 24 "shell poll %d lines emitted\n${modern_box}"
+sleep "$settle"
+
+assert_state "$mfs_sess" idle 0 \
+  "modern footer + streaming shell output above the box -> idle (suffix beats motion)"
+
+tmux kill-session -t "$mfs_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
