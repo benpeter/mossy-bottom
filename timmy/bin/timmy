@@ -353,8 +353,14 @@ has_idle_suffix() {
   printf '%s\n' "$text" | LC_ALL=C awk '
     { line[NR] = $0 }
     function isboxchrome(s) {
+      # Two footer generations: the old status line carries "Context:"/"Ctx" and " | "
+      # separators; the modern one (Claude Code >= 2.1.2xx) carries neither and is
+      # recognised by its context meter (▓░ glyphs) or its "NN% 1M"-shaped tail. Both
+      # run only on lines BELOW a confirmed input box, so the meter glyphs cannot
+      # collide with transcript content here.
       return (s ~ /^[ \t]*$/ || s ~ /───/ \
-        || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| /)
+        || s ~ /⏵⏵|shift\+tab|for agents|bypass permissions|Context|Ctx/ || s ~ / \| / \
+        || s ~ /[▓░][▓░]/ || s ~ /[0-9]+% +[0-9.]+[KM]/)
     }
     END {
       last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
