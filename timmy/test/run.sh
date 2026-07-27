@@ -823,7 +823,15 @@ sleep "$settle"  # let IDLE-A paint before watch takes its first read
 
 "$timmy" --watch --pane "$w_sess" > "$w_out" 2>/dev/null &
 w_pid=$!
-sleep 2                       # span all three phases (idle ~0.6s, busy ~0.9s, idle)
+# Wait for the third line rather than for a fixed 2s. The pane's phases are ~0.6s idle,
+# ~0.9s busy, then idle, and a fixed timer that only just spans them loses the trailing
+# idle whenever the host is loaded - the suite then fails as 'idle,busy,' perhaps one run
+# in three. The deadline still bounds a genuine hang, and the assertion below is unchanged,
+# so a real regression (wrong states, wrong order, duplicates) fails exactly as before.
+w_deadline=$(( $(date +%s) + 15 ))
+while [ "$(awk 'END{print NR}' "$w_out")" -lt 3 ] && [ "$(date +%s)" -lt "$w_deadline" ]; do
+  sleep 0.1
+done
 kill "$w_pid" 2>/dev/null     # SIGTERM -> watch must exit cleanly, flushing output
 wait "$w_pid" 2>/dev/null
 
