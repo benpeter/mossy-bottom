@@ -365,8 +365,25 @@ pane_cwds() {
 # The env prefix is applied by the same shell tmux already uses to split CLAUDE_CMD into
 # argv, so it exports to claude. Single-quoted to survive spaces in the paths. Dogfood
 # passes REPO_ROOT for both; MOSSY_REPO_DIR stays inert until shaun.md consumes it.
+# secrets_scrub_prefix - "env -u NAME ... " for every variable NAME assigned in the
+# Farmer's secrets file (default ~/.secrets, override MOSSY_SECRETS_FILE), so panes and
+# the heartbeat never inherit machine credentials in their environment (run 4: the shell
+# profile auto-sources the file, putting the tokens in env for every descendant). Names
+# only - values are never read past the '='. Absent or empty file = empty prefix, leaving
+# the launch commands byte-identical to the unscrubbed form.
+secrets_scrub_prefix() {
+  local f="${MOSSY_SECRETS_FILE:-${HOME}/.secrets}" names n out=""
+  [ -f "${f}" ] || return 0
+  names="$(LC_ALL=C sed -n -E 's/^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "${f}" | sort -u)"
+  [ -n "${names}" ] || return 0
+  out="env"
+  for n in ${names}; do out="${out} -u ${n}"; done
+  printf '%s ' "${out}"
+}
+
 launch_cmd() {
-  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
+  printf "%sMOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" \
+    "$(secrets_scrub_prefix)" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
 }
 
 # heartbeat_cmd <state_dir> - the bin/heartbeat.sh command for the background heartbeat
@@ -377,8 +394,8 @@ launch_cmd() {
 # the real spawn and the --plan preview, so the plan cannot drift from what up runs. Paths
 # single-quoted to survive spaces. No claude binary - it is a vanilla tmux+sleep loop.
 heartbeat_cmd() {
-  printf "MOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' MOSSY_HEARTBEAT_SECS=%s GIT_PAGER=cat '%s/bin/heartbeat.sh'" \
-    "$1" "${REPO_ROOT}" "${HB_SECS}" "${REPO_ROOT}"
+  printf "%sMOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' MOSSY_HEARTBEAT_SECS=%s GIT_PAGER=cat '%s/bin/heartbeat.sh'" \
+    "$(secrets_scrub_prefix)" "$1" "${REPO_ROOT}" "${HB_SECS}" "${REPO_ROOT}"
 }
 
 # state_authored <state_dir> - true iff both Farmer-authored state files are present.
