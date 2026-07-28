@@ -1013,6 +1013,46 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# V. THE INBOX IS A CHANNEL PROPERTY, NOT A FARMER PRIVILEGE. Section U put an inbox on the
+# Farmer -> bitzer hop. The bitzer -> shaun hop has the identical defect and is where the cost
+# actually landed on 2026-07-28: a stale Farmer order reached shaun late and deferred two
+# already-reviewed PRs.
+#
+# The evidence that it is structural rather than one agent being careless: bitzer hand-patched
+# his own FIFO in exactly the words the Farmer used, unprompted, on the same morning -
+# "superseding my earlier queued park-#22 message". Two agents, two layers, one workaround.
+# At 10:52 shaun held FOUR queued messages and every one described a world that no longer
+# existed, while he made correct decisions without them.
+#
+# So every downward channel gets the same treatment, and the pane narrows to interrupts.
+# ---------------------------------------------------------------------------
+if grep -qE 'SHAUN-INBOX' "$expected_repo/prompts/bitzer.md"; then
+  ok "V(a): bitzer.md says he keeps an inbox for shaun"
+else
+  no "V(a): bitzer.md says he keeps an inbox for shaun"
+fi
+
+if grep -qE 'SHAUN-INBOX' "$expected_repo/prompts/shaun.md"; then
+  ok "V(b): shaun.md names the inbox he reads"
+else
+  no "V(b): shaun.md names the inbox he reads"
+fi
+
+if awk '/SHAUN-INBOX/{f=1} f' "$expected_repo/prompts/shaun.md" | grep -qiE 'every tick'; then
+  ok "V(c): shaun.md reads it every tick"
+else
+  no "V(c): shaun.md reads it every tick"
+fi
+
+# The rule that makes it work is the same one section U relies on: the writer EDITS.
+if awk '/SHAUN-INBOX/{f=1} f' "$expected_repo/prompts/bitzer.md" | grep -qiE 'edit'; then
+  ok "V(d): bitzer.md says he edits it rather than appending"
+else
+  no "V(d): bitzer.md says he edits it rather than appending"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
