@@ -802,6 +802,38 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# R2. A HAND NAMES THE WORK. Live 2026-07-28: the worker's very first act after kickoff was
+# to ask "Which cloudadoption/ram issue number is this slice?", because the Opening directive
+# in MISSION.md describes the mission and never names a work item. A round trip, a blocked
+# worker, and a question the driver could not even see, all for a fact the hand already knew.
+#
+# The rule belongs in the harness and not in one run's MISSION.md, because every run would
+# rediscover it. Asserted on shaun.md rather than on a per-run file for the same reason.
+# ---------------------------------------------------------------------------
+if grep -qiE 'name the work item' "$expected_repo/prompts/shaun.md"; then
+  ok "R2(a): shaun.md requires a hand to name the work item"
+else
+  no "R2(a): shaun.md requires a hand to name the work item"
+fi
+
+# The kickoff is the hand that got this wrong, so it must say so where it is described,
+# not only in a general rule 200 lines away.
+if awk '/^## Kickoff/,/^## /' "$expected_repo/prompts/shaun.md" | grep -qiE 'name the work item|append.*work item|which issue'; then
+  ok "R2(b): the Kickoff section says the opening hand names the first work item"
+else
+  no "R2(b): the Kickoff section says the opening hand names the first work item"
+fi
+
+# A worker asking which slice it is on is a DRIVER defect. Saying that explicitly is what
+# stops the next reader from treating the question as the worker being difficult.
+if grep -qiE 'asks which .*is a (driver|hand) defect|asking which .*is a (driver|hand) defect' "$expected_repo/prompts/shaun.md"; then
+  ok "R2(c): shaun.md names the worker asking as a driver defect"
+else
+  no "R2(c): shaun.md names the worker asking as a driver defect"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
