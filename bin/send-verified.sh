@@ -94,13 +94,46 @@ needs_double_enter() {
   is_copilot_pane "${pane}"
 }
 
+# pane_is_busy <pane> - true while a turn is running. Anchored on the interrupt affordance,
+# the same cue timmy uses, because the word 'Working' is not reliable: Copilot swaps the
+# current task name in where it would be. An unreadable pane is NOT busy.
+pane_is_busy() {
+  local pane="$1" out
+  out="$(tmux capture-pane -p -t "${pane}" 2>/dev/null)" || return 1
+  [ -n "${out}" ] || return 1
+  printf '%s' "${out}" | grep -qF 'esc interrupt'
+}
+
+# needs_enqueue <pane> - true only for a BUSY Copilot pane. Such a pane does not submit on
+# Enter at all: the text stays in the composer indefinitely and the send looks delivered.
+# Copilot advertises the real key in its own busy footer, as 'ctrl+enter enqueue'. Four
+# messages were lost to this on 2026-07-28 before anyone read that footer.
+#
+# Both halves are load-bearing. An IDLE Copilot pane submits on Enter, and Claude Code queues
+# typed-while-busy text by itself, so neither should ever receive ctrl+enter.
+needs_enqueue() {
+  local pane="$1"
+  is_copilot_pane "${pane}" && pane_is_busy "${pane}"
+}
+
+# ENQUEUE_KEY - ctrl+enter as tmux hex bytes: ESC [ 1 3 ; 5 u, the kitty-protocol encoding.
+# `send-keys C-Enter` is not a key tmux names, so the bytes are sent literally.
+readonly ENQUEUE_KEY='1b 5b 31 33 3b 35 75'
+
 # deliver <pane> <text> - the smoke-test send rule (barn.sh send_prompt): literal text, a
-# settle, then a SEPARATE Enter. The settle is the first line of defence against the 06:39
-# race; the poll that follows is the confirmation that closes the gap the settle alone left.
+# settle, then a SEPARATE submit key. The settle is the first line of defence against the
+# 06:39 race; the poll that follows is the confirmation that closes the gap the settle left.
 deliver() {
   local pane="$1" text="$2"
   tmux send-keys -l -t "${pane}" -- "${text}"
   sleep "${SV_SETTLE}"
+  # A busy Copilot pane takes ctrl+enter and nothing else. Send that INSTEAD of Enter, never
+  # in addition: a plain Enter into a running turn is the failure this exists to prevent.
+  if needs_enqueue "${pane}"; then
+    # shellcheck disable=SC2086  # the hex bytes are separate args by design
+    tmux send-keys -t "${pane}" -H ${ENQUEUE_KEY}
+    return 0
+  fi
   tmux send-keys -t "${pane}" Enter
   # Copilot's slash palette eats the first Enter; the second submits. Gated on the pane
   # speaking Copilot AND the text being a slash command, so a Claude Code pane never
