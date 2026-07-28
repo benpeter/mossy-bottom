@@ -146,6 +146,53 @@ silently failed. `bin/send-verified.sh` handles this: it sends the second Enter
 only when the pane speaks Copilot AND the text is a slash command, so a Claude
 Code pane never gets a stray Enter that would start an empty turn.
 
+**A BUSY pane does not submit on Enter. It enqueues on ctrl+enter.** This is the
+single most expensive thing learned on 2026-07-28, because it is silent and it
+looks exactly like a delivered message. Send text to a Copilot pane that is
+mid-turn and plain Enter does nothing at all: the text sits in the composer
+indefinitely, and the pane keeps working on what it was already doing. Copilot
+says so in its own busy footer, which reads `· ctrl+enter enqueue` after the
+interrupt affordance. Nobody read it.
+
+Four messages were lost to this in one morning: a Farmer ruling to bitzer,
+shaun's role prompt at boot, the run's go signal, and shirley's opening prompt.
+Each one looked delivered.
+
+The rule:
+
+| pane state | how to submit |
+|---|---|
+| idle | `Enter` |
+| busy | ctrl+enter, which tmux sends as `send-keys -H 1b 5b 31 33 3b 35 75` |
+
+That byte sequence is `ESC [ 1 3 ; 5 u`, the kitty-protocol encoding of
+ctrl+enter. Verified live against a working pane: the composer cleared while the
+pane stayed busy, and the text arrived as its own turn once the running turn
+ended.
+
+**`send-verified` cannot see any of this, and that is a second defect.** Its
+success test is `submitted()`, which polls timmy and accepts ANY non-idle verdict
+as proof the prompt went in. A pane that was already busy satisfies that on the
+first poll, so the helper returns 0 for a message that never left the composer.
+The fix has two halves: submit with ctrl+enter when the pane is busy, and stop
+treating "non-idle" as proof. What proves delivery is the pane's own counter
+moving, `Session: N AIC`.
+
+Do NOT use process CPU as a liveness or delivery test. An agent waiting on a
+model response sits at 0.0% while genuinely working, so a busy pane and a wedged
+pane look identical through `ps`. That mistake was made here and corrected the
+same morning.
+
+**A boot warning is evidence.** `barn.sh` reported that shirley "did not reach its
+input box", and it was right: she had hung during skill loading and never
+consumed a keystroke, sitting at `Session: 0 AIC` with an empty transcript for 89
+minutes. The warning was dismissed because bitzer carried the same warning and was
+fine. The only thing that clears a boot warning is a turn actually running. The
+tell that separates the two: a healthy pane reaches the idle footer
+`/ commands · ? help · tab next tab`, while the hung one stayed on
+`Loading: N instructions, M skills` forever. `relaunch` fixes it and keeps the
+pane id.
+
 **Copilot draws TWO different boxes, and the busy one has no caret.** Idle is a
 light `───` fence with a `❯` prompt. While a turn runs it switches to a heavy
 fence, `╻▄▄▄` on top and `╹▀▀▀` on the bottom, and renders no `❯` at all. Any cue
