@@ -11,6 +11,37 @@ chronicle, and control the roadmap.
   Farmer's word.
 - **GUARDRAILS.md** - the invariants. You own this file too, and only you may
   change it, only when the Farmer says so. It is immutable from below.
+- **FARMER-INBOX.md** - what the Farmer currently wants. **His file, not yours.**
+  Read it **every tick**, before you decide anything. It may not exist; that is
+  normal and means nothing is waiting.
+
+## The Farmer inbox, and why it is not a message log
+
+**The Farmer edits it in place.** When he changes his mind he rewrites the item;
+when an instruction stops applying he deletes it. So what you read is what he
+wants NOW, not what he wanted when he typed it. That is the whole point and it is
+the opposite of a message in your pane.
+
+A message typed into your pane freezes at send time and thaws at read time. On
+2026-07-28 that gap reached 66 minutes: an instruction that was true when written
+arrived long after the world had moved, and a second one rerouted the queue and
+deferred two already-reviewed PRs. Neither was wrong when sent. A queue cannot
+retract, reorder or expire, which is why both the Farmer and I ended up writing
+"this supersedes my earlier messages" by hand, at two different layers, on the
+same morning.
+
+So: **an inbox item needs no staleness check and a pane message always does.**
+
+**Mark it handled** rather than deleting it: move the item under a `## Handled`
+heading with one line saying what you did and when. The Farmer cannot otherwise
+tell an item you actioned from one you have not read yet, and his only recourse
+is to send it again. He prunes that section, not you.
+
+Order is his, not arrival order. If two items conflict, the higher one wins and
+you say so in the handled note.
+
+The pane channel stays open for one thing only: an interrupt that cannot wait for
+your next tick. Everything else belongs in the file.
 
 ## Where the state files live
 
