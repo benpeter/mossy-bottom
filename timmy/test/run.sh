@@ -1073,5 +1073,32 @@ sleep 0.4
 assert_state "$copqg_sess" idle 0 "a transcript QUOTING the answer affordance stays idle"
 tmux kill-session -t "$copqg_sess" 2>/dev/null
 
+
+# --- COMPACTION is busy, and it renders the IDLE footer ------------------------------------
+# Measured 2026-07-28 against fixtures, after seeing it live: a compacting Copilot pane shows
+# ' Compacting conversation history (89s)' ABOVE the box and the ordinary IDLE footer below it.
+# No interrupt affordance, no heavy fence, no spinner. Every anchored cue is absent, so the
+# verdict fell through to snapshot motion and was correct ONLY because the seconds counter
+# happens to tick between the two snapshots. Static fixture read idle, animated read busy.
+#
+# It matters because of what is gated on it: shaun compacts the worker and WAITS for idle
+# before handing the next slice. A repaint pause of one interval reads idle, and the slice
+# lands inside the compaction, which is the exact thing that rule exists to prevent.
+compacting_static="timmy_compact_$$"
+tmux new-session -d -s "$compacting_static" -x 200 -y 50 \
+  "printf ' \xe2\x97\x89 Compacting conversation history (89s)\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$compacting_static" busy 10 "a STATIC compacting pane is busy, not idle"
+tmux kill-session -t "$compacting_static" 2>/dev/null
+
+# The mirror guard, same shape as the other cues: a transcript that merely mentions compaction
+# with a real idle box below it must stay idle, or the cue fabricates busy out of prose.
+compacting_guard="timmy_compactg_$$"
+tmux new-session -d -s "$compacting_guard" -x 200 -y 50 \
+  "printf ' \xe2\x97\x8f I finished compacting conversation history and re-anchored.\n /repo                                          Session: 15.1 AIC used\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$compacting_guard" idle 0 "a transcript MENTIONING compaction stays idle"
+tmux kill-session -t "$compacting_guard" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
