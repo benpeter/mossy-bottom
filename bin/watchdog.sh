@@ -15,8 +15,8 @@
 #   --weekly <pct>   current weekly window usage percent   (required)
 #
 # Config (per-window, independently tunable; defaults ship; zero-config works):
-#   --5h-threshold <pct>      overrides $MOSSY_WD_5H,     default 80
-#   --weekly-threshold <pct>  overrides $MOSSY_WD_WEEKLY, default 85
+#   --5h-threshold <pct>      overrides $MOSSY_WD_5H,     default 95
+#   --weekly-threshold <pct>  overrides $MOSSY_WD_WEEKLY, default 95
 #
 # Decision and exit code (distinct per outcome):
 #   CLEAR  exit 0    both windows are under their thresholds
@@ -27,7 +27,7 @@
 # percent, and the threshold. If both trip, both are named.
 #
 #   bin/watchdog.sh --5h 50 --weekly 60                 -> CLEAR (exit 0)
-#   bin/watchdog.sh --5h 82 --weekly 60                 -> PAUSE, names 5h (exit 10)
+#   bin/watchdog.sh --5h 96 --weekly 60                 -> PAUSE, names 5h (exit 10)
 #   bin/watchdog.sh --5h 50 --weekly 60 --weekly-threshold 55 -> PAUSE, names weekly
 #
 # tva
@@ -49,8 +49,8 @@ Required:
   --weekly <pct>            current weekly window usage percent
 
 Thresholds (per window, independently tunable; defaults apply with no config):
-  --5h-threshold <pct>      default $MOSSY_WD_5H or 80
-  --weekly-threshold <pct>  default $MOSSY_WD_WEEKLY or 85
+  --5h-threshold <pct>      default $MOSSY_WD_5H or 95
+  --weekly-threshold <pct>  default $MOSSY_WD_WEEKLY or 95
 
 Outcomes:
   CLEAR  exit 0    both windows under their thresholds
@@ -71,8 +71,8 @@ ge() { LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 >= b + 0) }'; }
 
 usage_5h=""
 usage_weekly=""
-th_5h="${MOSSY_WD_5H:-80}"
-th_weekly="${MOSSY_WD_WEEKLY:-85}"
+th_5h="${MOSSY_WD_5H:-95}"
+th_weekly="${MOSSY_WD_WEEKLY:-95}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
