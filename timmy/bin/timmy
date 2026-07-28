@@ -267,9 +267,22 @@ has_compacting() {
             if (line[i] ~ /───/ || line[i] ~ /^[ \t]*\xe2\x95\xb9\xe2\x96\x80/) { box = i; break }
           }
           if (box == 0) exit 1
-          for (i = box - 1; i >= 1; i--) {
-            if (line[i] ~ /Compacting conversation history/) { found = 1; break }
+          # Only the line IMMEDIATELY above the box counts, blanks skipped. The transcript
+          # keeps the completed-compaction line verbatim, so scanning the whole buffer cannot
+          # tell a finished compaction from a running one, and it reported a healthy idle
+          # worker as stalled. A LIVE compaction is the last thing rendered before the box and
+          # carries its elapsed counter; a finished one always has later output beneath it.
+          # NOTE: no apostrophes in this block. It sits inside a single-quoted shell string,
+          # and one apostrophe terminates the program and breaks timmy outright.
+          # box is the BOTTOM fence. The cue sits above the box, so climb past the caret to
+          # the TOP fence first, then look at the line immediately above that.
+          top = box
+          for (j = box - 1; j >= 1 && box - j <= 4; j--) {
+            if (line[j] ~ /───/) { top = j; break }
           }
+          i = top - 1
+          while (i >= 1 && line[i] ~ /^[ \t]*$/) i--
+          if (i >= 1 && line[i] ~ /Compacting conversation history/ && line[i] ~ /\([0-9]+s\)/) found = 1
           exit(found ? 0 : 1)
         }
       '
