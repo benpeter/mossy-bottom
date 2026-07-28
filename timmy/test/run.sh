@@ -1046,5 +1046,32 @@ assert_state "$copbusyg_sess" idle 0 "heavy fence with an IDLE footer stays idle
 
 tmux kill-session -t "$copbusyg_sess" 2>/dev/null
 
+
+# --- Copilot's QUESTION MODAL, which is a box and not a trailing '?' ------------------------
+# Live 2026-07-28: shirley asked "Which cloudadoption/ram issue number is this slice?" and timmy
+# said idle, exit 0. That is the dangerous direction: idle is the driver's signal to HAND OUT
+# WORK, so the next slice would have been typed into her answer field and consumed as the answer.
+#
+# The modal REPLACES the input box, so there is no caret between light fences, no idle suffix and
+# no spinner. Every existing cue is absent by construction and the pane falls through to idle.
+# The affordance line is the anchor, the same way 'esc interrupt' anchors busy.
+copilot_question_modal='\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x94\x82 Question\n\xe2\x94\x82 \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x94\x82 Which cloudadoption/ram issue number is this slice?\n\xe2\x94\x82\n\xe2\x94\x82 \xe2\x9d\xaf Type your answer...\n\xe2\x94\x82\n\xe2\x94\x82 enter to submit \xc2\xb7 esc to cancel\n\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n'
+
+copq_sess="timmy_copqm_$$"
+tmux new-session -d -s "$copq_sess" -x 200 -y 50 \
+  "printf ' \xe2\x97\x8b Asking user Which cloudadoption/ram issue number is this slice?\n${copilot_question_modal}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$copq_sess" question 30 "copilot QUESTION MODAL classified question, not idle"
+tmux kill-session -t "$copq_sess" 2>/dev/null
+
+# Guard, mirroring the busy-cue guard: a transcript that merely QUOTES the affordance, with a
+# real idle box below it, must stay idle. Otherwise the cue fabricates a question from prose.
+copqg_sess="timmy_copqg_$$"
+tmux new-session -d -s "$copqg_sess" -x 200 -y 50 \
+  "printf ' \xe2\x97\x8f The modal footer reads enter to submit \xc2\xb7 esc to cancel and I noted it.\n /repo                                          Session: 15.1 AIC used\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$copqg_sess" idle 0 "a transcript QUOTING the answer affordance stays idle"
+tmux kill-session -t "$copqg_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
