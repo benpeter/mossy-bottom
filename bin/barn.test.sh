@@ -921,6 +921,52 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# T. A RUN GETS ITS OWN TMUX SERVER. Measured 2026-07-28: one tmux server backing two live
+# chains plus every test fixture sat pegged at 100% CPU. timmy cost 20+ CPU-seconds per
+# classification and 44 to 75 seconds wall, sends stranded, and the full suite could not
+# complete at all - it ran in 88 seconds the moment it got its own TMUX_TMPDIR.
+#
+# TMUX_TMPDIR rather than `tmux -L` at each call site: there are 60+ direct tmux invocations
+# across barn, heartbeat, send-verified, stuck-check and timmy, and ONE missed call would talk
+# to the default server. That is a split-brain bug worse than the contention it fixes. The env
+# var needs no call-site changes and panes inherit it, so anything an agent runs inside a pane
+# lands on the right server automatically.
+#
+# The socket path is the constraint: a unix socket caps near 104 characters and tmux appends
+# tmux-<uid>/default, so the directory has to be SHORT. A scratchpad path overflows it, which
+# is how three fixtures failed before this was understood.
+# ---------------------------------------------------------------------------
+if grep -qE 'socket_dir|TMUX_TMPDIR' "$expected_repo/bin/barn.sh"; then
+  ok "T(a): barn.sh knows about a per-run socket dir"
+else
+  no "T(a): barn.sh knows about a per-run socket dir"
+fi
+
+sock_plan="$(MOSSY_SESSION=x cmd_up --plan "$k_target" 2>/dev/null | grep -c 'socket')"
+if [ "${sock_plan:-0}" -ge 1 ]; then
+  ok "T(b): --plan shows the socket dir, so it is previewable"
+else
+  no "T(b): --plan shows the socket dir, so it is previewable"
+fi
+
+# The whole point is that the path fits. Assert the resolved dir leaves room for tmux's own
+# suffix; if this ever regresses the failure is three confusing fixture errors, not a clear one.
+sock="$(socket_dir "$k_target" 2>/dev/null)"
+if [ -n "$sock" ] && [ "${#sock}" -le 60 ]; then
+  ok "T(c): the socket dir is short enough for a unix socket (${#sock} chars)"
+else
+  no "T(c): the socket dir is short enough for a unix socket (got '${sock}', ${#sock} chars)"
+fi
+
+# Two different targets must not share a server, or the isolation buys nothing.
+if [ "$(socket_dir /tmp/aaa 2>/dev/null)" != "$(socket_dir /tmp/bbb 2>/dev/null)" ]; then
+  ok "T(d): different targets resolve to different servers"
+else
+  no "T(d): different targets resolve to different servers"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
