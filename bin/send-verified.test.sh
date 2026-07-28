@@ -166,5 +166,59 @@ if needs_double_enter "$cc_pane" 'build the header'; then no "claude + prose -> 
 # driver's pane, and an unexplained empty turn is worse than a slash command that needs a nudge.
 if is_copilot_pane 'no_such_pane_'"$$"; then no "an unreadable pane is not assumed to be Copilot"; else ok "an unreadable pane is not assumed to be Copilot"; fi
 
+
+printf '\n== a BUSY copilot pane enqueues on ctrl+enter, it does not submit on Enter ==\n'
+# 2026-07-28: four messages were lost to this in one morning and every one looked delivered.
+# Plain Enter into a running Copilot turn leaves the text in the composer indefinitely; the
+# pane advertises the real key in its own busy footer as 'ctrl+enter enqueue'. An idle pane
+# still takes a plain Enter, and Claude Code takes one in BOTH states, so all three arms matter.
+cop_busy_chrome=' ~/x [\xe2\x8e\x87 main]                          Session: 15.1 AIC used\n \xe2\x97\x89 Working \xc2\xb7 7.2 KiB esc interrupt \xc2\xb7 ctrl+enter enqueue\n'
+cc_busy_chrome='  ~/x | Opus 4.8 | Context: 41%%\n  \xe2\x9c\xbb Brewing... (esc to interrupt)\n'
+
+new_pane sv_cop_busy "printf '${cop_busy_chrome}'; sleep 600"
+cop_busy="$PANE"
+new_pane sv_cc_busy "printf '${cc_busy_chrome}'; sleep 600"
+cc_busy="$PANE"
+sleep 0.4
+
+# A missing function returns 127, which is falsy, so every "must be false" assertion below
+# would PASS for the wrong reason. Assert the seams exist first, or the red is a lie.
+for _fn in pane_is_busy needs_enqueue; do
+  if declare -F "$_fn" >/dev/null 2>&1; then ok "seam $_fn exists"; else no "seam $_fn exists"; fi
+done
+
+if pane_is_busy "$cop_busy"; then ok "a busy pane is read as busy"; else no "a busy pane is read as busy"; fi
+if pane_is_busy "$cop_pane"; then no "an IDLE copilot pane is not read as busy"; else ok "an IDLE copilot pane is not read as busy"; fi
+
+if needs_enqueue "$cop_busy"; then ok "busy copilot -> ctrl+enter enqueue"; else no "busy copilot -> ctrl+enter enqueue"; fi
+if needs_enqueue "$cop_pane"; then no "IDLE copilot -> plain Enter"; else ok "IDLE copilot -> plain Enter"; fi
+if needs_enqueue "$cc_busy"; then no "busy Claude Code -> plain Enter, it queues on its own"; else ok "busy Claude Code -> plain Enter, it queues on its own"; fi
+if needs_enqueue 'no_such_pane_'"$$"; then no "an unreadable pane never gets ctrl+enter"; else ok "an unreadable pane never gets ctrl+enter"; fi
+
+# deliver() must actually SEND the sequence, not merely decide to. Spy on tmux so the assertion
+# is the bytes that leave, which is the thing that was wrong in production.
+printf '\n== deliver sends the ctrl+enter bytes to a busy copilot pane ==\n'
+(
+  sent=""
+  # shellcheck disable=SC2329
+  tmux() { sent="$sent|$*"; command tmux "$@" >/dev/null 2>&1; }
+  deliver "$cop_busy" 'some prose'
+  case "$sent" in
+    *'-H 1b 5b 31 33 3b 35 75'*) ok "busy copilot: deliver sends ESC[13;5u" ;;
+    *) no "busy copilot: deliver sends ESC[13;5u (sent: $sent)" ;;
+  esac
+)
+(
+  sent=""
+  # shellcheck disable=SC2329
+  tmux() { sent="$sent|$*"; command tmux "$@" >/dev/null 2>&1; }
+  deliver "$cop_pane" 'some prose'
+  case "$sent" in
+    *'-H 1b'*) no "IDLE copilot: deliver must NOT send ctrl+enter (sent: $sent)" ;;
+    *Enter*) ok "IDLE copilot: deliver sends a plain Enter" ;;
+    *) no "IDLE copilot: deliver sends a plain Enter (sent: $sent)" ;;
+  esac
+)
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
