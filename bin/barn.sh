@@ -105,6 +105,10 @@ if [ -z "${CLAUDE}" ] || [ ! -x "${CLAUDE}" ]; then
   echo "barn: cannot find an executable claude binary (set MOSSY_CLAUDE)" >&2
   exit 1
 fi
+# The pre-driver-table claude command, kept as the reference the suite compares against:
+# barn.test.sh asserts driver_cmd bitzer still equals it, which is what proves the table
+# left the claude default byte-identical. Sourced by the test, so shellcheck cannot see it.
+# shellcheck disable=SC2034
 CLAUDE_CMD="${CLAUDE} --model opus --dangerously-skip-permissions"
 
 # ---------------------------------------------------------------------------
