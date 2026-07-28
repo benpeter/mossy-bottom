@@ -114,5 +114,57 @@ case_parse "$(printf '%s\n' \
   '  ⏵⏵ bypass permissions on')" 0 "ok 19" \
   "a percent typed into the input box loses to the status line below the rule"
 
+# --- The LIVE path reads the pane TWICE and requires the two to agree. A capture taken
+# while the TUI repaints returns a torn frame, and a torn frame can carry a percent that is
+# not the context: resizing the window produced exactly one such read, "compact 80" against
+# a pane whose footer said 10%, and a spurious compact makes the agent dump its context for
+# nothing. Two agreeing frames are the evidence; disagreement is unavailable, which is the
+# documented fail-safe (skip the check). Exercised with a `tmux` stub on PATH - no pane,
+# no live server. ---
+
+stub_n=0
+
+# live_case <frame1> <frame2> <want-code> <want-out> <label>: a stub tmux that emits frame1
+# on its first capture-pane and frame2 on the second.
+live_case() {
+  local f1="$1" f2="$2" want_code="$3" want_out="$4" label="$5" out code bindir
+  stub_n=$((stub_n + 1))
+  bindir="$tmp_stub/stub$stub_n"
+  mkdir -p "$bindir"
+  printf '%s\n' "$f1" >"$bindir/frame1"
+  printf '%s\n' "$f2" >"$bindir/frame2"
+  cat >"$bindir/tmux" <<'STUB'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+n="$(cat "$d/n" 2>/dev/null || echo 0)"
+n=$((n + 1))
+printf '%s' "$n" >"$d/n"
+if [ "$n" -le 1 ]; then cat "$d/frame1"; else cat "$d/frame2"; fi
+STUB
+  chmod +x "$bindir/tmux"
+  out="$(PATH="$bindir:$PATH" "$cr" --pane %9 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq "$want_code" ] && [ "$out" = "$want_out" ]; then
+    ok "$label"
+  else
+    no "$label (exit $code want $want_code; stdout '$out' want '$want_out')"
+  fi
+}
+
+tmp_stub="$(mktemp -d "${TMPDIR:-/tmp}/context-read-stub-XXXXXX")"
+trap 'rm -rf "$tmp_stub"' EXIT
+
+steady="$(modern_footer '▓░░░░░░░' 10)"
+torn="$(printf '%s\n' '  a half-painted row claiming 80%' '  ⏵⏵ bypass permissions on')"
+
+live_case "$steady" "$steady" 0 "ok 10" \
+  "live: two agreeing frames -> the read stands"
+
+live_case "$torn" "$steady" 64 "" \
+  "live: a torn first frame disagreeing with the settled one -> unavailable, not compact"
+
+live_case "$steady" "$torn" 64 "" \
+  "live: a torn second frame -> unavailable, not a wrong number"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
