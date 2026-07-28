@@ -942,7 +942,9 @@ else
   no "T(a): barn.sh knows about a per-run socket dir"
 fi
 
-sock_plan="$(MOSSY_SESSION=x cmd_up --plan "$k_target" 2>/dev/null | grep -c 'socket')"
+# $k_target is a STATE dir, not a target dir; --plan takes the TARGET. Passing the wrong one
+# made resolve_target bail before printing anything, which read as a missing feature.
+sock_plan="$(MOSSY_SESSION=x cmd_up --plan "$scratchF" 2>/dev/null | grep -c 'socket')"
 if [ "${sock_plan:-0}" -ge 1 ]; then
   ok "T(b): --plan shows the socket dir, so it is previewable"
 else

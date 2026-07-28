@@ -287,6 +287,36 @@ apply_window() {
   HB_WINDOW="${WINDOW}-hb"
 }
 
+# socket_dir <target> - the tmux socket DIRECTORY this run uses, so a run gets its own tmux
+# server instead of sharing one with every other run and every test fixture on the host.
+#
+# Why this exists, measured 2026-07-28: one server backing two live chains sat pegged at 100%
+# CPU. timmy cost 20+ CPU-seconds per classification and 44-75s wall, sends stranded in
+# composers, and the test suite could not finish at all. Given its own TMUX_TMPDIR the same
+# suite ran in 88 seconds.
+#
+# TMUX_TMPDIR and not `tmux -L`: there are 60+ direct tmux invocations across barn, heartbeat,
+# send-verified, stuck-check and timmy. One missed call site would talk to the DEFAULT server,
+# and a chain half on each is worse than the contention it replaces. The env var needs no call
+# site changes at all, and panes inherit it, so anything an agent runs inside a pane lands on
+# the right server for free.
+#
+# SHORT paths are mandatory, not cosmetic: a unix socket path caps near 104 bytes and tmux
+# appends `tmux-<uid>/default` to whatever it is given. A scratchpad-length prefix overflows
+# that, and the failure is three unrelated-looking fixture errors rather than one clear one.
+# Hence /tmp and a truncated slug rather than anything derived from the full target path.
+socket_dir() {
+  local target="${1:-}" slug
+  if [ -n "${MOSSY_TMUX_TMPDIR:-}" ]; then
+    printf '%s' "${MOSSY_TMUX_TMPDIR}"
+    return 0
+  fi
+  # tr -c also rewrites the trailing NEWLINE basename emits, which appended a stray '-' to
+  # every socket path until it was noticed. Strip it first, then sanitise.
+  slug="$(printf '%s' "$(basename "${target:-mossy}")" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-16)"
+  printf '/tmp/mossy-%s-%s' "$(id -u)" "${slug}"
+}
+
 resolve_session() {
   if [ -n "${MOSSY_SESSION:-}" ]; then
     printf '%s' "${MOSSY_SESSION}"
@@ -715,6 +745,7 @@ cmd_up() {
     printf '  env      MOSSY_REPO_DIR=%s  (all three panes)\n' "${REPO_ROOT}"
     printf '  env      GIT_PAGER=cat  (all three panes, #27 pager-safe)\n'
     printf '  panes    %s\n' "${panes_file}"
+    printf '  socket   %s  (TMUX_TMPDIR - this run gets its own tmux server)\n' "$(socket_dir "${target}")"
     printf '  window     %s (primary)\n' "${WINDOW}"
     printf '  heartbeat  window %s (background) -> %s\n' "${HB_WINDOW}" "$(heartbeat_cmd "${state_dir}")"
     if state_authored "${state_dir}"; then
@@ -767,6 +798,16 @@ cmd_up() {
   if [ "${state_dir}" != "${REPO_ROOT}" ]; then
     seed_target_exclude "${target}"
   fi
+
+  # Take this run's own tmux server BEFORE the first tmux call. Everything below, and every
+  # pane spawned, inherits TMUX_TMPDIR, so no call site needs to know about it. Recorded to
+  # .barn-socket because relaunch/heartbeat/stuck-check run later and must find the SAME
+  # server; a run half on one server and half on another is the failure this must not create.
+  TMUX_TMPDIR="$(socket_dir "${target}")"
+  export TMUX_TMPDIR
+  mkdir -p "${TMUX_TMPDIR}"
+  chmod 700 "${TMUX_TMPDIR}" 2>/dev/null || true
+  printf '%s\n' "${TMUX_TMPDIR}" >"${state_dir}/.barn-socket"
 
   local session
   session="$(resolve_session)"
