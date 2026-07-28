@@ -294,7 +294,11 @@ has_question_box() {
         { line[NR] = $0 }
         END {
           for (i = NR; i >= 1; i--) {
-            if (line[i] !~ /enter to submit/) continue
+            # Two modal shapes, and the wording of the confirm half differs between them:
+            # a free-text ask says "enter to submit", a multiple-choice ask says
+            # "enter to confirm". Keying on the CANCEL half plus either confirm word covers
+            # both without loosening into anything a transcript would say.
+            if (line[i] !~ /enter to submit/ && line[i] !~ /enter to confirm/) continue
             if (line[i] !~ /esc to cancel/) continue
             for (j = i + 1; j <= NR; j++) {
               if (line[j] ~ /^[ \t]*\xe2\x95\xb0/) { found = 1; exit }
