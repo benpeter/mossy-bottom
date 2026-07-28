@@ -1064,6 +1064,19 @@ sleep 0.4
 assert_state "$copq_sess" question 30 "copilot QUESTION MODAL classified question, not idle"
 tmux kill-session -t "$copq_sess" 2>/dev/null
 
+# Copilot has a SECOND modal shape and the first fix missed it. Live 2026-07-28 the worker sat
+# blocked on a multiple-choice question reading "enter to CONFIRM", not "enter to submit", and
+# timmy called it idle. Same dangerous direction: idle releases the next slice into an answer
+# field. Anchoring on one modal is anchoring on an accident of that modal.
+copilot_choice_modal='\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x94\x82 Question\n\xe2\x94\x82 Which live surface should issue 6 migrate?\n\xe2\x94\x82 \xe2\x9d\xaf 1. Current landing page\n\xe2\x94\x82   2. Linked detail page\n\xe2\x94\x82   4. Other (type your answer)\n\xe2\x94\x82\n\xe2\x94\x82 \xe2\x86\x91/\xe2\x86\x93 to select \xc2\xb7 enter to confirm \xc2\xb7 esc to cancel\n\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n'
+
+copchoice_sess="timmy_copchoice_$$"
+tmux new-session -d -s "$copchoice_sess" -x 200 -y 50 \
+  "printf ' \xe2\x97\x8b Asking user which live surface\n${copilot_choice_modal}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$copchoice_sess" question 30 "copilot CHOICE modal (enter to confirm) is a question"
+tmux kill-session -t "$copchoice_sess" 2>/dev/null
+
 # Guard, mirroring the busy-cue guard: a transcript that merely QUOTES the affordance, with a
 # real idle box below it, must stay idle. Otherwise the cue fabricates a question from prose.
 copqg_sess="timmy_copqg_$$"
