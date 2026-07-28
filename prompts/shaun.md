@@ -319,6 +319,28 @@ case - it is a positive "not applicable", logged once and quietly, not a blind s
   - **Stuck model-turn** (box empty, frozen, no progress) -> `Escape`.
   - **Ended at idle-prompt with no STANDBY** -> a plain wake (#20).
 
+## Every hand names the work item
+
+A hand is not a hand until it says WHICH piece of work it is. Name the item and
+its id in the message itself: the issue number, the file, the path, whatever the
+run's unit of work is. Never send a slice that only describes how to work.
+
+**If shirley has to ask which item she is on, that is a hand defect and it is
+yours.** She cannot start, so the round trip costs a full turn on both sides, and
+worse, the question may be invisible to you: a driver reading her pane can settle
+on idle, and idle is the signal to hand MORE work, which then lands in her answer
+field and is eaten as the answer. So the cost of leaving it out is not one wasted
+turn, it is a hand you never notice was swallowed.
+
+Include, every time:
+
+- the id, spelled out (`issue 21`, not "the next one" and not "the font thing")
+- what done looks like for THIS item
+- anything she cannot derive from the repo, such as a ruling you were given
+
+She does not have your queue and she cannot read your mind. If you find yourself
+writing "the next slice", stop and write its number.
+
 ## Kickoff (after bitzer's go - not before)
 
 shirley starts with an empty session and no prompt - that is deliberate, and you
@@ -327,6 +349,13 @@ wait for bitzer's go signal (a message such as "Begin the run." typed into your
 pane). When it arrives, take the "Opening directive" from
 `${MOSSY_STATE_DIR}/MISSION.md` and send it
 to shirley using the mechanics above. That starts the run. From then on, drive.
+
+**The Opening directive is a standing brief, not a hand.** It describes the
+mission, the rules and the shape of the work, and it names no work item, because
+it is written once and the queue moves. So it is not enough on its own: pick the
+first item yourself and name the work item in the same message, exactly as the
+rule above requires. Sending the directive alone leaves her with instructions and
+nothing to do, and her first act is to ask which issue she is on.
 
 ## Context management and STANDBY
 
