@@ -238,6 +238,33 @@ has_spinner() {
 # added to remove. The affordance is offered only while a turn can be interrupted, and
 # the idle footer reads "/ commands · ? help · tab next tab", so below the box the phrase
 # means busy and nothing else. The position anchor is what makes keying on it alone safe.
+# has_question_box <snapshot> - Copilot asks through a MODAL, not through a trailing "?".
+# The modal REPLACES the input box, so is_idle_box, has_idle_suffix and both spinner cues are
+# absent by construction and the pane falls through to idle. Live 2026-07-28 that read idle,
+# exit 0, on a worker blocked awaiting an answer, and idle is what tells a driver to hand out
+# the next slice: the slice would have been typed into the answer field and eaten.
+#
+# Anchored on the affordance AND the box bottom that follows it, the same shape as the busy
+# cue. The affordance alone appears in prose; followed by the rounded bottom fence it is a live
+# modal. Both glyphs matched as literal sequences, never a bracket class, because awk matches a
+# bracket expression byte-wise and would catch every other U+2xxx glyph in the pane.
+has_question_box() {
+  printf '%s\n' "$1" \
+    | LC_ALL=C awk '
+        { line[NR] = $0 }
+        END {
+          for (i = NR; i >= 1; i--) {
+            if (line[i] !~ /enter to submit/) continue
+            if (line[i] !~ /esc to cancel/) continue
+            for (j = i + 1; j <= NR; j++) {
+              if (line[j] ~ /^[ \t]*\xe2\x95\xb0/) { found = 1; exit }
+            }
+          }
+        }
+        END { exit(found ? 0 : 1) }
+      '
+}
+
 has_worker_spinner() {
   printf '%s\n' "$1" \
     | LC_ALL=C awk '
@@ -606,10 +633,17 @@ classify_once() {
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
   if ends_in_question "$snap2"; then ends_q="true"; else ends_q="false"; fi
+  if has_question_box "$snap2"; then question_box="true"; else question_box="false"; fi
   sustained="false"  # set true only when the idle_box+differ branch confirms persistent motion
   spinner_frozen="false"  # set true only when the spinner branch confirms a persistent freeze (#25)
 
-  if [ "$idle_suffix" = "true" ]; then
+  if [ "$question_box" = "true" ]; then
+    # A live question modal outranks every other cue and is tested FIRST. The pane cannot make
+    # progress until it is answered, so no other reading is actionable, and the one reading that
+    # must never win is idle: idle tells a driver to hand out the next slice, which would be
+    # typed into the answer field and consumed as the answer.
+    state="question"; code="$EXIT_QUESTION"
+  elif [ "$idle_suffix" = "true" ]; then
     # settled-idle box confirmed by the "← for agents" suffix: beats the spinner, closing
     # the decoy-above-the-box case. A working pane never shows the suffix, so this branch
     # cannot mislabel a working pane idle.
