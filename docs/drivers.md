@@ -146,6 +146,16 @@ silently failed. `bin/send-verified.sh` handles this: it sends the second Enter
 only when the pane speaks Copilot AND the text is a slash command, so a Claude
 Code pane never gets a stray Enter that would start an empty turn.
 
+**Copilot draws TWO different boxes, and the busy one has no caret.** Idle is a
+light `───` fence with a `❯` prompt. While a turn runs it switches to a heavy
+fence, `╻▄▄▄` on top and `╹▀▀▀` on the bottom, and renders no `❯` at all. Any cue
+anchored on the idle shape is therefore unreachable on a busy pane, which is
+exactly when a busy cue matters. That bug shipped here: the interrupt-affordance
+cue was correct and simply never ran, so the verdict fell through to snapshot
+motion and 3 of 8 samples of a working pane read idle. Worse, `stalled` needs a
+spinner present, so a wedged worker could not reach it either and presented as
+idle. Anchor on both fences.
+
 **`/compact` takes no focus string**, so the keep-strings in the role prompts do
 nothing and the role has to re-anchor by hand afterwards.
 
