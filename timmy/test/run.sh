@@ -1088,8 +1088,21 @@ compacting_static="timmy_compact_$$"
 tmux new-session -d -s "$compacting_static" -x 200 -y 50 \
   "printf ' \xe2\x97\x89 Compacting conversation history (89s)\n${copilot_box}'; sleep 600" 2>/dev/null
 sleep 0.4
-assert_state "$compacting_static" busy 10 "a STATIC compacting pane is busy, not idle"
+assert_state "$compacting_static" stalled 40 "a STATIC compacting pane is stalled, never idle"
 tmux kill-session -t "$compacting_static" 2>/dev/null
+
+# The real-world shape: the counter ticks, so the pane advances between snapshots and
+# (the fixture animates every 0.05s, not the real 1s, because the suite compresses
+# TIMMY_INTERVAL to milliseconds - the fixture has to move on the same scaled clock)
+# the verdict is plain busy. Both readings are NON-IDLE, which is the property that protects
+# the hand-off; the split between them is the useful part, because a compaction that never
+# advances is a wedge the driver should recover rather than wait out.
+compacting_anim="timmy_compactа_$$"
+tmux new-session -d -s "$compacting_anim" -x 200 -y 50 \
+  "i=89; while :; do clear; printf ' \xe2\x97\x89 Compacting conversation history (%ss)\n${copilot_box}' \$i; i=\$((i+1)); sleep 0.05; done" 2>/dev/null
+sleep 1.2
+assert_state "$compacting_anim" busy 10 "an ANIMATED compacting pane is busy"
+tmux kill-session -t "$compacting_anim" 2>/dev/null
 
 # The mirror guard, same shape as the other cues: a transcript that merely mentions compaction
 # with a real idle box below it must stay idle, or the cue fabricates busy out of prose.

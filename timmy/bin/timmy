@@ -248,6 +248,33 @@ has_spinner() {
 # cue. The affordance alone appears in prose; followed by the rounded bottom fence it is a live
 # modal. Both glyphs matched as literal sequences, never a bracket class, because awk matches a
 # bracket expression byte-wise and would catch every other U+2xxx glyph in the pane.
+# has_compacting <snapshot> - a pane compacting its history is BUSY, and it says so above the
+# box while rendering the ordinary idle footer below. So every anchored cue is absent and the
+# verdict would fall through to snapshot motion, correct only while the seconds counter ticks.
+# A one-interval repaint pause then reads idle, and idle is what releases the next slice into
+# a pane that is mid-compaction.
+#
+# Anchored ABOVE the last box fence, mirroring has_worker_spinner which anchors below it, so a
+# transcript that merely mentions compaction cannot fire it.
+has_compacting() {
+  printf '%s\n' "$1" \
+    | LC_ALL=C awk '
+        { line[NR] = $0 }
+        END {
+          last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
+          box = 0
+          for (i = last; i >= 1; i--) {
+            if (line[i] ~ /───/ || line[i] ~ /^[ \t]*\xe2\x95\xb9\xe2\x96\x80/) { box = i; break }
+          }
+          if (box == 0) exit 1
+          for (i = box - 1; i >= 1; i--) {
+            if (line[i] ~ /Compacting conversation history/) { found = 1; break }
+          }
+          exit(found ? 0 : 1)
+        }
+      '
+}
+
 has_question_box() {
   printf '%s\n' "$1" \
     | LC_ALL=C awk '
@@ -628,7 +655,7 @@ classify_once() {
   snap2="$(snapshot)" || return 1
 
   if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
-  if has_spinner "$snap2" || has_worker_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+  if has_spinner "$snap2" || has_worker_spinner "$snap2" || has_compacting "$snap2"; then spinner="true"; else spinner="false"; fi
   if has_menu "$snap2"; then menu="true"; else menu="false"; fi
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
