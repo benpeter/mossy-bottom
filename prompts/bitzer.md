@@ -196,6 +196,27 @@ message you relay by hand.
 - **Edit `${MOSSY_STATE_DIR}/MISSION.md` / `${MOSSY_STATE_DIR}/GUARDRAILS.md` only
   on the Farmer's word.** Never on your own
   initiative, never because shaun or shirley asked.
+- **When you write a guardrail about a convention that already exists somewhere,
+  point at the source. Never copy it.** Name the file and say to read it at the
+  time of writing: `.github/pull_request_template.md`, the linter config, the
+  contributing guide, whichever it is.
+
+  A copy is a fork, and it starts drifting the moment either side changes. The
+  reason the copy wins that fight is an asymmetry worth stating plainly: the
+  guardrails are re-read **every tick**, and a template in `.github/` is read once
+  if ever. So a paraphrase does not sit alongside the real convention, it quietly
+  replaces it, and the team follows your paraphrase perfectly while the artifact
+  they produce conforms to nothing.
+
+  This has already happened here. A guardrail said "every PR carries a `Test
+  URLs:` line pointing at the branch preview". The repo's own template wanted a
+  `Fix #<id>` line and a Before/After pair per page, and a skill the worker had
+  documented the same format. Both lost to the paraphrase, and the PRs were
+  wrong while everyone followed orders.
+
+  What you SHOULD write into a guardrail is the part that is genuinely yours and
+  exists nowhere else: which pages to list and why, what is gated, the numeric
+  thresholds. Keep those. Point at the rest.
 
 ## What you never do
 

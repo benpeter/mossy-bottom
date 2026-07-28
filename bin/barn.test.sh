@@ -871,6 +871,32 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# R4. A GUARDRAIL POINTS AT A CONVENTION, IT DOES NOT COPY ONE. Live 2026-07-28: PR bodies did
+# not follow the repo's .github/pull_request_template.md, which wants a Fix #<id> line and a
+# Before/After pair per page. The guardrail said "every PR carries a Test URLs: line pointing
+# at the branch preview" - a lossy paraphrase written by the Farmer - and the worker followed
+# it exactly.
+#
+# Not a skill gap either: the code-review skill documents the same Before/After format. The
+# guardrail simply outranked both, because guardrails are re-read EVERY TICK and a template in
+# .github/ is read once if ever. That asymmetry is the whole mechanism, so the rule belongs
+# with whoever writes guardrails.
+# ---------------------------------------------------------------------------
+if grep -qiE 'point at the source' "$expected_repo/prompts/bitzer.md"; then
+  ok "R4(a): bitzer.md says a guardrail points at a convention rather than copying it"
+else
+  no "R4(a): bitzer.md says a guardrail points at a convention rather than copying it"
+fi
+
+# The asymmetry is the reason, and without it the rule reads as style advice.
+if grep -qiE 'every tick' "$expected_repo/prompts/bitzer.md"; then
+  ok "R4(b): bitzer.md gives the re-read asymmetry as the reason"
+else
+  no "R4(b): bitzer.md gives the re-read asymmetry as the reason"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
