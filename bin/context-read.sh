@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 #
-# context-read.sh - read a tmux pane's Claude "Context: NN%" footer and emit a threshold
-# verdict, the detection primitive for bounding an agent's own context over an indefinite
-# run (Issue #14). It only READS and judges; it never compacts and never sends keys -
-# wiring that into a poll is a later slice.
+# context-read.sh - read the context percent off a tmux pane's Claude status line and emit
+# a threshold verdict, the detection primitive for bounding an agent's own context over an
+# indefinite run (Issue #14). It only READS and judges; it never compacts and never sends
+# keys - wiring that into a poll is a later slice.
 #
 # Two clean parts, the usage-read.sh pattern:
-#   PARSER (launch-free): turn a captured footer into the context percent + a verdict.
+#   PARSER (launch-free): turn a captured status line into the context percent + a verdict.
 #          Pure transform - testable over fixtures via --parse.
 #   READER (live): capture-pane the given pane, then run the parser on it.
 #
-# The footer renders context USED as "Context: NN%" (wide) or "Ctx NN%" (narrow); it
-# climbs toward ~85-90% where Claude auto-compacts UNCURATED. We read it POSITION- and
-# SHAPE-anchored, not by brittle content matching (the timmy #9/#10 lesson):
-#   - POSITION: only the footer region (the bottom few non-blank rows) is considered, and
-#     the BOTTOM-MOST match wins, so a "Context: 99%" sitting in scrollback CONTENT never
-#     beats the real footer - the footer is always the lowest occurrence on screen.
-#   - SHAPE: a context-ish label (Context / Ctx, any case) immediately followed by NN%, so
-#     the read survives the wide/narrow wording split and the decoy "(1M context)" (which
-#     has no trailing percent).
+# The status line renders context USED, and it keeps changing how. It named the context
+# once ("Context: 41%"), then dropped the label for a meter ("▓▓▓░░░░░ 37% 1M"). The
+# percent climbs toward ~85-90% where Claude auto-compacts UNCURATED. Matching the
+# decoration goes blind at the next redesign, and a blind gauge is worse than a loose one,
+# so the read is anchored on POSITION alone: the status region is everything below the
+# bottom-most box-drawing rule (the input box's lower border), and any number followed by
+# % in that region is the context. Content and typed input sit above the rule.
+#
+# The live read takes TWO captures and requires them to agree: a capture during a repaint
+# returns a torn frame, and a torn frame's stray percent would compact an agent for nothing.
 #
 # Verdict: context USED >= threshold -> compact (exit 10); under -> ok (exit 0). On any
 # failure to read a context percent it prints "context unavailable" to stderr and exits
@@ -40,6 +41,10 @@ readonly EXIT_UNAVAIL=64
 # Footer region: how many trailing non-blank rows count as "the footer". The footer is
 # the bottom 2-3 rows; 6 gives margin while still excluding scrollback content above it.
 readonly FOOTER_ROWS=6
+
+# Gap between the two live captures. Long enough that a repaint in flight has finished,
+# short enough that a poll does not notice the wait.
+readonly SETTLE_SECS=0.3
 
 THRESHOLD="${MOSSY_CONTEXT_THRESHOLD:-70}"
 JSON=0
@@ -146,8 +151,23 @@ case "$THRESHOLD" in '' | *[!0-9]*) unavailable "threshold must be an integer 0.
 
 if [ -n "$pane" ]; then
   command -v tmux >/dev/null 2>&1 || { unavailable "tmux not found"; exit "${EXIT_UNAVAIL}"; }
+  # Two frames, and they have to agree. A capture taken while the TUI repaints returns a
+  # torn frame, and a torn frame can carry a percent that is not the context - a resize
+  # produced one reading 80 on a pane whose footer said 10. Acting on that costs the agent
+  # its context for nothing, so disagreement reports unavailable, the same fail-safe as an
+  # unreadable footer. Real growth between two frames this close is rare, and the cost of
+  # it is one skipped check.
   out="$(tmux capture-pane -p -t "$pane" 2>/dev/null)" \
     || { unavailable "capture-pane failed for pane '${pane}'"; exit "${EXIT_UNAVAIL}"; }
+  pct_a="$(printf '%s\n' "$out" | extract_pct)" \
+    || { unavailable "no context percent found in the status region"; exit "${EXIT_UNAVAIL}"; }
+  sleep "${SETTLE_SECS}"
+  out="$(tmux capture-pane -p -t "$pane" 2>/dev/null)" \
+    || { unavailable "capture-pane failed for pane '${pane}'"; exit "${EXIT_UNAVAIL}"; }
+  pct_b="$(printf '%s\n' "$out" | extract_pct)" \
+    || { unavailable "no context percent found in the status region"; exit "${EXIT_UNAVAIL}"; }
+  [ "$pct_a" = "$pct_b" ] \
+    || { unavailable "two captures disagree (${pct_a} then ${pct_b}) - the pane was repainting"; exit "${EXIT_UNAVAIL}"; }
   printf '%s\n' "$out" | parse_and_verdict
   exit $?
 elif [ "$parse" -eq 1 ]; then
