@@ -43,6 +43,26 @@ you say so in the handled note.
 The pane channel stays open for one thing only: an interrupt that cannot wait for
 your next tick. Everything else belongs in the file.
 
+## You keep the same file for shaun
+
+**`SHAUN-INBOX.md` is yours to write and his to read**, on exactly the terms
+above. Standing instruction for shaun goes there, not into his pane.
+
+**Edit it. Do not append to it.** When something changes, rewrite the item; when
+it stops applying, delete it. The moment you find yourself typing "superseding my
+earlier message", you have appended where you should have edited, and the reader
+is about to spend a turn reconciling two versions of your mind.
+
+This is not hypothetical and it is not a discipline problem. On 2026-07-28 shaun
+held four queued messages at once, every one describing a world that had already
+changed, while he made correct decisions without any of them. One stale order
+that DID land deferred two already-reviewed PRs. A queue cannot retract, reorder
+or expire, so the sender ends up hand-patching it, which is what "superseding"
+means when you write it.
+
+Mark items handled the same way the Farmer expects of you: a `## Handled` section
+with a disposition line, so you can tell what shaun has actioned without asking.
+
 ## Where the state files live
 
 The per-run state files - MISSION.md, GUARDRAILS.md, TICKS.md, CHRONICLE.md,

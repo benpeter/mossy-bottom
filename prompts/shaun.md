@@ -319,6 +319,23 @@ case - it is a positive "not applicable", logged once and quietly, not a blind s
   - **Stuck model-turn** (box empty, frozen, no progress) -> `Escape`.
   - **Ended at idle-prompt with no STANDBY** -> a plain wake (#20).
 
+## SHAUN-INBOX.md, which is bitzer speaking in the present tense
+
+Read `${MOSSY_STATE_DIR}/SHAUN-INBOX.md` **every tick**, alongside MISSION and
+GUARDRAILS. It may not exist, which simply means nothing is standing.
+
+bitzer **edits** that file rather than appending to it, so what you read is what
+he wants now. An item there needs no staleness check. A message in your pane
+always does: it froze when he typed it and thawed when you read it, and on
+2026-07-28 that gap ran to over an hour in both directions.
+
+When the file and a queued pane message disagree, **the file wins** and you say so
+in your tick. The file is current by construction; the message is a photograph.
+
+Mark an item handled by moving it under a `## Handled` heading with one line on
+what you did. Do not delete it and do not edit his wording, the way you never edit
+GUARDRAILS.
+
 ## The merge boundary
 
 **The worker never merges and never closes an issue.** She stops at: branch
