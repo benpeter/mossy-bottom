@@ -969,6 +969,50 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# U. THE FARMER INBOX. Pane injection freezes a message at SEND time and delivers it at POP
+# time. On 2026-07-28 that gap reached 66 minutes and a Farmer instruction that was true when
+# written ("shirley is dead, re-send the opening directive") arrived after she was alive and
+# 800 AIC into the next issue. The driver correctly refused it. A separate stale instruction
+# DID land and rerouted the queue, deferring two reviewed PRs.
+#
+# The channel cannot retract, reorder or expire, so both the Farmer and the driver
+# independently invented the same workaround: writing "this supersedes my earlier messages".
+# That is a FIFO being hand-patched, at two layers, by two different agents.
+#
+# A file read every tick has none of those failure modes. A superseded instruction is EDITED
+# rather than queued behind its own correction, and what the reader sees is what the writer
+# currently wants, not what they wanted an hour ago. The state files already work this way,
+# which is why MISSION and GUARDRAILS never had this problem.
+# ---------------------------------------------------------------------------
+if grep -qE 'FARMER-INBOX' "$expected_repo/prompts/bitzer.md"; then
+  ok "U(a): bitzer.md names the inbox file"
+else
+  no "U(a): bitzer.md names the inbox file"
+fi
+
+if awk '/FARMER-INBOX/{f=1} f' "$expected_repo/prompts/bitzer.md" | grep -qiE 'every tick'; then
+  ok "U(b): bitzer.md says to read it every tick"
+else
+  no "U(b): bitzer.md says to read it every tick"
+fi
+
+# The load-bearing property. Without it a driver treats the file as a message log and
+# re-executes items it already did, or distrusts it as possibly stale.
+if grep -qiE 'edits it in place' "$expected_repo/prompts/bitzer.md"; then
+  ok "U(c): bitzer.md says the Farmer edits in place, so the file is always current"
+else
+  no "U(c): bitzer.md says the Farmer edits in place, so the file is always current"
+fi
+
+# Without an ack the Farmer cannot tell a handled item from an unread one, and re-sends.
+if grep -qiE 'mark it handled' "$expected_repo/prompts/bitzer.md"; then
+  ok "U(d): bitzer.md says how to acknowledge an item"
+else
+  no "U(d): bitzer.md says how to acknowledge an item"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
