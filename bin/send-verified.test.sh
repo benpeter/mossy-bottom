@@ -197,28 +197,51 @@ if needs_enqueue 'no_such_pane_'"$$"; then no "an unreadable pane never gets ctr
 
 # deliver() must actually SEND the sequence, not merely decide to. Spy on tmux so the assertion
 # is the bytes that leave, which is the thing that was wrong in production.
+#
+# Two traps this spy has to avoid, both hit on the first attempt. It must PASS THROUGH the
+# stdout of capture-pane, or needs_enqueue reads an empty pane and never fires. And its verdict
+# has to leave the subshell through a file, because ok/no there would increment a counter the
+# parent never sees, which reports 0 failed while printing FAIL.
 printf '\n== deliver sends the ctrl+enter bytes to a busy copilot pane ==\n'
-(
-  sent=""
-  # shellcheck disable=SC2329
-  tmux() { sent="$sent|$*"; command tmux "$@" >/dev/null 2>&1; }
-  deliver "$cop_busy" 'some prose'
-  case "$sent" in
-    *'-H 1b 5b 31 33 3b 35 75'*) ok "busy copilot: deliver sends ESC[13;5u" ;;
-    *) no "busy copilot: deliver sends ESC[13;5u (sent: $sent)" ;;
-  esac
-)
-(
-  sent=""
-  # shellcheck disable=SC2329
-  tmux() { sent="$sent|$*"; command tmux "$@" >/dev/null 2>&1; }
-  deliver "$cop_pane" 'some prose'
-  case "$sent" in
-    *'-H 1b'*) no "IDLE copilot: deliver must NOT send ctrl+enter (sent: $sent)" ;;
-    *Enter*) ok "IDLE copilot: deliver sends a plain Enter" ;;
-    *) no "IDLE copilot: deliver sends a plain Enter (sent: $sent)" ;;
-  esac
-)
+spy_out="$(mktemp)"
+spy_deliver() { # spy_deliver <pane> <text> -> writes the sent args to $spy_out
+  ( : >"$spy_out"
+    # shellcheck disable=SC2329
+    tmux() {
+      case "$1" in send-keys) printf '|%s' "$*" >>"$spy_out" ;; esac
+      command tmux "$@"
+    }
+    deliver "$1" "$2" >/dev/null 2>&1
+  )
+}
+
+spy_deliver "$cop_busy" 'some prose'
+sent="$(cat "$spy_out")"
+case "$sent" in
+  *'-H 1b 5b 31 33 3b 35 75'*) ok "busy copilot: deliver sends ESC[13;5u" ;;
+  *) no "busy copilot: deliver sends ESC[13;5u (sent: $sent)" ;;
+esac
+case "$sent" in
+  *'send-keys -t '*' Enter'*) no "busy copilot: deliver must not ALSO send a plain Enter (sent: $sent)" ;;
+  *) ok "busy copilot: deliver sends no plain Enter" ;;
+esac
+
+spy_deliver "$cop_pane" 'some prose'
+sent="$(cat "$spy_out")"
+case "$sent" in
+  *'-H 1b'*) no "IDLE copilot: deliver must NOT send ctrl+enter (sent: $sent)" ;;
+  *Enter*) ok "IDLE copilot: deliver sends a plain Enter" ;;
+  *) no "IDLE copilot: deliver sends a plain Enter (sent: $sent)" ;;
+esac
+
+spy_deliver "$cc_busy" 'some prose'
+sent="$(cat "$spy_out")"
+case "$sent" in
+  *'-H 1b'*) no "busy Claude Code: deliver must NOT send ctrl+enter (sent: $sent)" ;;
+  *Enter*) ok "busy Claude Code: deliver sends a plain Enter" ;;
+  *) no "busy Claude Code: deliver sends a plain Enter (sent: $sent)" ;;
+esac
+rm -f "$spy_out"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
