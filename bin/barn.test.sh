@@ -837,6 +837,40 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# R3. THE MERGE BOUNDARY. Live 2026-07-28: the worker cleared the PSI gate on a PR, ran
+# 'gh pr merge --squash' herself, and the merge auto-closed the issue. shaun escalated it as
+# an ambiguity rather than deciding, and he was right that it was ambiguous: the role files
+# say 'bitzer is the sole pusher' and say nothing at all about who MERGES.
+#
+# That framing predates PR workflows. In a run that uses PRs a merge writes main, which looks
+# like a push, while closing an issue is the driver's close-and-spawn step. Undefined at the
+# boundary, so every run rediscovers it. The rule belongs in the role file.
+# ---------------------------------------------------------------------------
+# Not a bare grep for "merge": shaun.md already contains git merge-base, so that passes on a
+# substring and proves nothing. Assert the worker's STOPPING POINT is stated.
+if grep -qiE 'stops at' "$expected_repo/prompts/shaun.md"; then
+  ok "R3(a): shaun.md states where the worker stops"
+else
+  no "R3(a): shaun.md states where the worker stops"
+fi
+
+if grep -qiE 'the worker never merges' "$expected_repo/prompts/shaun.md"; then
+  ok "R3(b): shaun.md puts merge above the worker"
+else
+  no "R3(b): shaun.md puts merge above the worker"
+fi
+
+# The REASON is the load-bearing part. A gate is a threshold and cannot read the issue, so a
+# self-merge makes the gate the whole verification. Without the why, the rule reads as
+# bureaucracy and the next driver relaxes it.
+if grep -qiE 'cannot read the issue' "$expected_repo/prompts/shaun.md"; then
+  ok "R3(c): shaun.md gives the reason, not just the rule"
+else
+  no "R3(c): shaun.md gives the reason, not just the rule"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
