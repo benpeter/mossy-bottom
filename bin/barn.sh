@@ -371,19 +371,62 @@ pane_cwds() {
 # profile auto-sources the file, putting the tokens in env for every descendant). Names
 # only - values are never read past the '='. Absent or empty file = empty prefix, leaving
 # the launch commands byte-identical to the unscrubbed form.
-secrets_scrub_prefix() {
+secrets_scrub_flags() {
   local f="${MOSSY_SECRETS_FILE:-${HOME}/.secrets}" names n out=""
   [ -f "${f}" ] || return 0
   names="$(LC_ALL=C sed -n -E 's/^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "${f}" | sort -u)"
   [ -n "${names}" ] || return 0
-  out="env"
   for n in ${names}; do out="${out} -u ${n}"; done
-  printf '%s ' "${out}"
+  printf '%s ' "${out# }"
 }
 
+secrets_scrub_prefix() {
+  local flags
+  flags="$(secrets_scrub_flags)"
+  [ -n "${flags}" ] || return 0
+  printf 'env %s' "${flags}"
+}
+
+# CHILD_SESSION_VAR - the marker Claude Code sets on a session it spawned. The Farmer boots
+# and relaunches the chain THROUGH a Claude session, so the marker reaches the tmux server
+# environment and every pane's claude inherits it. A pane that inherits it runs with
+# transcript saving OFF, and the run leaves no session log to audit afterwards. Observed
+# live: a relaunched pane came up with "Transcript saving is off - inherited
+# CLAUDE_CODE_CHILD_SESSION marker". The pane launch drops it unconditionally - the leak
+# does not depend on the secrets file, so it is not scrubbed by name from one.
+readonly CHILD_SESSION_VAR="CLAUDE_CODE_CHILD_SESSION"
+
 launch_cmd() {
-  printf "%sMOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" \
-    "$(secrets_scrub_prefix)" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
+  printf "env -u %s %sMOSSY_STATE_DIR='%s' MOSSY_REPO_DIR='%s' GIT_PAGER=cat %s" \
+    "${CHILD_SESSION_VAR}" "$(secrets_scrub_flags)" "$1" "${REPO_ROOT}" "${CLAUDE_CMD}"
+}
+
+# window_size - the COLSxROWS the primary window is sized to. A detached tmux window is 80
+# columns, so a three-pane split leaves each role 26 and the TUI wraps its footer. Two
+# things read that footer: boot_pane greps it for the marker that says a pane reached its
+# input box, and context-read.sh takes the context percent off it. A wrapped or truncated
+# footer breaks both. 420 columns gives each pane ~139, past where the footer wraps.
+# Override with MOSSY_WINDOW_SIZE. (Taken from the mossy-copilot fork, which hit this on
+# its first launch; this run hit the truncation half of it at 82 columns per pane.)
+window_size() {
+  printf '%s' "${MOSSY_WINDOW_SIZE:-420x55}"
+}
+
+# size_window <target> - widen the window to window_size and PIN it. The target is anything
+# tmux resolves to a window: "session:window", or a pane id, which resolves to the window
+# holding it (relaunch knows the pane, not the session). tmux fits a window to its clients
+# unless pinned, so attaching a laptop after a monitor would squeeze the panes back under
+# the width where the footer wraps; resize-window sets window-size to manual, which holds
+# the size against any client. Best effort: an old tmux without resize-window, or a window
+# that vanished, is not a launch failure - sizing is a launch comfort, never a launch gate,
+# so this always returns 0. Idempotent, so a caller can re-assert it on a cadence.
+size_window() {
+  local target="$1" size cols rows
+  size="$(window_size)"
+  cols="${size%x*}"
+  rows="${size#*x}"
+  tmux resize-window -t "${target}" -x "${cols}" -y "${rows}" >/dev/null 2>&1 || true
+  return 0
 }
 
 # heartbeat_cmd <state_dir> - the bin/heartbeat.sh command for the background heartbeat
@@ -598,6 +641,9 @@ cmd_up() {
   local launch bitzer shaun shirley
   launch="$(launch_cmd "${state_dir}")"
   bitzer="$(tmux new-window -d -t "${session}" -n "${WINDOW}" -c "${bitzer_cwd}" -PF '#{pane_id}' "${launch}")"
+  # Size before the splits and the layout, so even-horizontal divides the full width and
+  # every pane starts wide enough that its footer never wraps.
+  size_window "${session}:${WINDOW}"
   shaun="$(tmux split-window -d -t "${bitzer}" -c "${shaun_cwd}" -PF '#{pane_id}' "${launch}")"
   shirley="$(tmux split-window -d -t "${shaun}" -c "${shirley_cwd}" -PF '#{pane_id}' "${launch}")"
 
@@ -737,6 +783,10 @@ cmd_relaunch() {
   id="$(pane_id_for "${role}" "${panes_file}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }
 
+  # Re-assert the window size first: boot_pane below greps the respawned pane's footer, so
+  # a window a client has since squeezed would make a healthy pane look like it never
+  # reached its input box. Idempotent, and never a launch gate.
+  size_window "${id}"
   tmux respawn-pane -k -t "${id}" -c "${dir}" "$(launch_cmd "${state_dir}")"
   boot_pane "${id}" "${role}" || true
   # Pre-role-prompt injection (#18.3 global + #24 per-role): same seam as up, for the one

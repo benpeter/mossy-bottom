@@ -10,8 +10,19 @@ here="$(cd "$(dirname "$0")" && pwd)"
 barn="$here/barn.sh"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/barn-test-XXXXXX")"
+
+# The tmux-backed cases get their OWN tmux server. Pointing TMUX_TMPDIR at a private
+# directory gives every bare `tmux` here a server of its own, so the suite cannot see, size,
+# or kill a window in a live run - and a live server under load cannot make the suite hang
+# waiting on it, which is what happened when it shared the Farmer's server. The directory
+# is short on purpose: a unix socket path is capped near 104 characters, and a long one
+# leaves tmux unable to start at all, failing every live case with "could not stand up a
+# throwaway session".
+tmux_srv="$(mktemp -d "/tmp/barn-tmux-XXXXXX")"
+export TMUX_TMPDIR="$tmux_srv"
+
 hb_sess="" # the heartbeat-window cases stand up one throwaway tmux session; reaped on exit
-trap '[ -n "$hb_sess" ] && tmux kill-session -t "$hb_sess" 2>/dev/null; rm -rf "$tmp"' EXIT
+trap '[ -n "$hb_sess" ] && tmux kill-session -t "$hb_sess" 2>/dev/null; tmux kill-server 2>/dev/null; rm -rf "$tmp" "$tmux_srv"' EXIT
 
 # barn.sh requires an executable claude at LOAD time (it resolves MOSSY_CLAUDE/PATH and
 # aborts if none). We never launch it - point it at a stub so sourcing succeeds without a
@@ -186,10 +197,10 @@ k_dogfood="$expected_repo"   # the dogfood state dir (the repo root itself)
 # and target-mode share the function, so both carry it.
 chk_eq "K(a): launch_cmd (target) byte-exact with GIT_PAGER=cat" \
   "$(launch_cmd "$k_target")" \
-  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+  "env -u CLAUDE_CODE_CHILD_SESSION MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
 chk_eq "K(a): launch_cmd (dogfood) byte-exact with GIT_PAGER=cat" \
   "$(launch_cmd "$k_dogfood")" \
-  "MOSSY_STATE_DIR='$k_dogfood' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+  "env -u CLAUDE_CODE_CHILD_SESSION MOSSY_STATE_DIR='$k_dogfood' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
 
 # (b) the heartbeat command guards itself (it bypasses launch_cmd) - byte-exact prefix.
 chk_eq "K(b): heartbeat_cmd byte-exact with GIT_PAGER=cat" \
@@ -564,7 +575,7 @@ EOF
 n_launch="$(MOSSY_SECRETS_FILE="$n_secrets" launch_cmd "$k_target")"
 chk_eq "N(a): launch_cmd scrubs every secrets var by name" \
   "$n_launch" \
-  "env -u BAR_KEY -u FOO_TOKEN -u PLAIN_VAR MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+  "env -u CLAUDE_CODE_CHILD_SESSION -u BAR_KEY -u FOO_TOKEN -u PLAIN_VAR MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
 
 n_hb="$(MOSSY_SECRETS_FILE="$n_secrets" heartbeat_cmd "$k_target")"
 chk_eq "N(b): heartbeat_cmd scrubs the same names" \
@@ -577,9 +588,105 @@ else
   ok "N(c): no secret VALUE ever appears in a launch command"
 fi
 
-chk_eq "N(d): absent secrets file leaves launch_cmd byte-identical (no env prefix)" \
+# An absent secrets file adds no NAME to the prefix. Section O covers what the prefix
+# still carries in that case: the child-session marker, which does not come from the
+# secrets file and is dropped either way.
+chk_eq "N(d): absent secrets file contributes no secrets name to the prefix" \
   "$(MOSSY_SECRETS_FILE=/nonexistent-nope launch_cmd "$k_target")" \
-  "MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+  "env -u CLAUDE_CODE_CHILD_SESSION MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+
+# ============================================================================
+# O: the child-session marker (run 4). The Farmer boots and relaunches the chain THROUGH a
+# Claude session, so CLAUDE_CODE_CHILD_SESSION=1 reaches the tmux server environment and
+# every pane claude inherits it. A pane that inherits it runs with transcript saving OFF -
+# the run leaves no session log to audit. Observed live: a relaunched shaun came up with
+# "Transcript saving is off - inherited CLAUDE_CODE_CHILD_SESSION marker".
+#
+# The pane launch drops the marker, and it does so unconditionally: the secrets file may be
+# absent, but the marker leak does not depend on it. The heartbeat is a tmux+sleep loop
+# with no claude in it, so it is left alone.
+# ============================================================================
+o_launch="$(MOSSY_SECRETS_FILE=/nonexistent-nope launch_cmd "$k_target")"
+chk_eq "O(a): launch_cmd drops the child-session marker even with no secrets file" \
+  "$o_launch" \
+  "env -u CLAUDE_CODE_CHILD_SESSION MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+
+chk_eq "O(b): the marker and the secrets names scrub together, one env prefix" \
+  "$(MOSSY_SECRETS_FILE="$n_secrets" launch_cmd "$k_target")" \
+  "env -u CLAUDE_CODE_CHILD_SESSION -u BAR_KEY -u FOO_TOKEN -u PLAIN_VAR MOSSY_STATE_DIR='$k_target' MOSSY_REPO_DIR='$expected_repo' GIT_PAGER=cat $CLAUDE_CMD"
+
+# ============================================================================
+# P: window size (ported from the mossy-copilot fork, which hit this on its first real
+# launch). A detached tmux window is 80 columns, so a three-pane split leaves each role 26
+# and the TUI wraps its footer. Two things read that footer: boot_pane greps it for the
+# marker that says a pane reached its input box, and context-read.sh takes the percent off
+# it. A wrapped or truncated footer breaks both, and this run watched exactly that - panes
+# 82 columns wide, footers ending in a truncation ellipsis. barn sizes the window itself
+# rather than depending on a human attaching a wide enough client.
+# ============================================================================
+chk_eq "P(a): default window size is wide enough for three panes" "$(window_size)" "420x55"
+chk_eq "P(b): MOSSY_WINDOW_SIZE overrides it" "$(MOSSY_WINDOW_SIZE=300x40 window_size)" "300x40"
+
+p_sess="barn_t_size_$$"
+tmux new-session -d -s "$p_sess" -x 80 -y 24 -n w 'sleep 600' 2>/dev/null
+if tmux has-session -t "$p_sess" 2>/dev/null; then
+  size_window "$p_sess:w"
+  p_w="$(tmux display-message -p -t "$p_sess:w" '#{window_width}')"
+  if [ "${p_w:-0}" -ge 400 ]; then
+    ok "P(c): size_window widens a detached 80-column window (got ${p_w})"
+  else
+    no "P(c): size_window widens a detached 80-column window (got ${p_w})"
+  fi
+  p_pw="$(tmux display-message -p -t "$p_sess:w" '#{pane_width}')"
+  if [ "${p_pw:-0}" -ge 400 ]; then
+    ok "P(d): the single pane inherits the width (got ${p_pw})"
+  else
+    no "P(d): the single pane inherits the width (got ${p_pw})"
+  fi
+  tmux kill-session -t "$p_sess" 2>/dev/null
+else
+  no "P(c): could not stand up a throwaway tmux session"
+fi
+
+if size_window "no_such_session_$$:nope"; then
+  ok "P(e): size_window returns 0 on a missing window (never blocks a launch)"
+else
+  no "P(e): size_window returns 0 on a missing window (never blocks a launch)"
+fi
+
+# ============================================================================
+# Q: the size has to SURVIVE. tmux fits a window to its clients unless the window is
+# pinned, so attaching a laptop after a monitor squeezes the panes back under the width
+# where the footer wraps. size_window pins window-size to manual, and re-asserting is
+# idempotent so a caller can do it on a cadence.
+# ============================================================================
+q_sess="barn_t_pin_$$"
+tmux new-session -d -s "$q_sess" -x 80 -y 24 -n w 'sleep 600' 2>/dev/null
+if tmux has-session -t "$q_sess" 2>/dev/null; then
+  size_window "$q_sess:w"
+  chk_eq "Q(a): size_window pins the window so clients cannot resize it" \
+    "$(tmux show-options -w -t "$q_sess:w" window-size | awk '{print $2}')" "manual"
+
+  # A second client of a DIFFERENT size is what a monitor hotplug looks like to tmux.
+  tmux new-session -d -s "${q_sess}b" -t "$q_sess" -x 100 -y 30 2>/dev/null
+  q_w="$(tmux display-message -p -t "$q_sess:w" '#{window_width}')"
+  if [ "${q_w:-0}" -ge 400 ]; then
+    ok "Q(b): a smaller client attaching does NOT shrink the window (got ${q_w})"
+  else
+    no "Q(b): a smaller client attaching does NOT shrink the window (got ${q_w})"
+  fi
+  tmux kill-session -t "${q_sess}b" 2>/dev/null
+
+  size_window "$q_sess:w"
+  size_window "$q_sess:w"
+  chk_eq "Q(c): re-asserting is idempotent (size)" \
+    "$(tmux display-message -p -t "$q_sess:w" '#{window_width}x#{window_height}')" "$(window_size)"
+  chk_eq "Q(c): re-asserting is idempotent (still pinned)" \
+    "$(tmux show-options -w -t "$q_sess:w" window-size | awk '{print $2}')" "manual"
+  tmux kill-session -t "$q_sess" 2>/dev/null
+else
+  no "Q(a): could not stand up a throwaway tmux session"
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
