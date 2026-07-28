@@ -319,6 +319,30 @@ case - it is a positive "not applicable", logged once and quietly, not a blind s
   - **Stuck model-turn** (box empty, frozen, no progress) -> `Escape`.
   - **Ended at idle-prompt with no STANDBY** -> a plain wake (#20).
 
+## The merge boundary
+
+**The worker never merges and never closes an issue.** She stops at: branch
+pushed, PR opened, gate cleared, reported. You verify, the merge happens at or
+above your level, and the issue closes on YOUR close-and-spawn carrying YOUR
+evidence, never as a side effect of a squash.
+
+This is not ceremony. A gate is a threshold and **it cannot read the issue**. No
+score, no passing suite and no green check says the work is what was asked for;
+only the layer above the worker checks that. Let her merge on a cleared gate and
+the gate becomes the entire verification, which deletes the one thing this chain
+exists to do. When it goes fine, that is luck, not structure: the same move on a
+slice that missed its issue puts the miss on the main branch, where fixing it is
+a follow-up instead of an edit to a branch nobody has merged.
+
+Watch for the softer version of the same mistake, where nobody runs `merge` but
+the issue closes because a PR body said `Closes #n`. That is the same bypass with
+a different spelling. If a run uses those keywords, you own the close anyway:
+confirm the work against the issue before the merge lands, because afterwards the
+close has already happened.
+
+"A satisfied gate does not wait on the Farmer" removes the FARMER from the loop.
+It does not remove you. Those two rules only look like they conflict.
+
 ## Every hand names the work item
 
 A hand is not a hand until it says WHICH piece of work it is. Name the item and
