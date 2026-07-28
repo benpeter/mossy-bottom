@@ -251,6 +251,16 @@ has_worker_spinner() {
             j = i - 1; while (j >= 1 && line[j] ~ /^[ \t]*$/) j--
             if (j >= 1 && line[j] ~ /───/) { box = i; break }
           }
+          # Copilot draws a DIFFERENT box while a turn is running: a heavy fence, and NO
+          # caret at all. So the idle-shape anchor above can never match on a busy pane,
+          # which is precisely when this cue matters. Fall back to the heavy bottom fence.
+          # Matched as a LITERAL two-glyph sequence, never a bracket class: awk matches a
+          # bracket expression byte-wise and would catch every other U+2xxx glyph in the pane.
+          if (box == 0) {
+            for (i = last; i >= 1; i--) {
+              if (line[i] ~ /^[ \t]*\xe2\x95\xb9\xe2\x96\x80/) { box = i; break }
+            }
+          }
           if (box == 0) exit
           for (i = box + 1; i <= last; i++) print line[i]
         }' \
