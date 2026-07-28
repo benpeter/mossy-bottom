@@ -1104,6 +1104,18 @@ sleep 1.2
 assert_state "$compacting_anim" busy 10 "an ANIMATED compacting pane is busy"
 tmux kill-session -t "$compacting_anim" 2>/dev/null
 
+# THE GUARD THAT MATTERED, and the first version of it was too weak. It used lowercase
+# "compacting" inside a sentence, so it never exercised the real string. Live 2026-07-28 the
+# cue fired on Copilot's OWN completed-compaction line, which reads EXACTLY the same as the
+# live indicator, and reported a healthy idle worker as stalled. Reproduce that capture: the
+# compaction line sits in the transcript with later content BELOW it and an idle box beneath.
+compacting_hist="timmy_compacth_$$"
+tmux new-session -d -s "$compacting_hist" -x 200 -y 50 \
+  "printf ' \xe2\x97\x89 Compacting conversation history (12s)\n \xe2\x97\x8f Compaction completed.\n \xe2\x97\x8f No merge, publish, or issue closure was performed.\n /repo                                          Session: 15.1 AIC used\n${copilot_box}'; sleep 600" 2>/dev/null
+sleep 0.4
+assert_state "$compacting_hist" idle 0 "a COMPLETED compaction in the transcript stays idle"
+tmux kill-session -t "$compacting_hist" 2>/dev/null
+
 # The mirror guard, same shape as the other cues: a transcript that merely mentions compaction
 # with a real idle box below it must stay idle, or the cue fabricates busy out of prose.
 compacting_guard="timmy_compactg_$$"
