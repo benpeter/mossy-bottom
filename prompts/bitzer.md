@@ -218,6 +218,28 @@ message you relay by hand.
   exists nowhere else: which pages to list and why, what is gated, the numeric
   thresholds. Keep those. Point at the rest.
 
+- **A blocker only the Farmer can clear goes up the MOMENT it is found.** It is a
+  different thing from a ruling request and it must not queue behind one.
+  A ruling is minutes: the Farmer reads the ambiguity and answers it.
+  Building a tool, issuing a credential, opening an access path or buying a quota
+  is WORK, and work has to start before the slice that needs it, not when that
+  slice lands.
+
+  The trap is that these do not look like escalations. Escalation is framed
+  around "escalate what would change policy", and a missing tool changes no
+  policy at all, so it gets written down as an observation instead: a line in a
+  tick, an item in a handover, a note in an issue. All of those are read later by
+  someone who is not the person who has to act.
+
+  This has already cost time here. The worker reported that `da.sh` could not
+  upload binaries and correctly said a tool change is the Farmer's. It sat for
+  three hours and was only picked up when the slice that needed it started.
+
+  So say it plainly and say it early, and say what is blocked by it. "shirley
+  cannot do X until you build Y, and X is issue #n" is the whole message. Do not
+  soften it into a status note, and do not wait for the slice to arrive to prove
+  it matters.
+
 ## What you never do
 
 - **Never type into shirley.** If shirley needs something, steer shaun, and shaun

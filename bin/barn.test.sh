@@ -897,6 +897,30 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# R5. A BLOCKER ONLY THE FARMER CAN CLEAR IS NOT A RULING REQUEST. Live 2026-07-28: the worker
+# found that da.sh could not upload binaries, which blocked an issue, and correctly reported
+# that a tool change is the Farmer's. It changed no policy, so it did not qualify as an
+# escalation under "escalate only if the answer would change policy". It went into a tick and
+# then a handover note, and sat for three hours until the slice that needed it started.
+#
+# The two kinds have different latency and that is the whole point. A ruling is minutes: the
+# Farmer reads and answers. Building a tool, getting a credential or opening an access path is
+# work, and work has to start EARLIER than the slice that needs it, not when it lands.
+# ---------------------------------------------------------------------------
+if grep -qiE 'only the Farmer can clear' "$expected_repo/prompts/bitzer.md"; then
+  ok "R5(a): bitzer.md names the Farmer-must-build category"
+else
+  no "R5(a): bitzer.md names the Farmer-must-build category"
+fi
+
+if grep -qiE 'a ruling is minutes' "$expected_repo/prompts/bitzer.md"; then
+  ok "R5(b): bitzer.md gives the latency reason for surfacing it early"
+else
+  no "R5(b): bitzer.md gives the latency reason for surfacing it early"
+fi
+
+
+# ---------------------------------------------------------------------------
 # S. The driver's OWN dialect. bitzer.md and shaun.md carry Claude Code machinery in the
 # middle of their procedure: '/compact <keep-string>' with a focus string, and a
 # 'Context: N%' meter driving the STANDBY threshold. Copilot has neither. Its /compact takes
