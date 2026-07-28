@@ -1011,5 +1011,40 @@ assert_state "$mfs_sess" idle 0 \
 
 tmux kill-session -t "$mfs_sess" 2>/dev/null
 
+
+# --- fixture: a BUSY Copilot pane, captured byte-for-byte from a live worker mid-turn.
+# Copilot draws a DIFFERENT box while a turn is running: a heavy fence, U+257B/U+2584 on
+# top and U+2579/U+2580 on the bottom, with NO ❯ caret at all. has_worker_spinner anchored
+# on the idle shape (a ❯ line with a ─── rule above it), so on a busy pane the anchor never
+# matched, the function returned before reading the cue, and the verdict fell through to
+# whether two snapshots happened to differ. Measured live: 3 of 8 samples of a demonstrably
+# working pane came back idle.
+#
+# Two consequences, and the second is the expensive one. Idle is the driver's signal to hand
+# the next slice, so a busy worker reading idle means typing into a live turn. And `stalled`
+# requires a spinner to be present, so with the cue unreachable a genuinely WEDGED worker
+# also reads idle and never triggers recovery. ---
+cop_busy_box='\xe2\x95\xbb\xe2\x96\x84\xe2\x96\x84\xe2\x96\x84\xe2\x96\x84\xe2\x96\x84\xe2\x96\x84\n\xe2\x94\x83\n\xe2\x95\xb9\xe2\x96\x80\xe2\x96\x80\xe2\x96\x80\xe2\x96\x80\xe2\x96\x80\xe2\x96\x80\n'
+
+copbusy_sess="timmy_t_copbusy_$$"
+tmux new-session -d -s "$copbusy_sess" -x 100 -y 24 \
+  "printf ' \xe2\x97\x8f I am building the hero block.\n /repo [branch]                                 Session: 19.6 AIC used\n${cop_busy_box} \xe2\x97\x89 Capturing hero reference \xc2\xb7 19.6 KiB esc interrupt\n'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$copbusy_sess" stalled 40 "copilot BUSY box (heavy fence, no caret) is never idle"
+
+tmux kill-session -t "$copbusy_sess" 2>/dev/null
+
+# --- guard: the heavy fence must not fabricate a busy verdict when the footer is the IDLE
+# one. Same box shape, key-hint footer instead of the interrupt affordance. ---
+copbusyg_sess="timmy_t_copbusyg_$$"
+tmux new-session -d -s "$copbusyg_sess" -x 100 -y 24 \
+  "printf ' \xe2\x97\x8f All done.\n${cop_busy_box} / commands \xc2\xb7 ? help \xc2\xb7 tab next tab                    GPT-5.6 Sol\n'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$copbusyg_sess" idle 0 "heavy fence with an IDLE footer stays idle"
+
+tmux kill-session -t "$copbusyg_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
