@@ -58,9 +58,24 @@ shape-anchored to the footer region, and prints a verdict. Exit 0 = ok (under th
 EOF
 }
 
-# extract_pct - read pane/footer text on stdin, print the footer context percent (0..100).
-# Position-anchored to the last FOOTER_ROWS non-blank rows; shape-anchored to a Context/Ctx
-# label immediately followed by NN%; takes the BOTTOM-MOST match so footer beats content.
+# extract_pct - read pane/footer text on stdin, print the status line's context percent
+# (0..100). POSITION does all the work here, and deliberately so: the status line keeps
+# changing shape. It named the context once ("Context: 41%"), then dropped the label for a
+# meter ("▓▓▓░░░░░ 37% 1M"), and it will change again. Matching the decoration means going
+# blind at the next redesign, and a blind gauge is worse than a loose one - bitzer's wiring
+# treats an unavailable reading as "skip", so a missed footer silently disables its
+# self-compact. So: find the status region, then take ANY number followed by % in it.
+#
+# The status region is everything BELOW the last box-drawing rule on screen. That rule is
+# the bottom border of the input box, so the region holds only the rows the TUI paints
+# about itself - model, cwd, branch, the context meter, permissions, warnings. Content the
+# agent printed, and anything the Farmer typed into the input box, sit above the rule and
+# cannot be read as context. A percent lower on screen wins, matching the older
+# bottom-most rule.
+#
+# With no rule on screen (an older footer, or a fixture) it falls back to the last
+# FOOTER_ROWS non-blank rows. That fallback is looser: it can see content rows, so a bare
+# percent up there could be misread. Every real pane paints the rule.
 extract_pct() {
   awk -v FR="${FOOTER_ROWS}" '
     { line[NR] = $0 }
@@ -68,10 +83,17 @@ extract_pct() {
       last = NR
       while (last > 0 && line[last] ~ /^[ \t]*$/) last--
       if (last == 0) exit 1
-      lo = last - (FR - 1); if (lo < 1) lo = 1
+
+      # The status region starts below the bottom-most box-drawing rule.
+      lo = 0
+      for (i = last; i >= 1; i--) {
+        if (line[i] ~ /^[ \t]*[─━═]{4,}/) { lo = i + 1; break }
+      }
+      if (lo == 0 || lo > last) { lo = last - (FR - 1); if (lo < 1) lo = 1 }
+
       pct = -1
       for (i = lo; i <= last; i++) {
-        if (match(line[i], /[Cc][Oo]?[Nn]?[Tt][Ee]?[Xx][Tt]?[: ]*[0-9]+%/)) {
+        if (match(line[i], /[0-9]+%/)) {
           seg = substr(line[i], RSTART, RLENGTH)
           if (match(seg, /[0-9]+/)) pct = substr(seg, RSTART, RLENGTH) + 0
         }

@@ -85,10 +85,34 @@ case_parse "$(printf '%s\n' '  Claude Opus 5 (1M context)' '  ⏵⏵ bypass perm
 
 case_parse "" 64 "" "empty input -> unavailable"
 
-# A percent in the footer region that belongs to something else (a usage line) must not be
-# read as context: only a labelled context percent or a bar-anchored percent counts.
-case_parse "$(printf '%s\n' '  usage: 5h 6% · weekly 51%' '  ⏵⏵ bypass permissions on')" \
-  64 "" "a bare percent with no label and no bar -> unavailable, not a context read"
+# --- The status line keeps changing shape, so the read is anchored on POSITION, not on
+# the decoration. Any number followed by % below the input box's rule is the context. ---
+
+case_parse "$(printf '%s\n' \
+  '──────────────────────────────────────────────────────────────────' \
+  '  Opus 5   ~/dev/adobe   main   44% 1M' \
+  '  ⏵⏵ bypass permissions on')" 0 "ok 44" \
+  "a future status line, percent with no bar and no label -> read as context"
+
+# A warning row can sit between the rule and the model row (an inherited-marker warning
+# does). It carries no percent, and must not shadow the row that does.
+case_parse "$(printf '%s\n' \
+  '──────────────────────────────────────────────────────────────────' \
+  '  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · resta…' \
+  "  Opus 5   ~/dev/adobe   main   ▓▓▓▓░░░░ 48% 1M" \
+  '  ⏵⏵ bypass permissions on')" 0 "ok 48" \
+  "a warning row above the status row does not shadow the percent"
+
+# What the Farmer types into the input box sits ABOVE the rule, so a percent in it is never
+# read as context. This is the whole reason the region is rule-anchored and not "last N
+# rows": a pasted directive mentioning "51%" must not gauge the pane.
+case_parse "$(printf '%s\n' \
+  '──────────────────────────────────────────────────────────────────' \
+  '❯ usage is 5h 6% and weekly 51%, keep going' \
+  '──────────────────────────────────────────────────────────────────' \
+  "  Opus 5   ~/dev/adobe   main   ▓▓░░░░░░ 19% 1M" \
+  '  ⏵⏵ bypass permissions on')" 0 "ok 19" \
+  "a percent typed into the input box loses to the status line below the rule"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
