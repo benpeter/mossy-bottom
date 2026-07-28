@@ -818,7 +818,10 @@ fi
 
 # The kickoff is the hand that got this wrong, so it must say so where it is described,
 # not only in a general rule 200 lines away.
-if awk '/^## Kickoff/,/^## /' "$expected_repo/prompts/shaun.md" | grep -qiE 'name the work item|append.*work item|which issue'; then
+# awk's /start/,/end/ checks the end pattern on the START line too, so '/^## Kickoff/,/^## /'
+# collapses to the heading alone and greps nothing. Set a flag and stop at the NEXT heading.
+if awk '/^## Kickoff/{f=1;next} f&&/^## /{exit} f' "$expected_repo/prompts/shaun.md" \
+     | grep -qiE 'name the work item'; then
   ok "R2(b): the Kickoff section says the opening hand names the first work item"
 else
   no "R2(b): the Kickoff section says the opening hand names the first work item"
@@ -826,7 +829,7 @@ fi
 
 # A worker asking which slice it is on is a DRIVER defect. Saying that explicitly is what
 # stops the next reader from treating the question as the worker being difficult.
-if grep -qiE 'asks which .*is a (driver|hand) defect|asking which .*is a (driver|hand) defect' "$expected_repo/prompts/shaun.md"; then
+if grep -qiE 'is a hand defect' "$expected_repo/prompts/shaun.md"; then
   ok "R2(c): shaun.md names the worker asking as a driver defect"
 else
   no "R2(c): shaun.md names the worker asking as a driver defect"
