@@ -307,6 +307,86 @@ age="$(activity_age "$tmp/nope.jsonl" "$tmp/nope.state")"
 if [ "$age" -ge 0 ]; then ok "unresolvable signals yield a numeric age ($age), never an error"; else no "unresolvable signals yielded '$age'"; fi
 
 # ============================================================================
+# resolve_session <projects> <cwd> <role> <state-file> - which transcript belongs to a role?
+#
+# The registered session id is preferred and costs one read. It is not always there: the WORKER
+# calls none of the harness tools (she hands back with a raw tmux send-keys), so nothing records
+# her id, and she is the one whose hands were being duplicated. So there has to be a fallback.
+#
+# The fallback is a bounded sweep, and two measured traps shape it. Cross-contamination: a whole
+# file grep for 'You are shaun, the driver' also hits bitzer's transcript and shirley's, because
+# shaun reads the prompts and types shirley's opening prompt into her pane - so the discriminator
+# is FIRST match in file order, not any match. Staleness: /clear mints a new transcript, shirley
+# acquired six in 3.5 hours on 2026-07-30, and a last-wins sweep resolved her to a file retired
+# two hours earlier - so it has to be NEWEST wins.
+# ============================================================================
+printf '\n== resolve_session (registered id, else a newest-wins bounded sweep) ==\n'
+
+rs="$tmp/rsproj/$enc"
+mkdir -p "$rs"
+
+# Boot prompts trimmed from the real records. promptSource "typed" marks a role boot.
+boot() { # <file> <phrase>
+  printf '{"type":"user","promptSource":"typed","sessionId":"S","timestamp":"2026-07-30T17:55:18.652Z","message":{"role":"user","content":"%s"}}\n' "$2" >"$1"
+}
+boot "$rs/aaaaaaaa-0000-0000-0000-000000000001.jsonl" 'You are bitzer, the steering layer and the Farmer'"'"'s interface in Mossy Bottom.'
+boot "$rs/bbbbbbbb-0000-0000-0000-000000000002.jsonl" 'YOU ARE SHIRLEY, the worker. Panes: bitzer=%2775, shaun=%2776'
+# shaun's file leads with HIS phrase and then quotes shirley's, which is the contamination trap.
+boot "$rs/cccccccc-0000-0000-0000-000000000003.jsonl" 'You are shaun, the driver in the Mossy Bottom deference chain.'
+printf '{"type":"assistant","sessionId":"S","timestamp":"2026-07-30T18:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"sending: YOU ARE SHIRLEY, the worker."}]}}\n' >>"$rs/cccccccc-0000-0000-0000-000000000003.jsonl"
+# a RETIRED shirley, older than the live one, to prove newest wins rather than last-glob-wins.
+boot "$rs/dddddddd-0000-0000-0000-000000000004.jsonl" 'YOU ARE SHIRLEY, the worker. Panes: bitzer=%2701, shaun=%2702'
+
+now2="$(date +%s)"
+touch -t "$(date -r "$((now2 - 7200))" '+%Y%m%d%H%M.%S')" "$rs/dddddddd-0000-0000-0000-000000000004.jsonl"
+touch -t "$(date -r "$((now2 - 60))" '+%Y%m%d%H%M.%S')" "$rs/bbbbbbbb-0000-0000-0000-000000000002.jsonl"
+touch -t "$(date -r "$((now2 - 90))" '+%Y%m%d%H%M.%S')" "$rs/cccccccc-0000-0000-0000-000000000003.jsonl"
+touch -t "$(date -r "$((now2 - 120))" '+%Y%m%d%H%M.%S')" "$rs/aaaaaaaa-0000-0000-0000-000000000001.jsonl"
+
+cwd2='/Users/ben/dev/adobe/cloudadoption/contitires-mossy'
+rsx() { resolve_session "$tmp/rsproj" "$cwd2" "$1" "${2:-}"; }
+
+got="$(rsx shirley)"
+if [ "$got" = "bbbbbbbb-0000-0000-0000-000000000002" ]; then
+  ok "sweep resolves shirley to the NEWEST of her two transcripts"
+else
+  no "sweep resolves shirley newest-wins (got '$got')"
+fi
+got="$(rsx shaun)"
+if [ "$got" = "cccccccc-0000-0000-0000-000000000003" ]; then
+  ok "sweep resolves shaun by FIRST match in file order, not by any match"
+else
+  no "sweep resolves shaun (got '$got')"
+fi
+got="$(rsx bitzer)"
+if [ "$got" = "aaaaaaaa-0000-0000-0000-000000000001" ]; then ok "sweep resolves bitzer"; else no "sweep resolves bitzer (got '$got')"; fi
+
+# shaun's transcript quotes shirley's boot phrase, so a whole-file match would hand shirley
+# shaun's file. The newest-wins order makes that failure invisible unless it is asserted.
+if [ "$(rsx shirley)" != "$(rsx shaun)" ]; then
+  ok "contamination: shaun's quoted phrase does not resolve shirley to shaun's transcript"
+else
+  no "contamination: shirley and shaun resolved to the same transcript"
+fi
+
+# A registered id wins and skips the sweep entirely - including when it disagrees with what the
+# sweep would say, because the state file follows a /clear and the sweep is only a guess.
+printf '%s shirley working eeeeeeee-0000-0000-0000-000000000009 Bash\n' "$now2" >"$tmp/reg.state"
+got="$(rsx shirley "$tmp/reg.state")"
+if [ "$got" = "eeeeeeee-0000-0000-0000-000000000009" ]; then
+  ok "a registered session id wins over the sweep"
+else
+  no "a registered session id wins (got '$got')"
+fi
+
+# An unknown role must resolve to NOTHING, never to whichever file happens to be newest.
+if got="$(rsx nobody)" && [ -n "$got" ]; then
+  no "an unknown role must not resolve to another role's transcript (got '$got')"
+else
+  ok "an unknown role resolves to nothing"
+fi
+
+# ============================================================================
 # CLI: the verdict word plus a distinct exit code per verdict, matching stuck-check.sh.
 # ============================================================================
 printf '\n== CLI verdicts and exit codes ==\n'
