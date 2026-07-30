@@ -379,6 +379,26 @@ worker_verdict() {
       40) printf '%s stalled' "$wid" ;;
       *) printf '%s other' "$wid" ;;
     esac
+  elif [ "$wrc" -eq 10 ]; then
+    # PARKED - the worker's TURN ENDED, which is what a finished slice looks like once stuck-check
+    # reads liveness instead of the screen. This branch has to exist, and its absence was a live
+    # regression: a finished worker used to reach exit 20 (idle + stable + no marker on a 54-line
+    # pane) and now reaches exit 10, so 'done' was never produced and BOTH of #36's paths died -
+    # the immediate done-wake and, because beat_idle_standby gates on wstate=done too, the K-beat
+    # backstop with it. Observed 2026-07-31: worker-done pinned while the worker worked, handoffs
+    # falling back to bitzer's 300s poll.
+    #
+    # A closed turn needs no two-beat confirm. The confirm existed because a momentary idle between
+    # tool calls looked finished; a turn_duration record is written once, at a real turn end.
+    #
+    # Order matters here and differs from the exit-20 branch: a question outranks 'finished',
+    # because a turn that ended ON a question is waiting for an answer, not for the next slice.
+    case "$trc" in
+      20 | 30) printf '%s needs-input' "$wid" ;;
+      0) printf '%s done' "$wid" ;;
+      40) printf '%s stalled' "$wid" ;;
+      *) printf '%s other' "$wid" ;;
+    esac
   else
     case "$trc" in
       20 | 30) printf '%s needs-input' "$wid" ;;
