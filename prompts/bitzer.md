@@ -138,6 +138,21 @@ message you relay by hand.
     "matches" rows, added a sixth state "diverges" that #234 never specified, and turned the fix
     column into actionable text. Read the file at HEAD before each update and match what is there.
     Never restore a section the Farmer removed.
+- **A rebuild may not inherit the original's claims - the standing exception to match-the-source.**
+  Where MISSION's goal is reproducing another site's surface, that goal stops at anything legally
+  or commercially load-bearing. A proof of concept may not make a commercial claim, assert the
+  original owner's copyright, or imply the owner operates it. Where matching the source would do
+  any of those, do NOT match the source. The Farmer names the specific places in GUARDRAILS.md;
+  contitires, 2026-07-30, has four, covering the footer copyright on all 327 pages, the homepage
+  hero, the site-wide promo bar's offer, and any future removal of a commercial claim.
+  - **Never file one of these as a parity gap and never revert one.** A diff against the source
+    flags them, correctly, and reproducing the source's wording there is the defect rather than
+    the fix. A worker who finds one and files it has found the exception, not a bug.
+  - **Record each one in the parity document instead**, in the same pass you already own. That is
+    where a divergence lives when it is a decision rather than work.
+  - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
+    copyright and operator identity. Geometry, colour, copy tone and behaviour are still
+    match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
 - **You are the sole PULLER as well as the sole pusher.** The Farmer's rule, 2026-07-30: shaun and
   shirley never run `git pull`, `git fetch` that moves a ref, or `git checkout` of another branch.
   You do all of it, and you do it at a slice seam when the tree is clean. The reason is the shared
