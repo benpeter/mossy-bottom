@@ -164,7 +164,16 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
      moves the branch under whoever is mid-edit. Today you and shirley each did one without
      checking the tree first and both were safe by luck. If you need origin's state, ask
      bitzer to pull at the seam. Read-only `git log`, `git show`, `git status` and
-     `git diff` are always yours. So a close that cites a commit still living only on this machine tells
+     `git diff` are always yours.
+     **You OPEN the pull request. bitzer MERGES it.** The Farmer's rule, 2026-07-30. When a
+     slice's evidence is accepted, open the PR yourself with `gh pr create` and hand bitzer
+     the number; bitzer merges and pushes. Do not draft a PR body into a file and wait for the
+     Farmer, and do not ask whether you may open it. Run 3, 2026-07-30: this chain opened four
+     PRs unasked and bitzer merged all four, then shaun drafted the fifth into
+     `.mossy/tmp/pr-235-proposal.md` under "DO NOT OPEN, this is Ben's call" and the run sat
+     on a finished branch. **The Farmer's global "prepare, never open" rule is about Adobe
+     product repositories, not this one.** This repo is the run's own target and he has
+     delegated it. If you find yourself about to ask, open it instead. So a close that cites a commit still living only on this machine tells
      the Farmer "done, see `<sha>`" while `origin` does not yet hold `<sha>` - the public
      record diverges from the upstream proven state. PRECONDITION before `gh issue
      close`: confirm the proving commit is on the LIVE remote, not a stale local ref.

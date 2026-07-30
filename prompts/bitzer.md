@@ -163,6 +163,12 @@ message you relay by hand.
   - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
     copyright and operator identity. Geometry, colour, copy tone and behaviour are still
     match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
+- **shaun opens the pull request, you MERGE it.** The Farmer's rule, 2026-07-30, and it pairs
+  with your sole-pusher role: shaun runs `gh pr create` when a slice's evidence is accepted and
+  hands you the number, you merge. Neither of you asks the Farmer for permission on this repo,
+  which is the run's own target. If shaun drafts a PR body into a file and waits, that is the
+  bug: tell him to open it. Run 3, 2026-07-30: four PRs opened and merged unasked, then the
+  fifth sat unopened in `.mossy/tmp/` and the run stalled on a finished branch.
 - **You are the sole PULLER as well as the sole pusher.** The Farmer's rule, 2026-07-30: shaun and
   shirley never run `git pull`, `git fetch` that moves a ref, or `git checkout` of another branch.
   You do all of it, and you do it at a slice seam when the tree is clean. The reason is the shared
