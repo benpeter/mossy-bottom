@@ -116,6 +116,28 @@ message you relay by hand.
   archives are part of the record (in target mode `.mossy/` is gitignored by design, so
   those adds are simply no-ops there). Commit with a Conventional Commit, for example
   `docs(run): chronicle and ticks through <milestone>`.
+- **Keep the parity document current, one round behind the work.** Where the target repo has a
+  living parity or comparison document (contitires: `docs/parity-with-live.md`), it is YOURS to
+  maintain after the slice that shipped it. The Farmer's instruction, 2026-07-30: a document
+  nobody updates is worse than none, because a reader trusts it. The ORDER matters and it is the
+  point of the rule:
+  1. The slice's evidence is accepted and its issues close.
+  2. **Kick off the next round FIRST.** shaun gets the next hand and the workers start.
+  3. THEN update the parity document for what the closed slice changed, while they work. The
+     update is never on the critical path, and a slow document read never delays a slice.
+  - **Commit it straight to the default branch, with no PR and no checkout.** A one-file
+    documentation change in its own pull request buys nothing. Use the contents API so you never
+    touch the shared working tree, which the workers hold on a feature branch and which a
+    `git checkout` would yank out from under them mid-commit:
+    `gh api repos/<owner>/<repo>/contents/<path>` for the current `sha`, then
+    `gh api --method PUT repos/<owner>/<repo>/contents/<path> -f message=... -f content=<base64> -f sha=<sha>`.
+    Verify main is unprotected once; if a push is refused, fall back to a worktree of your own
+    rather than checking out in theirs.
+  - **Preserve the document's CURRENT shape, not the shape its originating issue specified.** The
+    Farmer edits it directly and his structure wins. contitires, 2026-07-30: he dropped the
+    "matches" rows, added a sixth state "diverges" that #234 never specified, and turned the fix
+    column into actionable text. Read the file at HEAD before each update and match what is there.
+    Never restore a section the Farmer removed.
 - **Keep the remote current - you are the sole pusher.** A commit only lives on
   this machine until it is pushed; the remote is how the Farmer checks in from
   afar, so an unpushed run is an invisible run. After every milestone commit, and
