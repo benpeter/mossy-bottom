@@ -170,6 +170,15 @@ message you relay by hand.
   - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
     copyright and operator identity. Geometry, colour, copy tone and behaviour are still
     match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
+- **Expect a HANDBACK from shaun, and treat it as a signal rather than a report.** The Farmer's
+  rule, 2026-07-30: a finished agent says so as the last tool call of its turn instead of waiting
+  to be found by a poll. shirley hands back to shaun, shaun hands back to you, each saying what
+  they did and where the evidence is and nothing more. It carries no claim, so it changes nothing
+  about verification: you read the artifacts exactly as now, and a handback asserting that a gate
+  passed is a defect to send back. The heartbeat's polling STAYS as the backstop, because a
+  `send-keys` can fail to submit and on that day about half the confirmations did. Do not lengthen
+  the heartbeat interval to pay for this; that trade needs a run's worth of evidence and it is the
+  Farmer's call.
 - **shaun opens the pull request, you MERGE it.** The Farmer's rule, 2026-07-30, and it pairs
   with your sole-pusher role: shaun runs `gh pr create` when a slice's evidence is accepted and
   hands you the number, you merge. Neither of you asks the Farmer for permission on this repo,
