@@ -157,9 +157,16 @@ message you relay by hand.
     capture or crawl that walks a whole page EXCLUDES these zones from the comparison rather than
     recording a delta someone then has to explain. contitires, 2026-07-30: the Farmer pinned a
     figure and a link target, and both had moved before the guardrail was written.
-  - **Check a zone against the single rule and nothing else.** No commercial claim, no assertion
-    of the owner's copyright, no implication the owner operates it. One of those creeping in is
-    worth raising. A wording change that keeps all three true is not a finding.
+  - **The rule bites on the DISCLOSURE, not on every claim.** The test is whether the SITE reads
+    as a real offer, asserts the owner's copyright, or implies the owner operates it. Site-level
+    disclosure is what answers it: contitires carries a proof-of-concept paragraph in the footer
+    of all 327 pages and a parody offer in the promo bar at the top of every page. With those in
+    place, the source's own offer copy inside a campaign page is REPRODUCED SURFACE rather than a
+    claim this site makes, and it stays. Ben, 2026-07-30 19:05, closing an issue the Farmer filed
+    against three such pages: "we're just claiming enough in the promo banner that this is not a
+    real site." Do not go hunting for claims to remove. Check that the disclosure is intact.
+    A zone that carries the disclosure is the exception: it cannot itself carry the source's offer,
+    which is why the promo-bar fragment was fixed while the campaign pages were left.
   - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
     copyright and operator identity. Geometry, colour, copy tone and behaviour are still
     match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
