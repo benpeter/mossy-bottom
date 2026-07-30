@@ -141,6 +141,17 @@ animating() {
   sleep "$settle"
 }
 
+# make_wakeable_tx <sess> <printf-content> <transcript> - make_wakeable, plus it APPENDS one line to
+# <transcript> the moment it receives the wake. That is what Claude Code does: the receiver's record
+# is written at SUBMIT, before any token comes back, which is the signal send-verified now confirms
+# on. Without it a fixture's transcript can never grow and the delivery check can only ever fail.
+make_wakeable_tx() {
+  local cmd="printf '$2'; read x; printf '{\"type\":\"user\",\"content\":\"woken\"}\n' >>'$3'; while :; do printf 'tick %s\\n' \"\$RANDOM\"; sleep 0.05; done"
+  tmux new-session -d -s "$1" -x 80 -y 24 "$cmd" 2>/dev/null
+  sessions="$sessions $1"
+  sleep "$settle"
+}
+
 # beat <panes-file> <shaun-fp> [worker-fp] [backstop-fp] - run a single heartbeat; OUT captures its log.
 # The worker fp defaults to an unused path so the #20 (shaun-only) calls are byte-unaffected; the backstop
 # fp ALWAYS points at a temp path (default unused) so the #36-sl.3 freeze-state never pollutes the repo root.
@@ -544,7 +555,8 @@ wdl_closed 'aaaa1111-0000-0000-0000-00000000shau' 'You are shaun, the driver in 
 wdl_closed 'bbbb2222-0000-0000-0000-0000000shirl' 'YOU ARE SHIRLEY, the worker.'
 
 wdl_shaun="hbt_wdl_shaun_$$"
-make_wakeable "$wdl_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+make_wakeable_tx "$wdl_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}" \
+  "$wdl_proj/$wdl_enc/aaaa1111-0000-0000-0000-00000000shau.jsonl"
 wdl_shirley="hbt_wdl_shirley_$$"
 make_fixture "$wdl_shirley" "$idle_box"
 printf 'shaun=%s\nshirley=%s\n' "$wdl_shaun" "$wdl_shirley" >"$wdl_sd/.barn-panes"
