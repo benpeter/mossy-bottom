@@ -55,6 +55,7 @@ SV_SETTLE="${SV_SETTLE:-0.5}"
 SV_GROW_POLLS="${SV_GROW_POLLS:-10}"
 SV_GROW_SLEEP="${SV_GROW_SLEEP:-0.5}"
 LIVENESS_READ="${MOSSY_LIVENESS_READ:-${SCRIPT_DIR}/liveness-read.sh}"
+LIVENESS_APPEND="${MOSSY_LIVENESS_APPEND:-${SCRIPT_DIR}/liveness-append.sh}"
 SV_STATE_DIR="${MOSSY_STATE_DIR:-}"
 SV_AGENT_CWD="${MOSSY_AGENT_CWD:-${PWD}}"
 
@@ -161,15 +162,26 @@ receiver_grew() {
 # session id; that indirection is deliberate, because /clear mints a new transcript file and a
 # cached path would go stale (shirley acquired six in 3.5 hours on 2026-07-30).
 receiver_transcript() {
-  local pane="$1" sf sid
-  sf="${SV_STATE_DIR:+${SV_STATE_DIR}/liveness/${pane}.state}"
-  [ -n "${sf}" ] && [ -s "${sf}" ] || return 1
-  sid="$(tail -n 1 "${sf}" 2>/dev/null | awk '$4 ~ /^[0-9a-f]{8}-/ {print $4}')"
-  [ -n "${sid}" ] || return 1
+  local pane="$1" role sf
+  [ -n "${SV_STATE_DIR}" ] || return 1
   [ -x "${LIVENESS_READ}" ] || return 1
+  role="$(role_for_pane "${pane}")" || return 1
+  sf="${SV_STATE_DIR}/liveness/${role}.state"
+  # resolve_session prefers the registered session id and sweeps for the role only when there is
+  # none - which is the worker's case, since she calls none of the harness tools.
   # shellcheck source=/dev/null
-  ( . "${LIVENESS_READ}"; transcript_for "${MOSSY_CLAUDE_PROJECTS:-${HOME}/.claude/projects}" \
-      "${SV_AGENT_CWD}" "${sid}" )
+  ( . "${LIVENESS_READ}"
+    sid="$(resolve_session "$(projects_dir)" "${SV_AGENT_CWD}" "${role}" "${sf}")" || exit 1
+    transcript_for "$(projects_dir)" "${SV_AGENT_CWD}" "${sid}" )
+}
+
+# role_for_pane <pane> - which role owns this pane, from .barn-panes ("<role>=<pane>" per line,
+# written by barn.sh at launch). The state files are keyed by ROLE because a role outlives a
+# respawned pane, so the sender has to go through this mapping to reach the receiver's record.
+role_for_pane() {
+  local pane="$1" pf="${SV_STATE_DIR}/.barn-panes"
+  [ -f "${pf}" ] || return 1
+  awk -F= -v p="${pane}" '$2==p {print $1; ok=1} END{exit !ok}' "${pf}"
 }
 
 # transcript_baseline <pane> - the receiver's transcript mtime BEFORE the Enter, so a grow can be
@@ -223,6 +235,12 @@ main() {
   [ -n "${pane}" ] || die "<pane> must not be empty"
   command -v tmux >/dev/null 2>&1 || die "tmux not found (required)"
   [ -x "${TIMMY}" ] || die "timmy not found or not executable at '${TIMMY}' (set MOSSY_TIMMY)"
+
+  # Liveness hook. Record that the CALLING agent's session was alive; see bin/liveness-append.sh.
+  # Best-effort and silent: it can neither fail this tool nor change its output. A call driven by
+  # the heartbeat carries no CLAUDE_CODE_SESSION_ID and writes nothing, so the observer can never
+  # refresh the timestamp the stuck check is about to read.
+  "${LIVENESS_APPEND}" --tool send-verified >/dev/null 2>&1 || true
   send_verified "${pane}" "${text}"
 }
 

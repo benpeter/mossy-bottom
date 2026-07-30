@@ -137,6 +137,16 @@ case "$SUSTAIN_SAMPLES" in
   ''|*[!0-9]*) die "TIMMY_SUSTAIN_SAMPLES must be a non-negative integer" ;;
 esac
 
+# timmy lives at timmy/bin/, so the harness bin/ is two levels up.
+TIMMY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+LIVENESS_APPEND="${MOSSY_LIVENESS_APPEND:-${TIMMY_DIR}/../../bin/liveness-append.sh}"
+
+# Liveness hook. Record that the CALLING agent's session was alive; see bin/liveness-append.sh.
+# Best-effort and silent: it can neither fail this tool nor change its output. A call driven by
+# the heartbeat carries no CLAUDE_CODE_SESSION_ID and writes nothing, so the observer can never
+# refresh the timestamp the stuck check is about to read.
+"$LIVENESS_APPEND" --tool timmy >/dev/null 2>&1 || true
+
 snapshot() { tmux capture-pane -p -t "$pane"; }
 
 # A working session shows an ACTIVE spinner LINE. We match its stable SHAPE
