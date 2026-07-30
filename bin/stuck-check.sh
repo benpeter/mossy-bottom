@@ -43,6 +43,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIMMY="${MOSSY_TIMMY:-${SCRIPT_DIR}/../timmy/bin/timmy}"
 STANDBY_PATTERN="${MOSSY_STANDBY_PATTERN:-^[[:space:]]*(⏺[[:space:]]*)?STANDBY([[:space:](]|$)}"
 
+# Ground-truth inputs (see classify_turn_live). All three are optional: without them this tool
+# behaves exactly as it did, reading the screen. SESSION_ID is the agent's own Claude Code
+# session id, which names its transcript; the agent's tools record it into STATE_FILE, and it
+# has to be re-read rather than cached because /clear mints a new one (shirley acquired six
+# transcript files in 3.5 hours on 2026-07-30).
+LIVENESS_READ="${MOSSY_LIVENESS_READ:-${SCRIPT_DIR}/liveness-read.sh}"
+STATE_FILE="${MOSSY_STATE_FILE:-}"
+SESSION_ID="${MOSSY_SESSION_ID:-}"
+AGENT_CWD="${MOSSY_AGENT_CWD:-${PWD}}"
+
 die() { printf 'stuck-check: %s\n' "$1" >&2; exit "${EXIT_USAGE}"; }
 
 usage() {
@@ -64,9 +74,26 @@ Live-pane mode (gathers the three inputs from a REAL pane):
                            MOSSY_STUCK_FP). The change signal is the fingerprint compared
                            ACROSS calls; the first call (no prior) is treated as changed=1.
     state       <- timmy (timmy/bin/timmy; override with MOSSY_TIMMY); exit 40 -> stalled (#25)
-    has_standby <- a STANDBY marker line in the capture (override MOSSY_STANDBY_PATTERN)
+    has_standby <- a STANDBY marker in the capture OR in --state-file's last line
     changed     <- this capture's fingerprint vs the prior call's
   A pane that cannot be read (timmy can't classify, capture fails) -> working, never stuck.
+
+Ground truth (optional; without it this tool reads the screen exactly as it always did):
+  --state-file <f>   the role's append-only state file (env MOSSY_STATE_FILE). Carries the
+                     agent's state word and its current session id, and keeps a STANDBY that
+                     has scrolled off the pane.
+  --session <id>     the agent's Claude Code session id (env MOSSY_SESSION_ID). Read from
+                     --state-file when not given, which is preferable: /clear mints a new id
+                     and the file follows it.
+  --agent-cwd <p>    the agent's working directory (env MOSSY_AGENT_CWD, default $PWD),
+                     needed to locate its transcript.
+  When a session resolves, bin/liveness-read.sh decides and this tool maps its verdict:
+  working -> working, parked -> standby, stuck -> stuck. Otherwise the screen decides.
+
+PRECEDENCE. The transcript is authoritative for liveness and for whether a turn is still open.
+The state file is authoritative for what the agent is doing and for a STANDBY the pane has
+discarded. The pane is authoritative only for what renders THIS INSTANT: a spinner, a retry
+ladder, and the context percent. Full reasoning in bin/liveness-read.sh's header.
 
 Verdict (printed) and exit code:
   working  0   busy|waiting|question, OR changed=1 (alive / advancing - wins even over stalled)
@@ -107,6 +134,67 @@ classify_turn() {
   else
     printf 'stuck\n'
   fi
+}
+
+# classify_turn_live <liveness> <state> <has_standby> <changed> - the LIVENESS LAYER over the
+# pure core, and the place the precedence is written down: liveness WINS, and classify_turn is
+# the fallback for when no transcript can be resolved.
+#
+# Why a layer rather than a rewrite of classify_turn. The three inputs classify_turn takes are
+# all read off a 54-line alternate screen that keeps no scrollback, so has_standby and the
+# capture fingerprint are both answers from a window that throws history away. Measured on
+# 2026-07-30: 21 stuck-recovery wakes fired at shaun and every one landed on a turn that had
+# ALREADY ENDED - not one on a hung tool call. Only 3 of the 21 were the scroll-off shape this
+# STANDBY_PATTERN was tightened for; the other 18 were a completed turn parked 5.7 to 10.4
+# minutes waiting on shirley, with no marker anywhere to find.
+#
+# The mapping into this tool's existing verdicts, which heartbeat.sh already partitions on:
+#   working -> working (0). An open turn that appended recently, or a live pane.
+#   parked  -> standby (10). The turn ENDED. That is what exit 10 already means to the
+#              heartbeat: a shaun who can receive, which gates the worker wakes.
+#   stuck   -> stuck (20). The turn is open, nothing was appended for the threshold, and the
+#              pane renders neither a spinner nor a retry ladder.
+#   empty   -> classify_turn, unchanged, byte-for-byte. No transcript resolved, so we are back
+#              to the screen and should be honest that that is what we are reading.
+#
+# NOTE this widens exit 10. It used to mean "a STANDBY marker is visible on the pane"; it now
+# means "the turn has ended", which is true far more often and is the point. The worker wakes
+# gated on shaun_rc=10 therefore fire on a parked shaun whether or not he wrote a marker.
+classify_turn_live() {
+  local liveness="$1" state="$2" has_standby="$3" changed="$4"
+  case "${liveness}" in
+    working) printf 'working\n'; return 0 ;;
+    parked) printf 'standby\n'; return 0 ;;
+    stuck) printf 'stuck\n'; return 0 ;;
+  esac
+  classify_turn "${state}" "${has_standby}" "${changed}"
+}
+
+# standby_from_state <state-file> - echo 1 if the agent's own last state line says it parked.
+#
+# This is the marker that scrolled off. shaun's transcripts carry 220 STANDBY lines while his
+# pane showed none of them once a report followed, because a median marker is 248 characters and
+# 90 of them are trailed by another 464 to 1887 characters, which clears a 54-line viewport. A
+# file keeps what the pane discards.
+#
+# Matched on the bare token, deliberately. Three separator forms occur in the wild over those
+# 220 records: 'STANDBY (context) - ', 'STANDBY - ' and 'STANDBY — ' with an em dash, plus two
+# parentheticals, (context) and (worker). Keying on any one of them misses the rest.
+# The state word is field 3 of the last line, matched on the field rather than anywhere in the
+# line: a working agent's note routinely mentions STANDBY (shaun writes about the marker while
+# not being on one), and a substring match would read that as a park.
+standby_from_state() {
+  local sf="${1:-}" w
+  if [ ! -s "${sf}" ]; then printf '0'; return 0; fi
+  w="$(tail -n 1 "${sf}" 2>/dev/null | awk '{print tolower($3)}')"
+  if [ "${w}" = "standby" ]; then printf '1'; else printf '0'; fi
+}
+
+# session_from_state <state-file> - echo the session id field 4 of the last line. The tools
+# record it on every call, so the value follows a /clear on its own instead of going stale.
+session_from_state() {
+  [ -s "${1:-}" ] || return 0
+  tail -n 1 "$1" 2>/dev/null | awk '$4 ~ /^[0-9a-f]{8}-/ {print $4}'
 }
 
 # verdict_code <verdict> - the exit code for a verdict word (shared by both modes).
@@ -152,7 +240,7 @@ pane_state() {
 # Any read failure (timmy can't classify, capture fails) -> working: a pane we cannot read
 # is never provably stuck. Prints the verdict and returns its exit code.
 run_pane() {
-  local pane="$1" fpfile="$2" state cap has_standby changed cur prior verdict
+  local pane="$1" fpfile="$2" state cap has_standby changed cur prior verdict liveness=""
   if ! state="$(pane_state "${pane}")"; then
     printf 'working\n'
     return "${EXIT_WORKING}"
@@ -161,13 +249,24 @@ run_pane() {
     printf 'working\n'
     return "${EXIT_WORKING}"
   fi
+  # has_standby from EITHER source. The capture is kept because it is free once we hold it, but
+  # the state file is the one that survives: a marker scrolls off a 54-line viewport and 90 of
+  # shaun's 220 real markers are trailed by 464 to 1887 more characters.
   if printf '%s\n' "${cap}" | LC_ALL=C grep -qE "${STANDBY_PATTERN}"; then has_standby=1; else has_standby=0; fi
+  if [ "${has_standby}" = "0" ] && [ -n "${STATE_FILE}" ]; then has_standby="$(standby_from_state "${STATE_FILE}")"; fi
   cur="$(printf '%s' "${cap}" | fingerprint)"
   prior="$(cat "${fpfile}" 2>/dev/null || true)"
   if [ -n "${prior}" ] && [ "${cur}" = "${prior}" ]; then changed=0; else changed=1; fi
   mkdir -p "$(dirname "${fpfile}")" 2>/dev/null || true
   printf '%s' "${cur}" >"${fpfile}"
-  verdict="$(classify_turn "${state}" "${has_standby}" "${changed}")"
+  # Ground truth, when we can resolve it. Invoked by path like the heartbeat invokes us, so the
+  # two tools stay independent. Any failure leaves liveness empty and classify_turn_live falls
+  # back to the screen - never worse than what this replaced.
+  if [ -n "${SESSION_ID}" ] && [ -x "${LIVENESS_READ}" ]; then
+    liveness="$("${LIVENESS_READ}" --session "${SESSION_ID}" --cwd "${AGENT_CWD}" \
+      --state-file "${STATE_FILE}" --pane "${pane}" 2>/dev/null || true)"
+  fi
+  verdict="$(classify_turn_live "${liveness}" "${state}" "${has_standby}" "${changed}")"
   printf '%s\n' "${verdict}"
   verdict_code "${verdict}"
 }
@@ -178,6 +277,9 @@ main() {
     case "$1" in
       --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
       --fingerprint-file) shift; [ $# -gt 0 ] || die "--fingerprint-file needs a value"; fpfile="$1" ;;
+      --state-file) shift; [ $# -gt 0 ] || die "--state-file needs a value"; STATE_FILE="$1" ;;
+      --session) shift; [ $# -gt 0 ] || die "--session needs a value"; SESSION_ID="$1" ;;
+      --agent-cwd) shift; [ $# -gt 0 ] || die "--agent-cwd needs a value"; AGENT_CWD="$1" ;;
       --state) shift; [ $# -gt 0 ] || die "--state needs a value"; state="$1" ;;
       --has-standby) shift; [ $# -gt 0 ] || die "--has-standby needs a value"; has_standby="$1" ;;
       --changed) shift; [ $# -gt 0 ] || die "--changed needs a value"; changed="$1" ;;
@@ -192,6 +294,9 @@ main() {
     [ -z "${state}${has_standby}${changed}" ] || die "--pane cannot be combined with --state/--has-standby/--changed"
     [ -n "${fpfile}" ] || die "--pane needs --fingerprint-file <path> (or MOSSY_STUCK_FP)"
     command -v tmux >/dev/null 2>&1 || die "tmux not found (required for --pane)"
+    # A state file that carries a session id makes --session redundant; prefer the file, since
+    # it follows a /clear and an explicitly passed id does not.
+    if [ -z "${SESSION_ID}" ] && [ -n "${STATE_FILE}" ]; then SESSION_ID="$(session_from_state "${STATE_FILE}")"; fi
     run_pane "${pane}" "${fpfile}"
     return $?
   fi
