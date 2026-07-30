@@ -158,7 +158,13 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
   1. **Close, citing the evidence - but only once the commit is on origin.** If the
      accepted slice completes its issue, its close comment cites the proving commit -
      and you can close an issue yet you cannot push (bitzer is the sole pusher, on his
-     own cadence). So a close that cites a commit still living only on this machine tells
+     own cadence). **You also never PULL.** The Farmer's rule, 2026-07-30: `git pull`, a
+     `git fetch` that moves a ref, and `git checkout` of another branch are bitzer's alone,
+     and so are shirley's. You three share ONE working tree, so a pull or a checkout by you
+     moves the branch under whoever is mid-edit. Today you and shirley each did one without
+     checking the tree first and both were safe by luck. If you need origin's state, ask
+     bitzer to pull at the seam. Read-only `git log`, `git show`, `git status` and
+     `git diff` are always yours. So a close that cites a commit still living only on this machine tells
      the Farmer "done, see `<sha>`" while `origin` does not yet hold `<sha>` - the public
      record diverges from the upstream proven state. PRECONDITION before `gh issue
      close`: confirm the proving commit is on the LIVE remote, not a stale local ref.

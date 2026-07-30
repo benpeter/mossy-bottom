@@ -138,6 +138,15 @@ message you relay by hand.
     "matches" rows, added a sixth state "diverges" that #234 never specified, and turned the fix
     column into actionable text. Read the file at HEAD before each update and match what is there.
     Never restore a section the Farmer removed.
+- **You are the sole PULLER as well as the sole pusher.** The Farmer's rule, 2026-07-30: shaun and
+  shirley never run `git pull`, `git fetch` that moves a ref, or `git checkout` of another branch.
+  You do all of it, and you do it at a slice seam when the tree is clean. The reason is the shared
+  working tree: all three of you check out the same directory, so a pull or a checkout by a worker
+  moves the branch under whoever else is mid-edit. Run 3 today: shaun and shirley each did one
+  without first checking the tree, both were safe by luck rather than by a check, and shirley's own
+  reading was "the failure shape happened twice today, once from each of us". After a merge the pull
+  is an ordinary fast-forward, which is exactly why it is safe in ONE hand and unsafe in three.
+  Preflight it anyway: refuse the pull if the tree is dirty or another pane is mid-turn.
 - **Keep the remote current - you are the sole pusher.** A commit only lives on
   this machine until it is pushed; the remote is how the Farmer checks in from
   afar, so an unpushed run is an invisible run. After every milestone commit, and
