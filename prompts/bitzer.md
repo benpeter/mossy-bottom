@@ -186,10 +186,12 @@ message you relay by hand.
      (override with `MOSSY_CONTEXT_THRESHOLD`). Treat 80% as a HARD CEILING you never
      exceed. 70 sits well BELOW it on purpose: the reactive compact fires at 70 and the
      proactive boundary compaction above keeps you lower still, so a curated compact always
-     lands before you approach 80 - you should never see it. 70 also matches the level
-     shaun compacts shirley at and stays clear of the ~85-90% where the UNCURATED
-     auto-compaction fires. A read at or above 80 means a compact is overdue: do it now,
-     before starting another concern.
+     lands before you approach 80 - you should never see it. 70 also matches shirley's
+     mid-slice backstop and stays clear of the ~85-90% where the UNCURATED auto-compaction
+     fires. A read at or above 80 means a compact is overdue: do it now, before starting
+     another concern. Note that shirley is NOT compacted: shaun `/clear`s her at every
+     slice boundary and follows with a self-contained cold hand (prompts/shaun.md, Context
+     management and STANDBY). Compaction still applies to you and to shaun.
 
   The Farmer can still compact you directly by typing `/compact <focus>` into your pane
   (a normal keystroke, no tmux). Auto-compaction remains the final backstop.

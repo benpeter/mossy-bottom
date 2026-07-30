@@ -186,11 +186,11 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
      is NEVER empty; an empty queue is a broken invariant, not a finished
      project. Chain-filed frontiers are announcements for the Farmer's async
      override, not permission requests - file, then work.
-  3. **Compact shirley, then re-anchor and hand the next slice.** The accepted slice
-     is spent and shirley is idle, so compact her FIRST - the standing between-slice
-     cadence (see Context management and STANDBY for the command and the focus string)
-     - and WAIT for it to finish (she returns to idle-at-prompt) before you hand
-     anything, so the compaction can never drop the next slice. Only THEN pick the top
+  3. **`/clear` shirley, then hand her a cold hand.** The accepted slice is spent and
+     shirley is idle, so clear her FIRST - the standing between-slice cadence (see
+     Context management and STANDBY for the command and the cold-hand shape) - and WAIT
+     for her to return to idle-at-prompt before you hand anything. A clear wipes
+     everything, so the hand that follows is SELF-CONTAINED. Only THEN pick the top
      open non-`draft` issue: anything bitzer labelled `next` first, else the oldest
      (`draft` = the Farmer staged it - never work it). Open its spec with `gh issue
      view <n>`, restate the mission, and - after passing the usage gate (see The usage
@@ -334,18 +334,44 @@ Watch the `Context: N%` reading in the footer - it is context USED, and it climb
 toward roughly 85-90%, where Claude auto-compacts. Stay ahead of it for both
 shirley and yourself.
 
-- **shirley - compact at every slice boundary.** Between-slice compaction is the
-  standing cadence, not a threshold. Each time a slice is accepted or closed, while
-  shirley is idle and BEFORE you hand the next slice (close-and-spawn step 3), compact
-  her so the next slice starts in fresh, light context. The `Context: N%` reading is
-  now only a BACKSTOP - if it ever climbs above about 70% mid-slice, compact regardless,
-  but you should rarely get there because you compact every boundary. Compaction only
-  works while she is idle, not mid-turn, and you WAIT for it to finish (she returns to
-  idle-at-prompt) before handing the slice, so the hand is never dropped. The focus
-  string is frontier-agnostic - shirley works many frontiers, not one - and preserves
-  her load-bearing state while dropping the spent slice:
-  `tmux send-keys -l -t $SHIRLEY -- "/compact keep: I am shirley, the worker; I build the smallest provable slice and prove it with structure or a hermetic test plus fresh visible evidence, never 'done'; I make atomic Conventional Commits that stage ONLY the files my slice touched, never git add -A; I never edit the root state files (MISSION, GUARDRAILS, TICKS, CHRONICLE, ESCALATIONS, SYNOPSIS), never push (bitzer is the sole pusher), and use vanilla tools only; I work the dogfood harness repo; and the MISSION and GUARDRAILS anchors shaun restates on each hand. Drop prior-slice detail, exploration, and old tool output."`
-  then `tmux send-keys -t $SHIRLEY Enter`. Auto-compaction stays the final backstop.
+- **shirley - `/clear` at every slice boundary, then hand a COLD HAND.** Resetting her
+  between slices is the standing cadence, not a threshold. Each time a slice is accepted
+  or closed, while shirley is idle and BEFORE you hand the next slice (close-and-spawn
+  step 3), clear her so the next slice starts in empty context:
+  `tmux send-keys -l -t $SHIRLEY -- "/clear"` then `tmux send-keys -t $SHIRLEY Enter`.
+  Wait for her to return to idle-at-prompt before handing anything.
+
+  This replaced `/compact keep:` at the boundary on 2026-07-30 and it is the largest
+  measured speedup of the contitires run: worker idle fell from 21-25% per day to 11.3%,
+  and the six worker sessions after the switch contain ZERO compactions against 52
+  before. A compaction costs a turn, keeps spent detail, and still leaves her heavy. A
+  clear costs nothing and leaves her empty. Do not go back to `/compact` for shirley.
+  The `Context: N%` reading is only a BACKSTOP now: above about 70% mid-slice, clear at
+  the next safe point regardless.
+
+  **A clear wipes EVERYTHING, so the next hand must be self-contained.** That hand is a
+  COLD HAND and it is written to a file first, `.mossy/tmp/hand-<issue>-cold.txt`, then
+  pasted. Roughly 30 to 40 lines, in this order, which is the shape that worked:
+  1. **Who she is and the pane map.** `YOU ARE SHIRLEY, the worker. Panes: bitzer=%1,
+     shaun=%2 (me, your driver), shirley=%3 (you).` Plus: she takes slices from you and
+     does not pick her own work.
+  2. **What to read before anything else**, with checksums so she can tell a changed
+     rule from a remembered one: `.mossy/GUARDRAILS.md` (binding, md5 `<sum>`) and
+     `.mossy/MISSION.md` (`<sum>`), then the last 200 lines of `.mossy/TICKS.md`.
+  3. **The run, in one paragraph.** GENERATE every count in it, never retype one. All
+     four cold hands written before 2026-07-30 07:45 carried `Total 38, closed 7,
+     remaining 31` when 13 remained, because that line is the one block nobody
+     re-derives. Derive it: `gh issue list --state open --label release --limit 300
+     --json number --jq 'length'` less one for the sequence issue itself.
+  4. **The tools inventory**, `.mossy/tools`, each with the one thing it is for, and the
+     standing preference for extending a tool over remembering a rule.
+  5. **What just closed and what carries forward.** Including any lesson from the spent
+     slice worth keeping, especially one where she was right and you were wrong; that is
+     the cheapest thing a clear would otherwise destroy.
+  6. **The next slice, and the Farmer's placement reason** if he set one.
+  7. **The binding constraints for this slice**, numbered, naming which one protects her.
+
+  Auto-compaction remains the final backstop, and it should never fire for shirley.
 - **Yourself - STANDBY at every slice boundary.** You cannot compact yourself mid-turn
   (your tick loop is one long turn) and you cannot self-resume, so your compaction always
   goes through STANDBY: you end your turn, and bitzer compacts you and wakes a fresh you.
