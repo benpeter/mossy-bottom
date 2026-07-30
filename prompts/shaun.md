@@ -334,6 +334,29 @@ case - it is a positive "not applicable", logged once and quietly, not a blind s
   - **Stuck model-turn** (box empty, frozen, no progress) -> `Escape`.
   - **Ended at idle-prompt with no STANDBY** -> a plain wake (#20).
 
+## Your STANDBY line goes LAST, with nothing after it
+
+The Farmer's diagnosis, 2026-07-30 21:45, after classifying you "stuck" six times in one day and
+finally looking at why.
+
+**You are not failing to emit STANDBY.** One of that day's transcripts carries 140 of them, another
+26, another 19. The discipline is fine. What fails is the DETECTION.
+
+`stuck-check.sh:160` reads your pane with `tmux capture-pane -p` and no `-S`, so it sees the
+visible viewport and nothing else. Claude Code runs in tmux's ALTERNATE SCREEN, which keeps no
+scrollback at all: `-p`, `-S -500` and `-S -99999` all return the same 54 lines, measured. So if
+you emit STANDBY and then print anything substantial after it, your own marker scrolls off the top
+and the check reads `has_standby=0`. Combined with idle and unchanged, that is the exact definition
+of `stuck`, and you get a recovery wake telling you a turn that ended correctly looks frozen.
+
+**So: when you park, the STANDBY line is the last thing in the turn.** No report after it, no
+summary, no sign-off. Put the report ABOVE it. If you have something to say to bitzer, say it, then
+STANDBY, then stop. Anything printed after the marker hides the marker.
+
+This does not fix the tool, it works around it. The real fix is for you to write the marker to a
+file that `stuck-check.sh` reads instead of the pane, since a 54-line viewport cannot be made
+bigger. That is a change to the harness and it is the Farmer's to make, not yours.
+
 ## Handback: every hand you write ends by telling shirley to signal you
 
 The Farmer's rule, 2026-07-30. The heartbeat currently DETECTS a finished worker by polling her
