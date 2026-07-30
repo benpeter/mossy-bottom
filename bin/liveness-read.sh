@@ -72,13 +72,21 @@ readonly EXIT_USAGE=64
 
 # 600s: two heartbeat beats. See THE THRESHOLD above for the measurement behind it.
 MAX_AGE="${MOSSY_LIVENESS_MAX_AGE:-600}"
-PROJECTS_DIR="${MOSSY_CLAUDE_PROJECTS:-${HOME}/.claude/projects}"
+
+# Read from the environment at CALL time, not once at load time, so a caller (and the test) can
+# point one invocation at a different tree. One source of truth for the location, evaluated late.
+projects_dir() { printf '%s' "${MOSSY_CLAUDE_PROJECTS:-${HOME}/.claude/projects}"; }
 
 # How far back into a transcript's tail we look for the turn boundary. The sidecar records
 # trailing a finished turn number about six, so 400 is generous; and if a turn has appended
 # more than 400 records since it began, it is unambiguously OPEN anyway, so the bound is safe
 # in the direction that matters.
 readonly TAIL_LINES=400
+
+# How far into a transcript's HEAD we look for the boot prompt that names its role. 5 of the 24
+# role transcripts sampled put the phrase past line 15, so 60 has room; a continuation session
+# after /clear carries no boot prompt at all and simply does not match.
+readonly BOOT_SCAN_LINES=60
 
 # A retry ladder rung. timmy owns the spinner and keeps it, but timmy's own header documents
 # GAP-7: its shape needs an ellipsis immediately after a single verb plus a parenthesised
@@ -109,6 +117,8 @@ Explicit-inputs mode (the pure core):
   --max-age <s>     staleness threshold (default 600, env MOSSY_LIVENESS_MAX_AGE)
 
 Live mode (gathers the inputs itself):
+  --role <name>     shaun|bitzer|shirley - resolves the transcript itself, and re-resolves
+                    before it will say stuck, so a /clear cannot read as a hang
   --session <id>    the agent's Claude Code session id (its transcript is <id>.jsonl)
   --cwd <path>      the agent's working directory (default: $PWD)
   --state-file <f>  the append-only state file for this role
@@ -204,6 +214,101 @@ transcript_for() {
   return 1
 }
 
+# role_boot_pattern <role> - the literal that identifies a role's transcript by its boot prompt.
+# There is no role field anywhere in a transcript: cwd, gitBranch, version, userType and
+# isSidechain are identical across all three roles, so the English of the boot prompt is the only
+# discriminator there is. Overridable per role (MOSSY_BOOT_SHAUN and so on) so a reworded prompt
+# is a config change rather than a code change - the failure would otherwise be silent.
+role_boot_pattern() {
+  local role="$1" up override
+  up="$(printf '%s' "${role}" | tr '[:lower:]' '[:upper:]')"
+  eval "override=\"\${MOSSY_BOOT_${up}:-}\""
+  if [ -n "${override}" ]; then printf '%s' "${override}"; return 0; fi
+  case "${role}" in
+    shaun) printf 'You are shaun, the driver' ;;
+    bitzer) printf 'You are bitzer, the steering layer' ;;
+    shirley) printf 'YOU ARE SHIRLEY' ;;
+    *) return 1 ;;
+  esac
+}
+
+readonly KNOWN_ROLES="shaun bitzer shirley"
+
+# resolve_session <projects> <cwd> <role> [state-file] - echo the session id whose transcript
+# belongs to <role>, or return 1.
+#
+# A registered id wins and costs one read. It is preferred even when it disagrees with the sweep,
+# because the tools re-record it on every call so it follows a /clear, while the sweep is a guess.
+#
+# The sweep exists because the WORKER registers nothing: she calls none of the harness tools, and
+# she is the role whose hands were being duplicated, so leaving her unresolvable would leave the
+# delivery fix half done. Two measured traps shape it. NEWEST wins, because /clear mints a new
+# transcript and shirley acquired six in 3.5 hours on 2026-07-30, with a last-wins sweep landing
+# on one retired two hours earlier. And a file's role is decided by the FIRST boot pattern of ANY
+# role in file order, not by whether this role's pattern appears anywhere, because shaun's own
+# transcript quotes both of the other two - he reads the prompts and types shirley's opening
+# prompt into her pane.
+resolve_session() {
+  local root="$1" cwd="$2" role="$3" sf="${4:-}" want dir f base line r pat hit
+  if [ -n "${sf}" ] && [ -s "${sf}" ]; then
+    hit="$(tail -n 1 "${sf}" 2>/dev/null | awk '$4 ~ /^[0-9a-f]{8}-/ {print $4}')"
+    if [ -n "${hit}" ]; then printf '%s' "${hit}"; return 0; fi
+  fi
+  want="$(role_boot_pattern "${role}")" || return 1
+  dir="${root}/$(encode_cwd "${cwd}")"
+  [ -d "${dir}" ] || return 1
+  # One grep per file rather than one shell iteration per line: -m1 stops at the first matching
+  # line and -o prints the pattern it matched, which is exactly the first-in-file-order rule.
+  local -a pats=()
+  for r in ${KNOWN_ROLES}; do
+    pat="$(role_boot_pattern "${r}")" || continue
+    pats+=(-e "${pat}")
+  done
+  while IFS= read -r f; do
+    [ -f "${f}" ] || continue
+    hit="$(head -n "${BOOT_SCAN_LINES}" "${f}" 2>/dev/null \
+      | LC_ALL=C grep -m1 -o -F "${pats[@]}" 2>/dev/null | head -n 1 || true)"
+    if [ -n "${hit}" ] && [ "${hit}" = "${want}" ]; then
+      base="$(basename "${f}")"
+      printf '%s' "${base%.jsonl}"
+      return 0
+    fi
+  done < <(ls -t "${dir}"/*.jsonl 2>/dev/null)
+  return 1
+}
+
+# run_live_role <role> <cwd> <state-file> <pane> <max-age> - classify a ROLE, resolving its
+# transcript first and re-resolving before it is allowed to say stuck.
+#
+# The re-resolve is the /clear guard. A registered session id can point at an ABANDONED
+# transcript, and if the turn on that file was still open when /clear fired, it stays open and
+# its mtime stops moving - which is exactly the shape of a wedge. So a stuck verdict is re-taken
+# against a fresh sweep, once. Only the stuck path pays, which is the rare one, and a genuine
+# wedge survives it because the sweep finds no newer file.
+run_live_role() {
+  local role="$1" cwd="$2" sf="$3" pane="$4" max_age="$5" sid t topen age plive=-1 verdict sid2
+  sid="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" "${sf}" || true)"
+  [ -n "${pane}" ] && plive="$(pane_live "${pane}")"
+  verdict="$(classify_for_session "${sid}" "${cwd}" "${sf}" "${plive}" "${max_age}")"
+  if [ "${verdict}" = "stuck" ]; then
+    sid2="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" '' || true)"
+    if [ -n "${sid2}" ] && [ "${sid2}" != "${sid}" ]; then
+      verdict="$(classify_for_session "${sid2}" "${cwd}" "${sf}" "${plive}" "${max_age}")"
+    fi
+  fi
+  printf '%s' "${verdict}"
+}
+
+# classify_for_session <session> <cwd> <state-file> <pane-live> <max-age> - gather and classify
+# for one known session id.
+classify_for_session() {
+  local sid="$1" cwd="$2" sf="$3" plive="$4" max_age="$5" t="" topen=0 age
+  [ -n "${sid}" ] && t="$(transcript_for "$(projects_dir)" "${cwd}" "${sid}" || true)"
+  if [ -n "${t}" ] && turn_open "${t}"; then topen=1; fi
+  age="$(activity_age "${t}" "${sf}")"
+  classify_liveness "${topen}" "${age}" "${plive}" "${max_age}"
+}
+
 # turn_open <transcript> - return 0 if the agent's turn is still running, 1 if it ended.
 #
 # The harness writes a system record with subtype turn_duration at every turn end; it is present
@@ -290,18 +395,19 @@ verdict_code() {
 
 # run_live <session> <cwd> <state-file> <pane> <max-age> - gather the three inputs and classify.
 run_live() {
-  local sid="$1" cwd="$2" sf="$3" pane="$4" max_age="$5" t="" topen=0 age plive=-1 verdict
-  t="$(transcript_for "${PROJECTS_DIR}" "${cwd}" "${sid}" || true)"
-  if [ -n "${t}" ] && turn_open "${t}"; then topen=1; fi
-  age="$(activity_age "${t}" "${sf}")"
-  [ -n "${pane}" ] && plive="$(pane_live "${pane}")"
-  verdict="$(classify_liveness "${topen}" "${age}" "${plive}" "${max_age}")"
+  local sid="$1" cwd="$2" sf="$3" pane="$4" max_age="$5" role="$6" plive=-1 verdict
+  if [ -n "${role}" ]; then
+    verdict="$(run_live_role "${role}" "${cwd}" "${sf}" "${pane}" "${max_age}")"
+  else
+    [ -n "${pane}" ] && plive="$(pane_live "${pane}")"
+    verdict="$(classify_for_session "${sid}" "${cwd}" "${sf}" "${plive}" "${max_age}")"
+  fi
   printf '%s\n' "${verdict}"
   verdict_code "${verdict}"
 }
 
 main() {
-  local classify=0 turn_open_in="" age_in="" pane_live_in="" sid="" cwd="${PWD}" sf="" pane=""
+  local classify=0 turn_open_in="" age_in="" pane_live_in="" sid="" cwd="${PWD}" sf="" pane="" role=""
   local max_age="${MAX_AGE}"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -311,6 +417,7 @@ main() {
       --pane-live) shift; [ $# -gt 0 ] || die "--pane-live needs a value"; pane_live_in="$1" ;;
       --max-age) shift; [ $# -gt 0 ] || die "--max-age needs a value"; max_age="$1" ;;
       --session) shift; [ $# -gt 0 ] || die "--session needs a value"; sid="$1" ;;
+      --role) shift; [ $# -gt 0 ] || die "--role needs a value"; role="$1" ;;
       --cwd) shift; [ $# -gt 0 ] || die "--cwd needs a value"; cwd="$1" ;;
       --state-file) shift; [ $# -gt 0 ] || die "--state-file needs a value"; sf="$1" ;;
       --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
@@ -336,8 +443,8 @@ main() {
     return $?
   fi
 
-  [ -n "${sid}" ] || die "need --session <id> (or --classify with explicit inputs)"
-  run_live "${sid}" "${cwd}" "${sf}" "${pane}" "${max_age}"
+  [ -n "${sid}${role}" ] || die "need --role <name> or --session <id> (or --classify with explicit inputs)"
+  run_live "${sid}" "${cwd}" "${sf}" "${pane}" "${max_age}" "${role}"
 }
 
 # Run main only when executed, not when sourced - so the test can source this file and drive the
