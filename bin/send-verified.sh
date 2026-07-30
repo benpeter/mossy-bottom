@@ -57,7 +57,11 @@ SV_GROW_SLEEP="${SV_GROW_SLEEP:-0.5}"
 LIVENESS_READ="${MOSSY_LIVENESS_READ:-${SCRIPT_DIR}/liveness-read.sh}"
 LIVENESS_APPEND="${MOSSY_LIVENESS_APPEND:-${SCRIPT_DIR}/liveness-append.sh}"
 SV_STATE_DIR="${MOSSY_STATE_DIR:-}"
-SV_AGENT_CWD="${MOSSY_AGENT_CWD:-${PWD}}"
+# NOT defaulted to $PWD. The heartbeat window inherits the harness repo as its cwd (bin/barn.sh:674
+# has no -c) while the agents run in the target repo, so $PWD resolves the wrong project dir and
+# every send falls back to the timmy probe this was meant to replace. Observed live 2026-07-31
+# 00:56:21: a landed bitzer nudge logged "never appended after send + retry".
+SV_AGENT_CWD="${MOSSY_AGENT_CWD:-}"
 
 die() { printf 'send-verified: %s\n' "$1" >&2; exit "${EXIT_USAGE}"; }
 
@@ -162,17 +166,31 @@ receiver_grew() {
 # session id; that indirection is deliberate, because /clear mints a new transcript file and a
 # cached path would go stale (shirley acquired six in 3.5 hours on 2026-07-30).
 receiver_transcript() {
-  local pane="$1" role sf
+  local pane="$1" role sf cwd
   [ -n "${SV_STATE_DIR}" ] || return 1
   [ -x "${LIVENESS_READ}" ] || return 1
   role="$(role_for_pane "${pane}")" || return 1
   sf="${SV_STATE_DIR}/liveness/${role}.state"
+  cwd="$(receiver_cwd "${SV_STATE_DIR}")"
   # resolve_session prefers the registered session id and sweeps for the role only when there is
   # none - which is the worker's case, since she calls none of the harness tools.
   # shellcheck source=/dev/null
   ( . "${LIVENESS_READ}"
-    sid="$(resolve_session "$(projects_dir)" "${SV_AGENT_CWD}" "${role}" "${sf}")" || exit 1
-    transcript_for "$(projects_dir)" "${SV_AGENT_CWD}" "${sid}" )
+    sid="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" "${sf}")" || exit 1
+    transcript_for "$(projects_dir)" "${cwd}" "${sid}" )
+}
+
+# receiver_cwd <state-dir> - the agents' working directory, derived from the state dir rather than
+# taken from $PWD. Explicit MOSSY_AGENT_CWD still wins. Mirrors liveness-read's agent_cwd, and only
+# a TRAILING /.mossy is stripped.
+receiver_cwd() {
+  local sd="${1:-}"
+  [ -n "${SV_AGENT_CWD}" ] && { printf '%s' "${SV_AGENT_CWD}"; return 0; }
+  [ -n "${sd}" ] || { printf '%s' "${PWD}"; return 0; }
+  case "${sd}" in
+    */.mossy) printf '%s' "${sd%/.mossy}" ;;
+    *) printf '%s' "${sd}" ;;
+  esac
 }
 
 # role_for_pane <pane> - which role owns this pane, from .barn-panes ("<role>=<pane>" per line,

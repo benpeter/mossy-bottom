@@ -273,8 +273,11 @@ printf '{"type":"user","promptSource":"typed","sessionId":"%s","timestamp":"2026
 
 (
   cd / || exit 1
+  # export, not an assignment prefix: in default bash mode a prefix before `source` does not
+  # persist, and the helper reads these at source time.
+  export MOSSY_STATE_DIR="$sd" MOSSY_CLAUDE_PROJECTS="$proj"
   # shellcheck source=/dev/null
-  MOSSY_STATE_DIR="$sd" MOSSY_CLAUDE_PROJECTS="$proj" . "$sv"
+  . "$sv"
   set +o pipefail
   t="$(receiver_transcript '%9001')" && printf '  resolved: %s\n' "$t" || printf '  resolved: NOTHING\n'
 ) >"$tmp/e2e.out" 2>&1
