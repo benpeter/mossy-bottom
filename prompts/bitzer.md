@@ -150,6 +150,16 @@ message you relay by hand.
     the fix. A worker who finds one and files it has found the exception, not a bug.
   - **Record each one in the parity document instead**, in the same pass you already own. That is
     where a divergence lives when it is a decision rather than work.
+  - **The ZONE is the rule, never the value inside it.** The Farmer names regions, and the copy
+    in them is his: wording, figures and link targets keep changing and none of it derives from
+    the source. So never diff a zone against the source, and **never quote a string, a number or
+    a link target out of one as a measurement** - it is copy in flight, not a parity result. A
+    capture or crawl that walks a whole page EXCLUDES these zones from the comparison rather than
+    recording a delta someone then has to explain. contitires, 2026-07-30: the Farmer pinned a
+    figure and a link target, and both had moved before the guardrail was written.
+  - **Check a zone against the single rule and nothing else.** No commercial claim, no assertion
+    of the owner's copyright, no implication the owner operates it. One of those creeping in is
+    worth raising. A wording change that keeps all three true is not a finding.
   - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
     copyright and operator identity. Geometry, colour, copy tone and behaviour are still
     match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
