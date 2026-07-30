@@ -510,5 +510,61 @@ beat "$pfdk" "$tmp/dk_shaun.fp" "$tmp/dk_worker.fp" "$dk_fp"   # beat 4: streak 
 if grep -q 'WAKE-BACKSTOP-XYZZY' "$dk_log" 2>/dev/null; then no "defaults: backstop must NOT fire by streak 3 under the default K=4 (default silently lowered to 3?)"; else ok "defaults: default backstop K=4 - no fire through streak 3 (production default unchanged; K=3 would have fired here)"; fi
 if "$hb" -h 2>&1 | grep -q 'cadence, default 300'; then ok "defaults: production cadence default documented 300s (no MOSSY_HEARTBEAT_SECS override -> the fixed interval the #36 redesign is measured against)"; else no "defaults: 300s cadence default not documented in --help"; fi
 
+# ============================================================================
+# #36 WORKER-DONE WITH LIVENESS ACTIVE - the production path, and a regression guard.
+#
+# Every other worker case above runs with liveness INERT: their fixture panes have no transcript, so
+# liveness-read resolves nothing and stuck-check falls back to reading the screen. That is why they
+# kept passing when the done-wake broke in production.
+#
+# Here the worker and shaun both have a resolvable transcript whose turn is CLOSED, which is what a
+# real finished slice looks like. Under liveness a closed turn is 'parked', so stuck-check returns 10
+# rather than 20 - and worker_verdict used to infer 'done' from 20 alone, so it read 'alive' and NO
+# wake fired. Observed live 2026-07-31: worker-done pinned at 2 for twelve minutes while shirley
+# worked, with the K-beat backstop dead by the same gate. Both of #36's paths were gone.
+#
+# It also fires on BEAT 1 here, not beat 2. The two-beat confirm existed because a momentary idle
+# between tool calls looked done; a turn_duration record is not momentary, so no confirm is needed.
+# ============================================================================
+wdl_root="$tmp/wdl"
+wdl_sd="$wdl_root/.mossy"
+wdl_proj="$tmp/wdlproj"
+wdl_enc="$(printf '%s' "$wdl_root" | tr './' '--')"
+mkdir -p "$wdl_sd/liveness" "$wdl_proj/$wdl_enc"
+
+# A transcript whose turn ENDED: an assistant text block, then the harness's turn markers.
+wdl_closed() {
+  cat >"$wdl_proj/$wdl_enc/$1.jsonl" <<EOF
+{"type":"user","promptSource":"typed","sessionId":"$1","timestamp":"2026-07-31T01:00:00.000Z","message":{"role":"user","content":"$2"}}
+{"type":"assistant","sessionId":"$1","timestamp":"2026-07-31T01:05:00.100Z","message":{"role":"assistant","content":[{"type":"text","text":"slice done, handing back"}]}}
+{"type":"system","subtype":"turn_duration","durationMs":300000,"sessionId":"$1","timestamp":"2026-07-31T01:05:00.200Z"}
+EOF
+}
+wdl_closed 'aaaa1111-0000-0000-0000-00000000shau' 'You are shaun, the driver in the Mossy Bottom deference chain.'
+wdl_closed 'bbbb2222-0000-0000-0000-0000000shirl' 'YOU ARE SHIRLEY, the worker.'
+
+wdl_shaun="hbt_wdl_shaun_$$"
+make_wakeable "$wdl_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wdl_shirley="hbt_wdl_shirley_$$"
+make_fixture "$wdl_shirley" "$idle_box"
+printf 'shaun=%s\nshirley=%s\n' "$wdl_shaun" "$wdl_shirley" >"$wdl_sd/.barn-panes"
+
+# beat_live - a beat with the liveness inputs wired, which is how production reaches this code.
+beat_live() {
+  OUT="$(MOSSY_STATE_DIR="$wdl_sd" MOSSY_CLAUDE_PROJECTS="$wdl_proj" \
+    MOSSY_SHAUN_FP="$tmp/wdl_shaun.fp" MOSSY_WORKER_FP="$tmp/wdl_worker.fp" \
+    MOSSY_BACKSTOP_FP="$tmp/wdl_backstop.fp" "$hb" --once --panes "$wdl_sd/.barn-panes" 2>&1)"
+}
+
+# Sanity first: liveness really is active here, or the rest of this case proves nothing.
+wdl_lv="$(MOSSY_CLAUDE_PROJECTS="$wdl_proj" MOSSY_STATE_DIR="$wdl_sd" "$here/liveness-read.sh" --role shirley 2>/dev/null)"
+if [ "$wdl_lv" = "parked" ]; then ok "worker-done/liveness: the worker's closed turn reads 'parked' (liveness IS active)"; else no "worker-done/liveness: setup wrong, liveness said '${wdl_lv:-nothing}' not parked"; fi
+
+beat_live
+if log_has 'shirley DONE'; then ok "worker-done/liveness beat 1: a closed turn is DONE without a two-beat confirm"; else no "worker-done/liveness beat 1: heartbeat did not call it DONE ($OUT)"; fi
+if log_has 'worker-done wake delivered + verified'; then ok "worker-done/liveness beat 1: wake DELIVERED + VERIFIED to shaun"; else no "worker-done/liveness beat 1: wake not delivered ($OUT)"; fi
+if log_has 'worker-alert'; then no "worker-done/liveness: NOT the #29 worker-alert (a parked worker is not stalled)"; else ok "worker-done/liveness: NOT the #29 worker-alert (a parked worker is not stalled)"; fi
+if log_has 'stuck-recovery'; then no "worker-done/liveness: shaun NOT given a stuck-recovery (his turn ended, he is parked)"; else ok "worker-done/liveness: shaun NOT given a stuck-recovery (his turn ended, he is parked)"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
