@@ -435,6 +435,53 @@ else
 fi
 
 # ============================================================================
+# role_of_pane <state-dir> <pane> - which role owns a pane, from .barn-panes.
+#
+# This is what lets the change take effect WITHOUT a chain relaunch. heartbeat.sh is a running
+# bash process, so an edit to it needs a restart; but it re-execs stuck-check.sh by path on every
+# beat, so an edit THERE lands on the next beat. stuck-check therefore has to derive the role by
+# itself from what it already has - a pane id - rather than waiting for a caller to pass it.
+# ============================================================================
+printf '\n== role_of_pane (derive the role from the pane, so no caller has to change) ==\n'
+
+bp="$tmp/bpdir"
+mkdir -p "$bp"
+cat >"$bp/.barn-panes" <<'EOF'
+bitzer=%2775
+shaun=%2776
+shirley=%2777
+EOF
+for pair in "%2775:bitzer" "%2776:shaun" "%2777:shirley"; do
+  p="${pair%%:*}"; want="${pair##*:}"
+  got="$(role_of_pane "$bp" "$p")"
+  if [ "$got" = "$want" ]; then ok "pane $p -> $want"; else no "pane $p -> '$got', wanted $want"; fi
+done
+if role_of_pane "$bp" '%9999' >/dev/null 2>&1; then
+  no "an unknown pane must not resolve to a role"
+else
+  ok "an unknown pane resolves to nothing"
+fi
+if role_of_pane "$tmp/nodir" '%2776' >/dev/null 2>&1; then
+  no "a missing .barn-panes must not resolve to a role"
+else
+  ok "a missing .barn-panes resolves to nothing"
+fi
+
+# End to end through the CLI: a pane plus a state dir is enough to reach a verdict, which is
+# exactly what stuck-check has on hand.
+mkdir -p "$tmp/e2eproj/$enc"
+cp "$tmp/closed.jsonl" "$tmp/e2eproj/$enc/ffffffff-0000-0000-0000-00000000000f.jsonl"
+mkdir -p "$bp/liveness"
+printf '%s shaun standby ffffffff-0000-0000-0000-00000000000f STANDBY - parked\n' "$(date +%s)" >"$bp/liveness/shaun.state"
+out="$(MOSSY_CLAUDE_PROJECTS="$tmp/e2eproj" "$lr" --pane '%2776' --state-dir "$bp" --cwd "$cwd2" 2>/dev/null)"
+code=$?
+if [ "$out" = "parked" ] && [ "$code" -eq 10 ]; then
+  ok "CLI --pane + --state-dir resolves the role and returns parked/10"
+else
+  no "CLI --pane + --state-dir gave '$out' exit $code, wanted parked/10"
+fi
+
+# ============================================================================
 # CLI: the verdict word plus a distinct exit code per verdict, matching stuck-check.sh.
 # ============================================================================
 printf '\n== CLI verdicts and exit codes ==\n'
