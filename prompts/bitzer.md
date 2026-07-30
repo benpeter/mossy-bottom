@@ -161,9 +161,16 @@ message you relay by hand.
     material since your last compact, rather than waiting for the threshold to trip. Each
     concern then begins in fresh, light context. Use the curated focus string below and
     send it the same way (it queues into your input and runs when your current turn ends).
-  - **Reactively, at the threshold (the backstop).** As the LAST step of each sustaining
-    poll, after the substantive work above, gauge your own context and self-compact when
-    it is heavy:
+  - **Reactively, at the threshold (the backstop).** As the FIRST step of each sustaining
+    poll, BEFORE the substantive work above, gauge your own context and self-compact when
+    it is heavy. First, not last, and the reason is mechanical: a self-sent `/compact`
+    cannot fire until your current turn ends, so a check placed at the end of a long poll
+    queues a compact that lands after the turn it was meant to protect. Run 3, 2026-07-30:
+    this check sat last, bitzer climbed 64% to 84% over two hours across many polls, and it
+    compacted only when an outside nudge arrived while it happened to be idle. Its own
+    reading afterwards: "a pane cannot act on input while mid-turn, so my own /compact can
+    only fire at turn end. The gauge check therefore belongs early in a poll, since the last
+    step of a long turn is already too late to compact from." Gauge first, then work:
   1. **Gauge.** Your own pane id is the `bitzer=` line in
      `${MOSSY_STATE_DIR}/.barn-panes`; the reader is a control-plane tool at
      `${MOSSY_REPO_DIR}/bin/context-read.sh` (absolute path, the same pattern as the
@@ -183,10 +190,13 @@ message you relay by hand.
        A spurious self-compact would dump your context uncurated for no reason, whereas a
        skip is safe - auto-compaction remains the backstop for a genuine overflow.
   2. **Threshold, and 80% as the hard ceiling.** context-read defaults to 70% used
-     (override with `MOSSY_CONTEXT_THRESHOLD`). Treat 80% as a HARD CEILING you never
-     exceed. 70 sits well BELOW it on purpose: the reactive compact fires at 70 and the
-     proactive boundary compaction above keeps you lower still, so a curated compact always
-     lands before you approach 80 - you should never see it. 70 also matches shirley's
+     (override with `MOSSY_CONTEXT_THRESHOLD`, a live knob read at each invocation, so it
+     needs no relaunch). Treat 80% as a HARD CEILING you never exceed. 70 sits well BELOW
+     it on purpose: the reactive compact fires at 70 and the proactive boundary compaction
+     above keeps you lower still, so a curated compact always lands before you approach 80.
+     If you ever read 80 or above, the gauge is firing too late for this run's poll length:
+     re-invoke context-read with `MOSSY_CONTEXT_THRESHOLD=60` from then on and say so in a
+     tick, rather than waiting for the Farmer to notice the climb. 70 also matches shirley's
      mid-slice backstop and stays clear of the ~85-90% where the UNCURATED auto-compaction
      fires. A read at or above 80 means a compact is overdue: do it now, before starting
      another concern. Note that shirley is NOT compacted: shaun `/clear`s her at every
