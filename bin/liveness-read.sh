@@ -124,7 +124,10 @@ Live mode (gathers the inputs itself):
   --session <id>    the agent's Claude Code session id (its transcript is <id>.jsonl)
   --cwd <path>      the agent's working directory (default: $PWD)
   --state-file <f>  the append-only state file for this role
-  --pane <id>       tmux pane, read ONLY for the spinner/retry-ladder veto
+  --pane <id>       tmux pane, read for the spinner/retry-ladder veto, and used to derive the
+                    role from <state-dir>/.barn-panes when --role and --session are both absent
+  --state-dir <d>   the run's state dir (env MOSSY_STATE_DIR). Supplies .barn-panes for the
+                    pane-to-role lookup and liveness/<role>.state when --state-file is absent
 
 Verdict (printed) and exit code:
   working  0   advancing: a live pane, or an open turn that appended inside max-age
@@ -279,6 +282,20 @@ resolve_session() {
   return 1
 }
 
+# role_of_pane <state-dir> <pane> - which role owns this pane, from .barn-panes ("<role>=<pane>"
+# per line, written by barn.sh at launch). Return 1 when it cannot be told.
+#
+# This is what makes the change apply without a chain relaunch. heartbeat.sh is a long-running
+# bash process, so editing it would need a restart - but it re-execs stuck-check.sh by path on
+# every beat, so a change there lands on the next beat. So the role is derived from the pane id
+# the caller already has, rather than from a new argument the caller would have to learn to pass.
+role_of_pane() {
+  local sd="$1" pane="$2" pf="$1/.barn-panes"
+  [ -n "${sd}" ] || return 1
+  [ -f "${pf}" ] || return 1
+  awk -F= -v p="${pane}" '$2==p {print $1; ok=1} END{exit !ok}' "${pf}"
+}
+
 # run_live_role <role> <cwd> <state-file> <pane> <max-age> - classify a ROLE, resolving its
 # transcript first and re-resolving before it is allowed to say stuck.
 #
@@ -410,6 +427,7 @@ run_live() {
 
 main() {
   local classify=0 turn_open_in="" age_in="" pane_live_in="" sid="" cwd="${PWD}" sf="" pane="" role=""
+  local state_dir="${MOSSY_STATE_DIR:-}"
   local max_age="${MAX_AGE}"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -420,6 +438,7 @@ main() {
       --max-age) shift; [ $# -gt 0 ] || die "--max-age needs a value"; max_age="$1" ;;
       --session) shift; [ $# -gt 0 ] || die "--session needs a value"; sid="$1" ;;
       --role) shift; [ $# -gt 0 ] || die "--role needs a value"; role="$1" ;;
+      --state-dir) shift; [ $# -gt 0 ] || die "--state-dir needs a value"; state_dir="$1" ;;
       --cwd) shift; [ $# -gt 0 ] || die "--cwd needs a value"; cwd="$1" ;;
       --state-file) shift; [ $# -gt 0 ] || die "--state-file needs a value"; sf="$1" ;;
       --pane) shift; [ $# -gt 0 ] || die "--pane needs a value"; pane="$1" ;;
@@ -445,7 +464,14 @@ main() {
     return $?
   fi
 
-  [ -n "${sid}${role}" ] || die "need --role <name> or --session <id> (or --classify with explicit inputs)"
+  # A pane plus a state dir is enough: derive the role, and its state file, ourselves.
+  if [ -z "${role}" ] && [ -z "${sid}" ] && [ -n "${pane}" ] && [ -n "${state_dir}" ]; then
+    role="$(role_of_pane "${state_dir}" "${pane}" || true)"
+  fi
+  if [ -z "${sf}" ] && [ -n "${role}" ] && [ -n "${state_dir}" ]; then
+    sf="${state_dir}/liveness/${role}.state"
+  fi
+  [ -n "${sid}${role}" ] || die "need --role <name>, --session <id>, or --pane with --state-dir"
   run_live "${sid}" "${cwd}" "${sf}" "${pane}" "${max_age}" "${role}"
 }
 

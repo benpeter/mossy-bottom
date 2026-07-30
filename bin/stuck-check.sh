@@ -262,9 +262,15 @@ run_pane() {
   # Ground truth, when we can resolve it. Invoked by path like the heartbeat invokes us, so the
   # two tools stay independent. Any failure leaves liveness empty and classify_turn_live falls
   # back to the screen - never worse than what this replaced.
-  if [ -n "${SESSION_ID}" ] && [ -x "${LIVENESS_READ}" ]; then
-    liveness="$("${LIVENESS_READ}" --session "${SESSION_ID}" --cwd "${AGENT_CWD}" \
-      --state-file "${STATE_FILE}" --pane "${pane}" 2>/dev/null || true)"
+  #
+  # We pass the pane and the state dir and let the reader derive the role from .barn-panes, so
+  # NO CALLER HAS TO CHANGE. That is deliberate: heartbeat.sh is a long-running process and
+  # editing it would need a chain relaunch, but it re-execs this script by path every beat.
+  if [ -x "${LIVENESS_READ}" ]; then
+    liveness="$("${LIVENESS_READ}" --pane "${pane}" --cwd "${AGENT_CWD}" \
+      ${MOSSY_STATE_DIR:+--state-dir "${MOSSY_STATE_DIR}"} \
+      ${SESSION_ID:+--session "${SESSION_ID}"} \
+      ${STATE_FILE:+--state-file "${STATE_FILE}"} 2>/dev/null || true)"
   fi
   verdict="$(classify_turn_live "${liveness}" "${state}" "${has_standby}" "${changed}")"
   printf '%s\n' "${verdict}"
