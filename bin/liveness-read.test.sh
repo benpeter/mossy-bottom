@@ -387,6 +387,54 @@ else
 fi
 
 # ============================================================================
+# A /clear must not read as a hang.
+#
+# /clear mints a NEW transcript and abandons the old one. If the abandoned file's last turn was
+# still open, it stays open forever and its mtime stops moving, which is indistinguishable from a
+# wedge. shirley acquired six transcripts in 3.5 hours on 2026-07-30, so this is a several-times-
+# an-hour event, not a corner case.
+#
+# So a stuck verdict has to be re-checked against a fresh sweep before it is returned. Only the
+# stuck path pays for it, which is the rare one.
+# ============================================================================
+printf '\n== a /clear does not read as a hang (re-resolve before declaring stuck) ==\n'
+
+rc2="$tmp/clearproj/$enc"
+mkdir -p "$rc2"
+old='11111111-0000-0000-0000-00000000aaaa'
+new='22222222-0000-0000-0000-00000000bbbb'
+
+# The ABANDONED transcript: shirley's boot prompt, a turn left OPEN, mtime 900s stale.
+boot "$rc2/$old.jsonl" 'YOU ARE SHIRLEY, the worker. Panes: bitzer=%2775, shaun=%2776'
+printf '{"type":"assistant","sessionId":"S","timestamp":"2026-07-30T20:00:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}\n' >>"$rc2/$old.jsonl"
+# The LIVE transcript after the /clear: same role, fresh, mid-turn.
+boot "$rc2/$new.jsonl" 'YOU ARE SHIRLEY, the worker. Panes: bitzer=%2775, shaun=%2776'
+printf '{"type":"assistant","sessionId":"T","timestamp":"2026-07-30T21:42:44.297Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{}}]}}\n' >>"$rc2/$new.jsonl"
+
+now3="$(date +%s)"
+touch -t "$(date -r "$((now3 - 900))" '+%Y%m%d%H%M.%S')" "$rc2/$old.jsonl"
+touch -t "$(date -r "$((now3 - 5))" '+%Y%m%d%H%M.%S')" "$rc2/$new.jsonl"
+
+# The state file still registers the ABANDONED session, because nothing has re-recorded it yet.
+printf '%s shirley working %s Bash\n' "$((now3 - 900))" "$old" >"$tmp/clear.state"
+
+got="$(MOSSY_CLAUDE_PROJECTS="$tmp/clearproj" run_live_role shirley "$cwd2" "$tmp/clear.state" '' 600)"
+if [ "$got" = "working" ]; then
+  ok "a stale registered session re-resolves to the post-/clear transcript -> working"
+else
+  no "a /clear read as '$got', wanted working"
+fi
+
+# And the guard must not blunt a real wedge: with no newer transcript to find, stuck stands.
+rm -f "$rc2/$new.jsonl"
+got="$(MOSSY_CLAUDE_PROJECTS="$tmp/clearproj" run_live_role shirley "$cwd2" "$tmp/clear.state" '' 600)"
+if [ "$got" = "stuck" ]; then
+  ok "with no newer transcript, a stale open turn still reads stuck"
+else
+  no "re-resolve blunted a real wedge: got '$got', wanted stuck"
+fi
+
+# ============================================================================
 # CLI: the verdict word plus a distinct exit code per verdict, matching stuck-check.sh.
 # ============================================================================
 printf '\n== CLI verdicts and exit codes ==\n'
