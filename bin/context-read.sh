@@ -149,6 +149,15 @@ done
 case "$THRESHOLD" in '' | *[!0-9]*) unavailable "threshold must be an integer 0..100 (got '${THRESHOLD}')"; exit "${EXIT_UNAVAIL}" ;; esac
 [ "$THRESHOLD" -le 100 ] || { unavailable "threshold must be 0..100 (got '${THRESHOLD}')"; exit "${EXIT_UNAVAIL}"; }
 
+CR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+LIVENESS_APPEND="${MOSSY_LIVENESS_APPEND:-${CR_DIR}/liveness-append.sh}"
+
+# Liveness hook. Record that the CALLING agent's session was alive; see bin/liveness-append.sh.
+# Best-effort and silent: it can neither fail this tool nor change its output. A call driven by
+# the heartbeat carries no CLAUDE_CODE_SESSION_ID and writes nothing, so the observer can never
+# refresh the timestamp the stuck check is about to read.
+"$LIVENESS_APPEND" --tool context-read >/dev/null 2>&1 || true
+
 if [ -n "$pane" ]; then
   command -v tmux >/dev/null 2>&1 || { unavailable "tmux not found"; exit "${EXIT_UNAVAIL}"; }
   # Two frames, and they have to agree. A capture taken while the TUI repaints returns a
