@@ -130,5 +130,107 @@ if [ "$code" -eq 64 ]; then ok "missing timmy -> usage error 64"; else no "missi
 "$sv" --help >/dev/null 2>&1; code=$?
 if [ "$code" -eq 0 ]; then ok "--help -> exit 0"; else no "--help -> expected 0, got $code"; fi
 
+# ============================================================================
+# ACCEPTANCE 5: a prompt that LANDED but whose agent is slow to first token reads as
+# delivered.
+#
+# The idle/busy probe measures FIRST TOKEN latency and calls it delivery failure. Measured on
+# 2026-07-30 across the live chain: first-token latency median 7.81s for bitzer, 9.09s for
+# shaun, 12.14s for shirley, and 82.45s on the worst confirmed-landed prompt. 46 to 63 percent
+# of LANDED prompts crossed the 8s window, which is the "roughly half FAILED to submit" the
+# harness logged. There is not one genuinely failed submit in the corpus.
+#
+# The receiver's transcript is the honest signal: over 86 matched cross-transcript sends it
+# grew within 3.09s of the Enter in 86 of 86 cases, median 0.59s. Claude Code appends the user
+# record (or a queue-operation enqueue on a busy pane) at SUBMIT, before any token comes back.
+#
+# receiver_grew <pane> <baseline> is the new seam: 0 grew, 1 not yet, 2 unresolvable.
+# submitted must accept 0 as proof, and fall back to the timmy poll only on 2.
+# ============================================================================
+printf '\n== acceptance 5: landed but slow to first token (transcript beats the idle probe) ==\n'
+
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  # The 82.45s case: the pane never goes non-idle inside the poll window...
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 1; }
+  # ...but the receiver's transcript grew 0.6s after the Enter.
+  # shellcheck disable=SC2329
+  receiver_grew() { return 0; }
+  submitted DUMMY 0; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf 'ok   - a grown receiver transcript proves delivery while the pane is still idle\n'
+  else
+    printf 'FAIL - grown transcript ignored: submitted returned %s, wanted 0\n' "$rc"
+  fi
+) | tee "$tmp/slow-token.out"
+grep -q '^ok' "$tmp/slow-token.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
+# A landed prompt must NOT be re-sent. The cost of getting this wrong is on the record: shaun
+# to bitzer at 20:52:12 "THIRD DUPLICATE, and this one has a WORSE SHAP..." and again at
+# 21:04:24 "FOURTH DUPLICATE, and it kills the obvious wor...".
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  deliver_calls=0
+  # shellcheck disable=SC2329
+  deliver() { deliver_calls=$((deliver_calls + 1)); }
+  # shellcheck disable=SC2329
+  clear_input() { :; }
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 1; }   # slow first token, forever
+  # shellcheck disable=SC2329
+  receiver_grew() { return 0; }   # but it landed
+  send_verified DUMMY 'x'; rc=$?
+  if [ "$deliver_calls" -eq 1 ] && [ "$rc" -eq 0 ]; then
+    printf 'ok   - a landed-but-slow prompt is delivered ONCE, never duplicated\n'
+  else
+    printf 'FAIL - duplicate send: %s deliveries rc %s, wanted 1 and 0\n' "$deliver_calls" "$rc"
+  fi
+) | tee "$tmp/no-dup.out"
+grep -q '^ok' "$tmp/no-dup.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
+# When the transcript cannot be resolved (exit 2) the helper must fall back to today's timmy
+# probe rather than declaring either outcome. That keeps the change from ever being worse than
+# what it replaces - the heartbeat itself has no transcript at all.
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  # shellcheck disable=SC2329
+  receiver_grew() { return 2; }   # unresolvable
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 0; }   # the old signal says the turn started
+  submitted DUMMY 0; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf 'ok   - unresolvable transcript falls back to the timmy probe\n'
+  else
+    printf 'FAIL - fallback broken: submitted returned %s, wanted 0\n' "$rc"
+  fi
+) | tee "$tmp/fallback.out"
+grep -q '^ok' "$tmp/fallback.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
+# A genuinely unsent prompt must still fail. Neither signal says it landed, so the retry and
+# the nonzero exit both have to survive this change.
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  # shellcheck disable=SC2329
+  receiver_grew() { return 1; }   # transcript never grew
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 1; }   # pane never left idle
+  submitted DUMMY 0; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'ok   - neither signal firing still reads as NOT submitted\n'
+  else
+    printf 'FAIL - a genuinely unsent prompt read as submitted\n'
+  fi
+) | tee "$tmp/genuine-fail.out"
+grep -q '^ok' "$tmp/genuine-fail.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

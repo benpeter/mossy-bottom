@@ -165,5 +165,76 @@ sc_live "stalled call 2 (timmy exit 40, stable -> stalled -> stuck)" "$sl" "$tmp
 unset MOSSY_TIMMY
 tmux kill-session -t "$sl" 2>/dev/null
 
+# ============================================================================
+# classify_turn_live - the liveness layer over the pure core.
+#
+# The pane is a 54-line alternate screen with no scrollback, so has_standby and the capture
+# fingerprint are both read off a window that throws history away. Ground truth is the
+# harness-written transcript. This layer states the precedence in code: liveness WINS, and
+# classify_turn is the fallback for when no transcript can be resolved.
+#
+# Measured on 2026-07-30: 21 stuck-recovery wakes fired, all of them on a turn that had
+# already ended, and only 3 of the 21 were the scroll-off shape. The other 18 are the
+# parked-and-waiting case that liveness 'parked' now catches.
+# ============================================================================
+printf '\n== classify_turn_live (liveness wins, the scrape is the fallback) ==\n'
+
+# "<liveness> <state> <has_standby> <changed> <expected>"
+live_table=(
+  # liveness working outranks an idle, stable, marker-less pane - the 40-minute turn and the
+  # 529 ladder both arrive here, and both used to read stuck.
+  "working idle 0 0 working"
+  "working idle 1 0 working"
+  "working stalled 0 0 working"
+
+  # liveness parked maps to standby (exit 10), which is what heartbeat.sh already means by it.
+  # This is the 18-of-21 case: a completed turn, legitimately waiting, NO marker on the pane.
+  "parked idle 0 0 standby"
+  "parked idle 1 0 standby"
+  "parked stalled 0 0 standby"
+
+  # liveness stuck is the wedged turn: open, silent past the threshold, rendering nothing.
+  # It must NOT be softened by a marker that happens to be on screen.
+  "stuck idle 0 0 stuck"
+  "stuck idle 1 0 stuck"
+
+  # no liveness resolved -> fall back to the existing pure core, byte-for-byte behaviour.
+  "'' idle 1 0 standby"
+  "'' idle 0 0 stuck"
+  "'' idle 0 1 working"
+  "'' busy 0 0 working"
+  "'' stalled 0 0 stuck"
+)
+for row in "${live_table[@]}"; do
+  read -r lv state hs ch want <<<"$row"
+  [ "$lv" = "''" ] && lv=""
+  got="$(classify_turn_live "$lv" "$state" "$hs" "$ch")"
+  if [ "$got" = "$want" ]; then
+    ok "$(printf 'liveness=%-8s %-8s standby=%s changed=%s -> %s' "${lv:-none}" "$state" "$hs" "$ch" "$got")"
+  else
+    no "$(printf 'liveness=%-8s %-8s standby=%s changed=%s -> %s (wanted %s)' "${lv:-none}" "$state" "$hs" "$ch" "$got" "$want")"
+  fi
+done
+
+# has_standby must also be readable from the state FILE, not only from the capture, because a
+# marker scrolls off a 54-line viewport. 220 real markers exist in shaun's transcripts; the
+# pane showed none of them once a report followed. Three separator forms occur in the wild.
+printf '\n== has_standby from the state file (the marker that scrolled off) ==\n'
+sf="$tmp/shaun.state"
+for line in \
+  '1753906020 shaun standby STANDBY (context) - resume monitoring shirley' \
+  '1753906020 shaun standby STANDBY - resume monitoring shirley' \
+  '1753906020 shaun standby STANDBY — shirley on #366'; do
+  printf '%s\n' "$line" >"$sf"
+  if [ "$(standby_from_state "$sf")" = "1" ]; then
+    ok "state file marker recognised: ${line#* shaun standby }"
+  else
+    no "state file marker NOT recognised: ${line#* shaun standby }"
+  fi
+done
+printf '1753906500 shaun working timmy\n' >"$sf"
+if [ "$(standby_from_state "$sf")" = "0" ]; then ok "a working state line is not a standby"; else no "a working state line read as standby"; fi
+if [ "$(standby_from_state "$tmp/absent.state")" = "0" ]; then ok "a missing state file is not a standby"; else no "a missing state file read as standby"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
