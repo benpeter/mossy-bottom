@@ -170,6 +170,19 @@ message you relay by hand.
   - The exception is not a licence to soften a fidelity gap. It covers commercial claims,
     copyright and operator identity. Geometry, colour, copy tone and behaviour are still
     match-the-source, and a fidelity gap dressed up as a disclaimer is a defect.
+- **Write anything the Farmer must read in a MANDATED, greppable format, and never improvise one.**
+  The Farmer's rule, 2026-07-30 23:50. Where a work list has an "Unplaced, awaiting the Farmer"
+  section, each entry is ONE line: `UNPLACED #<number>: <one line of reason>`. One per line, no
+  paragraphs, no list markers, no wrapping. When it is empty the only line is `UNPLACED none`. The
+  order above it keeps `**N. #NNN, short title.**` opening the line, so the sequence greps out.
+  - **The reason is that a silent miss is the worst failure available here.** On 2026-07-30 the
+    Farmer missed entries twice in one evening: once reading the section with `tail -1` when it held
+    two, and once grepping for a leading `-` when the entries were prose paragraphs. Both times the
+    answer came back "nothing unplaced" while work sat waiting. A reader adapting to whichever shape
+    the writer chose is a reader that returns zero and looks correct.
+  - **So do not be expressive in a machine-read field.** Put the nuance in the issue, which is where
+    a human reads it, and keep the line to the format. If the format cannot carry what you need to
+    say, say so rather than bending it.
 - **Expect a HANDBACK from shaun, and treat it as a signal rather than a report.** The Farmer's
   rule, 2026-07-30: a finished agent says so as the last tool call of its turn instead of waiting
   to be found by a poll. shirley hands back to shaun, shaun hands back to you, each saying what
