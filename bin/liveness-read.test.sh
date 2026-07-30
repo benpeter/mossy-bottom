@@ -482,6 +482,57 @@ else
 fi
 
 # ============================================================================
+# agent_cwd <state-dir> - the agent's working directory, derived from the state dir.
+#
+# This is not a convenience, it is what makes the change fire at all. The heartbeat window is
+# created by bin/barn.sh:674 with NO -c, so it inherits the session's cwd, which barn.sh:140 sets
+# to the HARNESS repo. Meanwhile the agents run in the TARGET repo. So $PWD inside the heartbeat
+# is the wrong directory, it encodes to the wrong project dir, no transcript resolves, and the
+# whole reader silently falls back to reading the screen - which is what it replaced.
+#
+# MOSSY_STATE_DIR is the reliable anchor: barn sets it to <target>/.mossy in target mode, and to
+# the repo root in dogfood mode where the agents' cwd IS the repo root. Stripping a trailing
+# /.mossy gives the right answer in both.
+# ============================================================================
+printf '\n== agent_cwd (the heartbeat runs in the harness repo, the agents do not) ==\n'
+
+got="$(agent_cwd '/Users/ben/dev/adobe/cloudadoption/contitires-mossy/.mossy')"
+if [ "$got" = '/Users/ben/dev/adobe/cloudadoption/contitires-mossy' ]; then
+  ok "target mode: <target>/.mossy -> <target>"
+else
+  no "target mode gave '$got'"
+fi
+got="$(agent_cwd '/Users/ben/github/benpeter/mossy-bottom')"
+if [ "$got" = '/Users/ben/github/benpeter/mossy-bottom' ]; then
+  ok "dogfood mode: a state dir with no /.mossy suffix is left alone"
+else
+  no "dogfood mode gave '$got'"
+fi
+got="$(agent_cwd '')"
+if [ "$got" = "$PWD" ]; then ok "no state dir -> \$PWD"; else no "empty state dir gave '$got'"; fi
+# Only a trailing segment counts. A path that merely CONTAINS .mossy must not be truncated.
+got="$(agent_cwd '/Users/ben/x/.mossy/nested')"
+if [ "$got" = '/Users/ben/x/.mossy/nested' ]; then ok "only a TRAILING /.mossy is stripped"; else no "mid-path .mossy was stripped: '$got'"; fi
+
+# End to end with no --cwd at all, which is how the heartbeat will actually reach it.
+tgt="$tmp/tgt"
+mkdir -p "$tgt/.mossy/liveness"
+tenc="$(encode_cwd "$tgt")"
+mkdir -p "$tmp/cwdproj/$tenc"
+tsid='abcdef00-1111-2222-3333-444444444444'
+cp "$tmp/closed.jsonl" "$tmp/cwdproj/$tenc/$tsid.jsonl"
+printf 'shaun=%%2776\n' >"$tgt/.mossy/.barn-panes"
+printf '%s shaun standby %s STANDBY - parked\n' "$(date +%s)" "$tsid" >"$tgt/.mossy/liveness/shaun.state"
+
+out="$(cd / && MOSSY_CLAUDE_PROJECTS="$tmp/cwdproj" MOSSY_STATE_DIR="$tgt/.mossy" "$lr" --pane '%2776' 2>/dev/null)"
+code=$?
+if [ "$out" = "parked" ] && [ "$code" -eq 10 ]; then
+  ok "with NO --cwd and \$PWD wrong, the state dir still resolves the transcript"
+else
+  no "no --cwd gave '$out' exit $code, wanted parked/10"
+fi
+
+# ============================================================================
 # CLI: the verdict word plus a distinct exit code per verdict, matching stuck-check.sh.
 # ============================================================================
 printf '\n== CLI verdicts and exit codes ==\n'
