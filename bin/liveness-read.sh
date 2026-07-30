@@ -65,10 +65,12 @@
 # tva
 set -uo pipefail
 
-readonly EXIT_WORKING=0
-readonly EXIT_PARKED=10
-readonly EXIT_STUCK=20
-readonly EXIT_USAGE=64
+# Prefixed because send-verified.sh sources this file, and its own EXIT_USAGE is readonly too:
+# re-declaring a readonly name prints a warning to stderr even when the value is identical.
+readonly LR_EXIT_WORKING=0
+readonly LR_EXIT_PARKED=10
+readonly LR_EXIT_STUCK=20
+readonly LR_EXIT_USAGE=64
 
 # 600s: two heartbeat beats. See THE THRESHOLD above for the measurement behind it.
 MAX_AGE="${MOSSY_LIVENESS_MAX_AGE:-600}"
@@ -99,7 +101,7 @@ readonly BOOT_SCAN_LINES=60
 # tense and cost shaun three false positives of his own on 2026-07-29.
 RETRY_PATTERN="${MOSSY_RETRY_PATTERN:-(Retrying in [0-9]+s|attempt [0-9]+/[0-9]+)}"
 
-die() { printf 'liveness-read: %s\n' "$1" >&2; exit "${EXIT_USAGE}"; }
+die() { printf 'liveness-read: %s\n' "$1" >&2; exit "${LR_EXIT_USAGE}"; }
 
 usage() {
   cat <<'EOF'
@@ -386,10 +388,10 @@ activity_age() {
 
 verdict_code() {
   case "$1" in
-    working) return "${EXIT_WORKING}" ;;
-    parked) return "${EXIT_PARKED}" ;;
-    stuck) return "${EXIT_STUCK}" ;;
-    *) return "${EXIT_USAGE}" ;;
+    working) return "${LR_EXIT_WORKING}" ;;
+    parked) return "${LR_EXIT_PARKED}" ;;
+    stuck) return "${LR_EXIT_STUCK}" ;;
+    *) return "${LR_EXIT_USAGE}" ;;
   esac
 }
 
