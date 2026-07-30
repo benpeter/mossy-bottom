@@ -122,7 +122,9 @@ Live mode (gathers the inputs itself):
   --role <name>     shaun|bitzer|shirley - resolves the transcript itself, and re-resolves
                     before it will say stuck, so a /clear cannot read as a hang
   --session <id>    the agent's Claude Code session id (its transcript is <id>.jsonl)
-  --cwd <path>      the agent's working directory (default: $PWD)
+  --cwd <path>      the agent's working directory. Default: derived from --state-dir by
+                    stripping a trailing /.mossy, falling back to $PWD. Do not rely on $PWD -
+                    the heartbeat window runs in the harness repo, not where the agents run.
   --state-file <f>  the append-only state file for this role
   --pane <id>       tmux pane, read for the spinner/retry-ladder veto, and used to derive the
                     role from <state-dir>/.barn-panes when --role and --session are both absent
@@ -282,6 +284,24 @@ resolve_session() {
   return 1
 }
 
+# agent_cwd <state-dir> - the agent's working directory, derived from the state dir.
+#
+# Not a convenience. bin/barn.sh:674 creates the heartbeat window with no -c, so it inherits the
+# session cwd, which barn.sh:140 sets to the HARNESS repo - while the agents run in the TARGET
+# repo. So $PWD inside the heartbeat encodes to the wrong project dir, nothing resolves, and this
+# reader would silently fall back to the screen it exists to replace.
+#
+# MOSSY_STATE_DIR is the reliable anchor: <target>/.mossy in target mode, the repo root in dogfood
+# mode where the agents' cwd IS the repo root. Stripping a trailing /.mossy is right in both.
+agent_cwd() {
+  local sd="${1:-}"
+  [ -n "${sd}" ] || { printf '%s' "${PWD}"; return 0; }
+  case "${sd}" in
+    */.mossy) printf '%s' "${sd%/.mossy}" ;;
+    *) printf '%s' "${sd}" ;;
+  esac
+}
+
 # role_of_pane <state-dir> <pane> - which role owns this pane, from .barn-panes ("<role>=<pane>"
 # per line, written by barn.sh at launch). Return 1 when it cannot be told.
 #
@@ -426,7 +446,7 @@ run_live() {
 }
 
 main() {
-  local classify=0 turn_open_in="" age_in="" pane_live_in="" sid="" cwd="${PWD}" sf="" pane="" role=""
+  local classify=0 turn_open_in="" age_in="" pane_live_in="" sid="" cwd="" sf="" pane="" role=""
   local state_dir="${MOSSY_STATE_DIR:-}"
   local max_age="${MAX_AGE}"
   while [ $# -gt 0 ]; do
@@ -464,6 +484,9 @@ main() {
     return $?
   fi
 
+  # No --cwd given: derive it from the state dir rather than trusting $PWD, which inside the
+  # heartbeat window is the harness repo and not where the agents run.
+  [ -n "${cwd}" ] || cwd="$(agent_cwd "${state_dir}")"
   # A pane plus a state dir is enough: derive the role, and its state file, ourselves.
   if [ -z "${role}" ] && [ -z "${sid}" ] && [ -n "${pane}" ] && [ -n "${state_dir}" ]; then
     role="$(role_of_pane "${state_dir}" "${pane}" || true)"

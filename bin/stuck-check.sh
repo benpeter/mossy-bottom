@@ -51,7 +51,10 @@ STANDBY_PATTERN="${MOSSY_STANDBY_PATTERN:-^[[:space:]]*(⏺[[:space:]]*)?STANDBY
 LIVENESS_READ="${MOSSY_LIVENESS_READ:-${SCRIPT_DIR}/liveness-read.sh}"
 STATE_FILE="${MOSSY_STATE_FILE:-}"
 SESSION_ID="${MOSSY_SESSION_ID:-}"
-AGENT_CWD="${MOSSY_AGENT_CWD:-${PWD}}"
+# Deliberately NOT defaulted to $PWD. The heartbeat window inherits the harness repo as its cwd
+# (bin/barn.sh:674 has no -c), so $PWD here is the wrong tree; left empty, liveness-read derives
+# the agent's cwd from the state dir instead.
+AGENT_CWD="${MOSSY_AGENT_CWD:-}"
 
 die() { printf 'stuck-check: %s\n' "$1" >&2; exit "${EXIT_USAGE}"; }
 
@@ -85,8 +88,10 @@ Ground truth (optional; without it this tool reads the screen exactly as it alwa
   --session <id>     the agent's Claude Code session id (env MOSSY_SESSION_ID). Read from
                      --state-file when not given, which is preferable: /clear mints a new id
                      and the file follows it.
-  --agent-cwd <p>    the agent's working directory (env MOSSY_AGENT_CWD, default $PWD),
-                     needed to locate its transcript.
+  --agent-cwd <p>    the agent's working directory (env MOSSY_AGENT_CWD), needed to locate its
+                     transcript. Left unset on purpose: liveness-read derives it from the state
+                     dir, because the heartbeat window's own $PWD is the harness repo rather
+                     than the tree the agents run in.
   When a session resolves, bin/liveness-read.sh decides and this tool maps its verdict:
   working -> working, parked -> standby, stuck -> stuck. Otherwise the screen decides.
 
@@ -267,7 +272,8 @@ run_pane() {
   # NO CALLER HAS TO CHANGE. That is deliberate: heartbeat.sh is a long-running process and
   # editing it would need a chain relaunch, but it re-execs this script by path every beat.
   if [ -x "${LIVENESS_READ}" ]; then
-    liveness="$("${LIVENESS_READ}" --pane "${pane}" --cwd "${AGENT_CWD}" \
+    liveness="$("${LIVENESS_READ}" --pane "${pane}" \
+      ${AGENT_CWD:+--cwd "${AGENT_CWD}"} \
       ${MOSSY_STATE_DIR:+--state-dir "${MOSSY_STATE_DIR}"} \
       ${SESSION_ID:+--session "${SESSION_ID}"} \
       ${STATE_FILE:+--state-file "${STATE_FILE}"} 2>/dev/null || true)"
