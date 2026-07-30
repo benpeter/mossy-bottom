@@ -232,5 +232,57 @@ grep -q '^ok' "$tmp/fallback.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 ) | tee "$tmp/genuine-fail.out"
 grep -q '^ok' "$tmp/genuine-fail.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 
+# ============================================================================
+# The receiver's cwd must come from the state dir, not from $PWD.
+#
+# Same bug as the one fixed in liveness-read: the heartbeat window inherits the HARNESS repo as its
+# cwd (bin/barn.sh:674 has no -c) while the agents run in the TARGET repo. With $PWD as the default,
+# the sweep looks in the wrong ~/.claude/projects directory, resolves nothing, and every send falls
+# back to the timmy probe - so the delivery fix silently does not apply in production.
+#
+# Observed live 2026-07-31 00:56:21 on the running chain, which is what sent me looking:
+#   send-verified: pane %3336 never appended after send + retry - prompt NOT submitted
+#   heartbeat 00:56:21 | bitzer idle (%3336) -> nudge FAILED to submit after retry
+# That is the ORIGINAL first-token false negative, still firing because the transcript path that
+# was meant to replace it never resolved.
+# ============================================================================
+printf '\n== the receiver cwd comes from the state dir, not from $PWD ==\n'
+
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  printf '  target mode: %s\n' "$(receiver_cwd '/x/target/.mossy')"
+  printf '  dogfood mode: %s\n' "$(receiver_cwd '/x/harness')"
+  printf '  no state dir: %s\n' "$(receiver_cwd '')"
+) >"$tmp/cwd.out" 2>&1
+if grep -q 'target mode: /x/target$' "$tmp/cwd.out"; then ok "target mode: <target>/.mossy -> <target>"; else no "target mode: $(grep 'target mode' "$tmp/cwd.out")"; fi
+if grep -q 'dogfood mode: /x/harness$' "$tmp/cwd.out"; then ok "dogfood mode: a state dir with no /.mossy is left alone"; else no "dogfood mode: $(grep 'dogfood mode' "$tmp/cwd.out")"; fi
+if grep -q "no state dir: $PWD\$" "$tmp/cwd.out"; then ok "no state dir -> \$PWD"; else no "no state dir: $(grep 'no state dir' "$tmp/cwd.out")"; fi
+
+# End to end: a receiver whose transcript IS resolvable must be confirmed by its growth, from a
+# deliberately wrong $PWD, with only MOSSY_STATE_DIR to go on.
+e2e="$tmp/e2e"
+sd="$e2e/.mossy"
+proj="$tmp/e2eproj"
+enc="$(printf '%s' "$e2e" | tr './' '--')"
+sid='cccc3333-0000-0000-0000-00000000000c'
+mkdir -p "$sd/liveness" "$proj/$enc"
+printf 'shirley=%%9001\n' >"$sd/.barn-panes"
+printf '{"type":"user","promptSource":"typed","sessionId":"%s","timestamp":"2026-07-31T01:00:00Z","message":{"role":"user","content":"YOU ARE SHIRLEY, the worker."}}\n' "$sid" >"$proj/$enc/$sid.jsonl"
+
+(
+  cd / || exit 1
+  # shellcheck source=/dev/null
+  MOSSY_STATE_DIR="$sd" MOSSY_CLAUDE_PROJECTS="$proj" . "$sv"
+  set +o pipefail
+  t="$(receiver_transcript '%9001')" && printf '  resolved: %s\n' "$t" || printf '  resolved: NOTHING\n'
+) >"$tmp/e2e.out" 2>&1
+if grep -q "resolved: $proj/$enc/$sid.jsonl" "$tmp/e2e.out"; then
+  ok "a receiver's transcript resolves from the state dir with \$PWD wrong"
+else
+  no "receiver transcript did not resolve: $(cat "$tmp/e2e.out")"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
