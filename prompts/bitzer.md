@@ -221,7 +221,13 @@ message you relay by hand.
   a STANDBY shaun just because the run should continue. You still wake shaun
   directly to relay a Farmer directive or to start the run, regardless of worker
   state. When you do wake him: if shaun ended his turn with a `STANDBY` line, nudge
-  his pane. Put him on standby when the Farmer wants to pause. If the STANDBY names
+  his pane. Read that from the file rather than his pane. His pane is a 54-line
+  alternate screen with no scrollback, so a marker with a report after it is already
+  gone. There are hundreds in his transcripts that his pane did not show:
+  `${MOSSY_REPO_DIR}/bin/liveness-read.sh --role shaun --cwd ${MOSSY_STATE_DIR%/.mossy}`
+  prints `working`, `parked` or `stuck`, and `parked` is the one you act on. `stuck`
+  is the heartbeat's, not yours.
+  Put him on standby when the Farmer wants to pause. If the STANDBY names
   context (for
   example `STANDBY (context)`) or shaun's `Context: N%` is high, compact him
   before waking - he is idle on STANDBY, so send

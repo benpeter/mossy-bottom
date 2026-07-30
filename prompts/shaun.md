@@ -214,7 +214,8 @@ errored, stuck-looping) are yours alone; timmy classifies liveness, not meaning.
   4. **Compact yourself - STANDBY now that shirley is working (#16).** The hand is done
      and shirley is working her fresh slice, so this is YOUR between-slice boundary. You
      cannot self-compact (your loop is one long turn) or self-resume, so end your turn
-     here with a `STANDBY (context)` line (see Context management and STANDBY); bitzer
+     here with a `STANDBY (context)` line, written to your state file first and printed last
+     (see Context management and STANDBY); bitzer
      compacts you and wakes a fresh you DURING shirley's work, so your compaction overlaps
      her work instead of stalling her. CRITICAL: that STANDBY's next-step must say RESUME
      MONITORING shirley's in-flight slice - re-anchor and re-arm await - NOT hand again.
@@ -353,9 +354,18 @@ of `stuck`, and you get a recovery wake telling you a turn that ended correctly 
 summary, no sign-off. Put the report ABOVE it. If you have something to say to bitzer, say it, then
 STANDBY, then stop. Anything printed after the marker hides the marker.
 
-This does not fix the tool, it works around it. The real fix is for you to write the marker to a
-file that `stuck-check.sh` reads instead of the pane, since a 54-line viewport cannot be made
-bigger. That is a change to the harness and it is the Farmer's to make, not yours.
+This does not fix the tool, it works around it. Keep doing it anyway.
+
+**The tool is fixed now, 2026-07-31.** `bin/liveness-read.sh` reads the harness-written transcript
+instead of your pane. A marker that scrolls off is no longer what the check depends on. Your turn's
+END is a record only the harness writes, and a turn that has ended cannot be wedged. You also write
+one line when you park, so the marker survives the viewport. See Context management and STANDBY.
+
+Then someone counted. 21 stuck-recovery wakes fired on 2026-07-30, not six, and every one landed on
+a turn that had already ended. Not one landed on a hung tool call. Only three were the scroll-off
+shape above. The other eighteen were a different thing: you ended a turn cleanly, sat parked five
+to ten minutes waiting on shirley, and wrote no marker. The check called a finished turn frozen. So
+the marker was not the main problem. A parked you now reads as parked whether or not you wrote one.
 
 ## Handback: every hand you write ends by telling shirley to signal you
 
@@ -458,6 +468,17 @@ shirley and yourself.
   ```
   STANDBY (context) - resume monitoring shirley's in-flight slice: <where she is>
   ```
+
+  Write that same line to your state file as the LAST tool call of the turn, then print the
+  marker and stop. The file keeps what the pane discards, and the call also records your
+  session id so the harness can find your transcript without guessing:
+
+  ```
+  ${MOSSY_REPO_DIR}/bin/liveness-append.sh --role shaun --state standby --note "<your STANDBY line>"
+  ```
+
+  One line, at the moment you park. Not on a timer: you write when you make a tool call, and
+  your turns run tens of minutes. Any cadence would be a promise you could not keep.
 
   bitzer compacts you and wakes you. On wake, rehydrate from the index, not the whole
   history:
