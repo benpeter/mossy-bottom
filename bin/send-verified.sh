@@ -40,6 +40,8 @@
 # CLI: send-verified.sh <pane> <text>
 #   exit 0   the prompt submitted (timmy saw the pane go non-idle within the poll window)
 #   exit 1   delivery FAILED - the pane stayed idle through the initial send AND the one retry
+#   exit 3   DELIVERED but unconfirmed - the receiver was mid-turn, so its enqueue has not
+#            reached the file yet. Not retried. The caller must not count this as a failure.
 #   exit 64  usage error
 #
 # Environment:
@@ -53,6 +55,7 @@ set -uo pipefail
 
 readonly EXIT_OK=0
 readonly EXIT_UNSENT=1
+readonly EXIT_UNCONFIRMED=3
 readonly EXIT_USAGE=64
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,8 +65,42 @@ SV_SETTLE="${SV_SETTLE:-0.5}"
 
 # The transcript-grow confirmation. Measured worst case over 86 real sends was 3.09s, median
 # 0.59s, so 10 polls at 0.5s allows 5s - margin over everything observed.
+# 2026-07-31: that 5s is too tight for THIS run. Turns ran 1-4 minutes and the append arrived
+# 23s, 24s and 71s after the send: 13 reported failures between 21:43 and 23:00, all 13 landed.
+# The default is left alone because the heartbeat's own escalation thresholds are tuned to it;
+# raise it per call with SV_GROW_POLLS/SV_GROW_SLEEP until the real fix lands.
 SV_GROW_POLLS="${SV_GROW_POLLS:-10}"
 SV_GROW_SLEEP="${SV_GROW_SLEEP:-0.5}"
+
+# WALL-CLOCK WATCHDOG (Farmer, 2026-07-31 23:3x, on Ben's "guard against the harness defect").
+# The caller that matters is the heartbeat, which runs this SYNCHRONOUSLY: a copy of this script
+# that never returns takes the heartbeat down with it, and the heartbeat is the chain's only
+# recovery path for a stuck agent. At 23:08:58 it logged its last beat and was still blocked at
+# 23:20:53, twelve minutes, inside one invocation. A bounded failure is strictly better than an
+# unbounded wedge, so cap the whole script and let the caller's own retry handle the rest.
+SV_DEADLINE="${SV_DEADLINE:-90}"
+# Armed only when this file is EXECUTED. Sourcing it - which the suite does to drive send_verified
+# over stubs, and which .mossy/tools/send-verified.sh does for receiver_grew - must not spawn a
+# 90-second sleeper: it outlives the caller, and any pipeline waiting on the subshell's writers
+# blocks for the full deadline. Found when every sourcing assertion started taking 90s.
+if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${SV_DEADLINE}" -gt 0 ] 2>/dev/null; then
+  (
+    sleep "${SV_DEADLINE}"
+    kill -0 "$$" 2>/dev/null || exit 0
+    printf 'send-verified: WATCHDOG - exceeded %ss wall clock, killing this delivery attempt.\n' \
+      "${SV_DEADLINE}" >&2
+    printf 'send-verified: the caller should treat this as a failed submit and check the receiver\n' >&2
+    printf 'send-verified: transcript before concluding the pane is dead.\n' >&2
+    kill -TERM "$$" 2>/dev/null
+  ) >/dev/null &
+  SV_WATCHDOG=$!
+  # Kill the sleep as well as the shell that owns it. Killing only the subshell orphans its `sleep`,
+  # which keeps the inherited descriptors open, so a caller reading this script through a command
+  # substitution blocks for the whole deadline even after the script has exited. stdout is sent to
+  # /dev/null for the same reason; the watchdog's own diagnostics go to stderr and still surface.
+  # shellcheck disable=SC2064
+  trap "pkill -P ${SV_WATCHDOG} 2>/dev/null; kill ${SV_WATCHDOG} 2>/dev/null; true" EXIT
+fi
 LIVENESS_READ="${MOSSY_LIVENESS_READ:-${SCRIPT_DIR}/liveness-read.sh}"
 LIVENESS_APPEND="${MOSSY_LIVENESS_APPEND:-${SCRIPT_DIR}/liveness-append.sh}"
 SV_STATE_DIR="${MOSSY_STATE_DIR:-}"
@@ -92,6 +129,7 @@ Arguments:
 Exit codes:
   0   submitted (pane went non-idle within the poll window)
   1   delivery failed (pane stayed idle through the send and the retry)
+  3   delivered but unconfirmed (receiver was mid-turn) - do NOT retry
   64  usage error
 
 Environment:
@@ -133,13 +171,17 @@ deliver() {
 # clear_input <pane> - empty the input box before a retry, so a partially-buffered first
 # attempt cannot concatenate with the retry into a garbled prompt. C-u kills the line; the
 # BSpace burst is belt-and-suspenders for any editor state C-u does not cover.
+# 2026-07-31 23:3x (Farmer, on Ben's "guard against the harness defect"): the burst was 64
+# SEPARATE tmux round-trips. With three busy panes and captures running, the tmux server
+# serialises them and this function alone took minutes; at 23:20 the heartbeat had been
+# blocked 9m57s inside here, its child a lone `send-keys BSpace`, spraying backspaces into
+# a pane that was already empty and already working. tmux send-keys takes many keys in one
+# call, so this is one round-trip instead of 65 and the keystrokes are identical.
 clear_input() {
   local pane="$1" i
-  tmux send-keys -t "${pane}" C-u
-  for ((i = 0; i < 64; i++)); do
-    tmux send-keys -t "${pane}" BSpace
-  done
-  tmux send-keys -t "${pane}" C-u
+  local -a bs=()
+  for ((i = 0; i < 64; i++)); do bs+=(BSpace); done
+  tmux send-keys -t "${pane}" C-u "${bs[@]}" C-u
 }
 
 # timmy_nonidle <pane> - the ORIGINAL signal, kept as the fallback. Poll timmy up to SV_POLLS
@@ -208,6 +250,17 @@ receiver_transcript() {
     transcript_for "$(projects_dir)" "${cwd}" "${sid}" )
 }
 
+# receiver_turn_open <pane> - was the agent owning <pane> inside a turn? False when it cannot be
+# resolved, so an unreadable receiver keeps today's retry-then-fail path rather than gaining a
+# silent new verdict. turn_open reads the harness's own turn_duration marker; no agent is involved.
+receiver_turn_open() {
+  local t
+  t="$(receiver_transcript "$1" 2>/dev/null)" || return 1
+  [ -n "${t}" ] || return 1
+  # shellcheck source=/dev/null
+  ( . "${LIVENESS_READ}"; turn_open "${t}" )
+}
+
 # receiver_cwd <state-dir> - the agents' working directory, derived from the state dir rather than
 # taken from $PWD. Explicit MOSSY_AGENT_CWD still wins. Mirrors liveness-read's agent_cwd, and only
 # a TRAILING /.mossy is stripped.
@@ -262,6 +315,25 @@ send_verified() {
   fi
   # A retry re-types the prompt, so a landed-but-slow prompt must never reach here: shaun logged
   # the cost as "THIRD DUPLICATE" at 20:52:12 and "FOURTH DUPLICATE" at 21:04:24 on 2026-07-30.
+  #
+  # Before retrying, ask whether the receiver was MID-TURN when we sent. Claude Code appends the
+  # receiver's record at submit, but on a pane that is already inside a turn the enqueue does not
+  # reach the file promptly: on 2026-07-31 the chain's turns ran 1 to 4 minutes and the append
+  # arrived 23s, 24s and 71s after the send, against a 5s window. Thirteen sends between 21:43 and
+  # 23:00 were reported failed and all thirteen had landed.
+  #
+  # Calling that a failure is expensive in a way a missed beat is not: two consecutive failures
+  # raise an ESCALATIONS entry whose documented remedy is `bin/barn.sh relaunch <role>`, and that
+  # fired for bitzer at 21:59:10 and shaun at 22:05:40 against panes alive at 65% and 46% context.
+  #
+  # So an open turn at send time means DELIVERED, unconfirmed. Nothing is re-typed, because
+  # re-typing a landed prompt is how a duplicate hand happens. A receiver whose turn we cannot read
+  # at all is unchanged: it takes the retry and the old verdict.
+  if receiver_turn_open "${pane}"; then
+    printf 'send-verified: pane %s was mid-turn at send time and has not appended yet - treating as DELIVERED, unconfirmed.\n' "${pane}" >&2
+    printf 'send-verified: not retrying, because re-typing a landed prompt is how a duplicate happens.\n' >&2
+    return "${EXIT_UNCONFIRMED}"
+  fi
   clear_input "${pane}"
   baseline="$(transcript_baseline "${pane}")"
   deliver "${pane}" "${text}"

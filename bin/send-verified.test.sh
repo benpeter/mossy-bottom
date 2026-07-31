@@ -151,10 +151,10 @@ printf '\n== a slow receiver is delivered-unconfirmed, not failed ==\n'
   # shellcheck disable=SC2329
   timmy_nonidle() { return 1; }      # no token back either
   # shellcheck disable=SC2329
-  text_in_box() { return 1; }        # but the box is empty: the text went out
+  receiver_turn_open() { return 0; } # but it was mid-turn: the enqueue has not reached the file
   send_verified DUMMY 'x'; rc=$?
   if [ "$rc" -eq 3 ] && [ "$deliver_calls" -eq 1 ]; then
-    printf 'ok   - an empty box with no append yet -> exit 3, delivered once, NOT retried\n'
+    printf 'ok   - a mid-turn receiver with no append yet -> exit 3, delivered once, NOT retried\n'
   else
     printf 'FAIL - slow receiver: rc %s after %s deliveries, wanted rc 3 after 1\n' "$rc" "$deliver_calls"
   fi
@@ -177,29 +177,30 @@ grep -q '^ok' "$tmp/slow-recv.out" && pass=$((pass + 1)) || fail=$((fail + 1))
   # shellcheck disable=SC2329
   timmy_nonidle() { return 1; }
   # shellcheck disable=SC2329
-  text_in_box() { return 0; }        # still sitting in the box: it never submitted
+  receiver_turn_open() { return 1; } # a settled receiver, so nothing explains the silence
   send_verified DUMMY 'x'; rc=$?
   if [ "$rc" -eq 1 ] && [ "$deliver_calls" -eq 2 ]; then
-    printf 'ok   - text still in the box -> retried once then exit 1, unchanged\n'
+    printf 'ok   - a settled receiver -> retried once then exit 1, unchanged\n'
   else
     printf 'FAIL - unsent: rc %s after %s deliveries, wanted rc 1 after 2\n' "$rc" "$deliver_calls"
   fi
 ) | tee "$tmp/unsent.out"
 grep -q '^ok' "$tmp/unsent.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 
-# text_in_box reads the pane, so it must answer NO when it cannot read one. Unknown resolving to
-# "still in the box" would turn every unreadable pane into a retry, which is the duplicate path.
+# receiver_turn_open must answer NO when it cannot resolve the receiver. Unknown resolving to
+# "mid-turn" would turn every unreadable receiver into a silent exit 3, which is a delivery nobody
+# checks again.
 (
   # shellcheck source=/dev/null
   . "$sv"
   set +o pipefail
-  if text_in_box '%9999999' 'anything at all'; then
-    printf 'FAIL - an unreadable pane reported the text still in its box\n'
+  if receiver_turn_open '%9999999'; then
+    printf 'FAIL - an unresolvable receiver reported a turn open\n'
   else
-    printf 'ok   - an unreadable pane reads NOT-in-box, so it never manufactures a retry\n'
+    printf 'ok   - an unresolvable receiver reads turn-closed, keeping the old retry path\n'
   fi
-) | tee "$tmp/box-unreadable.out"
-grep -q '^ok' "$tmp/box-unreadable.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+) | tee "$tmp/turn-unresolvable.out"
+grep -q '^ok' "$tmp/turn-unresolvable.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 
 # --- a gone pane is a TARGET error, not a delivery failure ------------------------------------
 # Today a nonexistent pane exits 1, the code for "the prompt did not submit", after leaking three
