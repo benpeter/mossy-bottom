@@ -19,6 +19,16 @@
 # sends on 2026-07-30, the receiver's file grew within 3.09s of the Enter in 86 of 86 cases,
 # median 0.59s.
 #
+# AN EXTERNAL CALLER SOURCES THIS FILE. `.mossy/tools/send-verified.sh` in a run's state dir is a
+# second copy of this tool, written on 2026-07-30 when shaun resolved guardrail 13's `bin/` against
+# the project working directory and read the empty result as absence. It grew guards this one does
+# not have (text from a file, an empty-box assertion, argument-order checks, a refuse-to-retry),
+# and at fold-back on 2026-07-31 it took this file's delivery signal by SOURCING it and calling
+# receiver_grew and transcript_baseline. So those two names, their arguments and their exit codes
+# are a contract with a caller outside this repo: 0 grew, 1 not yet, 2 unresolvable. Renaming or
+# re-numbering either one breaks a tool the chain sends every hand through, and it breaks it into
+# the unresolvable branch, which is silent.
+#
 # timmy's non-idle read is kept as the FALLBACK for when a receiver's transcript cannot be
 # resolved, because it measures the wrong thing: it asks whether a token has come back. Measured
 # first-token latency was a median of 7.81s for bitzer, 9.09s for shaun and 12.14s for shirley,
