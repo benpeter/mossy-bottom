@@ -15,10 +15,21 @@
 # previous day's work under tomorrow's date and collide with that day's real chapter (Issue
 # #39). The chapter date is resolved in precedence order:
 #   1. an explicit <chapter-date> argument (YYYY-MM-DD) - the caller knows the content's day;
-#   2. else inferred from the last tick in TICKS.md: tick lines carry only HH:MM, so if the
-#      newest tick's time is LATER than now, the clock has wrapped past midnight since that
-#      tick and the content belongs to YESTERDAY - seal under yesterday;
-#   3. else today (date +%F) - the same-day default, unchanged and backward-compatible.
+#   2. else the calendar day of TICKS.md's LAST APPEND, from its mtime;
+#   3. else today (date +%F), for an empty or absent live file.
+#
+# WHY MTIME AND NOT THE STAMP ON THE LAST TICK LINE. The rule used to compare the newest tick's
+# HH:MM against now and read "later than now" as a midnight wrap, which trusts an agent to
+# author a clock. On 2026-07-31 bitzer's stamps crossed real time at 06:37 and by 09:20 read
+# 12:30 against a real 09:20, +190 minutes, compounding at about 1.5 minutes per real minute
+# because he advanced a counter by roughly 8 minutes per tick while real gaps were 2 to 4.
+# shaun's drifted in both directions and his prompt already told him to read `date`.
+#
+# With a stamp of 12:30 at a real 09:30 the wrap test fires and the chapter is named yesterday.
+# rotate_one appends, so 2026-07-31's ticks would have gone into ticks/archive/2026-07-30.md
+# and nothing would say so. mtime is written by the kernel on the append: it cannot drift, it
+# names the day outright instead of inferring one from a wrap, and it handles a rotation run
+# days late, which the wrap rule could not express.
 #
 # It operates ONLY on the state dir it is given - it resolves nothing and launches
 # nothing. The state dir is the already-resolved MOSSY_STATE_DIR (Issue #2 split):
@@ -34,14 +45,15 @@
 # tva
 set -uo pipefail
 
-# day_before <YYYY-MM-DD> - echo the prior calendar day. Portable across BSD (date -j, on
-# macOS) and GNU (date -d, on Linux) so the day-turn inference works on either host.
-day_before() {
-  if date -j >/dev/null 2>&1; then
-    date -j -v-1d -f '%Y-%m-%d' "$1" '+%F' # BSD / macOS
-  else
-    date -d "$1 -1 day" '+%F' # GNU / Linux
-  fi
+# ticks_day <file> - the calendar day of the file's last append, from its mtime. Echoes nothing
+# for an absent or empty file, so the caller falls back to today rather than guessing. Portable
+# across BSD (stat -f, date -r) and GNU (stat -c, date -d @).
+ticks_day() {
+  local f="${1:-}" epoch
+  [ -s "${f}" ] || return 0
+  epoch="$(stat -f %m "${f}" 2>/dev/null || stat -c %Y "${f}" 2>/dev/null || true)"
+  [ -n "${epoch}" ] || return 0
+  date -r "${epoch}" '+%F' 2>/dev/null || date -d "@${epoch}" '+%F' 2>/dev/null || true
 }
 
 # valid_date <s> - true iff s is YYYY-MM-DD shaped. Guards the explicit arg so a malformed
@@ -53,27 +65,20 @@ valid_date() {
   esac
 }
 
-# resolve_chapter_date <explicit> <ticks-file> <today> <now-hhmm> - decide the date the
-# sealed chapter is named under, in the precedence documented in the header. Pure: today and
-# now are passed in (never read from the clock here), so the day-turn logic is hermetically
-# testable without mocking the wall clock.
+# resolve_chapter_date <explicit> <ticks-file> <today> - decide the date the sealed chapter is
+# named under, in the precedence documented in the header. `today` is passed in rather than read
+# from the clock, so the day-turn cases are deterministic in a test.
 resolve_chapter_date() {
-  local explicit="$1" ticks="$2" today="$3" now_hhmm="$4"
+  local explicit="$1" ticks="$2" today="$3" day
 
   if [ -n "${explicit}" ]; then
     printf '%s\n' "${explicit}"
     return 0
   fi
 
-  # Newest tick's HH:MM (tick lines look like "HH:MM - ..."); || true so a missing/empty
-  # file or no-match never trips the caller's pipefail.
-  local last_hhmm=""
-  if [ -s "${ticks}" ]; then
-    last_hhmm="$(grep -Eo '^[0-9][0-9]:[0-9][0-9]' "${ticks}" 2>/dev/null | tail -n1 || true)"
-  fi
-
-  if [ -n "${last_hhmm}" ] && [[ "${last_hhmm}" > "${now_hhmm}" ]]; then
-    day_before "${today}" # the clock wrapped past midnight since the last tick -> yesterday
+  day="$(ticks_day "${ticks}")"
+  if [ -n "${day}" ]; then
+    printf '%s\n' "${day}"
   else
     printf '%s\n' "${today}"
   fi
@@ -124,20 +129,18 @@ main() {
     exit 1
   fi
 
-  # Date from the clock, never a guessed value; resolve_chapter_date may roll it back one day
-  # on a day-turn rotation (Issue #39). today/now are read here and passed in so the resolver
-  # stays pure and testable.
-  local today now_hhmm chapter_date
+  # Date from the clock, never a guessed value. resolve_chapter_date uses it only as the fallback
+  # for an empty live file; otherwise the day comes from TICKS.md's mtime (Issue #39).
+  local today chapter_date
   today="$(date +%F)"
-  now_hhmm="$(date +%H:%M)"
-  chapter_date="$(resolve_chapter_date "${explicit_date}" "${state_dir}/TICKS.md" "${today}" "${now_hhmm}")"
+  chapter_date="$(resolve_chapter_date "${explicit_date}" "${state_dir}/TICKS.md" "${today}")"
 
   rotate_one TICKS.md ticks "${state_dir}" "${chapter_date}" || exit 1
   rotate_one CHRONICLE.md chronicle "${state_dir}" "${chapter_date}" || exit 1
 }
 
 # Run main only when executed, not when sourced - so the test can source this file and drive
-# resolve_chapter_date / day_before directly without running the CLI. The seam barn.sh, timmy,
+# resolve_chapter_date / ticks_day directly without running the CLI. The seam barn.sh, timmy,
 # and stuck-check.sh all use.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   main "$@"
