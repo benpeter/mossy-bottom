@@ -107,6 +107,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 INTERVAL="${MOSSY_HEARTBEAT_SECS:-300}"
 STATE_DIR="${MOSSY_STATE_DIR:-${REPO_ROOT}}"
+LIVENESS_READ="${MOSSY_LIVENESS_READ:-${REPO_ROOT}/bin/liveness-read.sh}"
 TIMMY="${MOSSY_REPO_DIR:-${REPO_ROOT}}/timmy/bin/timmy"
 
 # Stuck-shaun recovery (#20). stuck-check.sh is the sibling control-plane tool; the shaun
@@ -457,6 +458,26 @@ beat_shaun() {
 #     no two-beat confirm) -> 'needs-input'; anything else (busy/advancing) -> 'alive', no wake.
 # Echoes nothing (empty) when there is no shirley pane or no stuck-check. Never dies: a read failure falls
 # toward 'alive', never a spurious done/stalled/needs-input (a pane we cannot read is never provably so).
+# worker_pending <pane> - how many background tasks the agent owning <pane> has started and not
+# yet seen complete. 0 when anything cannot be resolved, so it can only ever withhold a wake on
+# positive evidence, never invent a reason to withhold one.
+#
+# Resolved through liveness-read in a SUBSHELL, the same seam send-verified uses: the role comes
+# from .barn-panes, the session id from the role's state file or the boot-phrase sweep, and the
+# transcript from the session id. /clear mints a new transcript, so this re-resolves every beat
+# rather than caching a path.
+worker_pending() {
+  local pane="$1" role
+  [ -x "${LIVENESS_READ}" ] || { printf '0'; return 0; }
+  role="$(awk -F= -v p="${pane}" '$2==p {print $1; ok=1} END{exit !ok}' "${panes_file}" 2>/dev/null)" || { printf '0'; return 0; }
+  # shellcheck source=/dev/null
+  ( . "${LIVENESS_READ}"
+    cwd="$(agent_cwd "${STATE_DIR}")"
+    sid="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" "${STATE_DIR}/liveness/${role}.state" "$(run_floor "${STATE_DIR}")")" || { printf '0'; exit 0; }
+    t="$(transcript_for "$(projects_dir)" "${cwd}" "${sid}")" || { printf '0'; exit 0; }
+    pending_tasks "${t}" ) 2>/dev/null || printf '0'
+}
+
 worker_verdict() {
   local wid wrc trc
   [ -x "$STUCK_CHECK" ] || return 0
@@ -487,7 +508,19 @@ worker_verdict() {
     # because a turn that ended ON a question is waiting for an answer, not for the next slice.
     case "$trc" in
       20 | 30) printf '%s needs-input' "$wid" ;;
-      0) printf '%s done' "$wid" ;;
+      0)
+        # A closed turn is not a finished slice while the worker's own background task is still
+        # running. She emits a waiter, the Bash tool backgrounds it, she writes one status line and
+        # the turn boundary falls there - a shape she never chose, and one the pane renders exactly
+        # like a finished slice. On 2026-07-31 that produced four done-wakes at 12:16:07, 12:21:17,
+        # 12:52:20 and 13:07:52, all four refused by the driver after checking, four burnt turns of
+        # his context. pending_tasks reads 2, 2, 1 and 1 at those instants.
+        if [ "$(worker_pending "$wid")" != "0" ]; then
+          printf '%s alive' "$wid"
+        else
+          printf '%s done' "$wid"
+        fi
+        ;;
       40) printf '%s stalled' "$wid" ;;
       *) printf '%s other' "$wid" ;;
     esac
