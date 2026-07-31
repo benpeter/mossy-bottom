@@ -221,6 +221,33 @@ transcript_for() {
   return 1
 }
 
+# state_dir_for_cwd <cwd> - the run's state dir for a given agent cwd. MOSSY_STATE_DIR wins when set,
+# which it always is in production. Otherwise it is <cwd>/.mossy in target mode or <cwd> itself in
+# dogfood mode, whichever holds a .barn-panes. The inverse of agent_cwd.
+state_dir_for_cwd() {
+  local cwd="${1:-}"
+  if [ -n "${MOSSY_STATE_DIR:-}" ]; then printf '%s' "${MOSSY_STATE_DIR}"; return 0; fi
+  [ -n "${cwd}" ] || return 1
+  if [ -f "${cwd}/.mossy/.barn-panes" ]; then printf '%s' "${cwd}/.mossy"; return 0; fi
+  if [ -f "${cwd}/.barn-panes" ]; then printf '%s' "${cwd}"; return 0; fi
+  return 1
+}
+
+# run_floor <state-dir> - the epoch this run started, or nothing. barn writes .barn-panes at `up`, so
+# its mtime dates the run and a transcript last written before it cannot belong to this run.
+#
+# This closes the boot-window defect seen live 2026-07-31 00:57. The worker gets no boot prompt from
+# barn, so until her driver hands her something she has no transcript at all; the sweep then matched
+# the newest file carrying her boot phrase, which was the PREVIOUS run's, and she read `stuck` on a
+# transcript that had stopped moving before this run began. Two of her nine historical sessions carry
+# the phrase nowhere at all, which without a floor leaves them resolving to an older run for good.
+run_floor() {
+  local sd="${1:-}"
+  [ -n "${sd}" ] || return 0
+  [ -f "${sd}/.barn-panes" ] || return 0
+  mtime_of "${sd}/.barn-panes"
+}
+
 # role_boot_pattern <role> - the literal that identifies a role's transcript by its boot prompt.
 # There is no role field anywhere in a transcript: cwd, gitBranch, version, userType and
 # isSidechain are identical across all three roles, so the English of the boot prompt is the only
@@ -256,7 +283,7 @@ readonly KNOWN_ROLES="shaun bitzer shirley"
 # transcript quotes both of the other two - he reads the prompts and types shirley's opening
 # prompt into her pane.
 resolve_session() {
-  local root="$1" cwd="$2" role="$3" sf="${4:-}" want dir f base line r pat hit
+  local root="$1" cwd="$2" role="$3" sf="${4:-}" floor="${5:-}" want dir f base line r pat hit ft
   if [ -n "${sf}" ] && [ -s "${sf}" ]; then
     hit="$(tail -n 1 "${sf}" 2>/dev/null | awk '$4 ~ /^[0-9a-f]{8}-/ {print $4}')"
     if [ -n "${hit}" ]; then printf '%s' "${hit}"; return 0; fi
@@ -273,6 +300,12 @@ resolve_session() {
   done
   while IFS= read -r f; do
     [ -f "${f}" ] || continue
+    # A transcript last written before this run started belongs to an earlier run, whatever boot
+    # phrase it carries. Skipping it is what stops a retired session being read as the live role.
+    if [ -n "${floor}" ]; then
+      ft="$(mtime_of "${f}")"
+      [ -n "${ft}" ] && [ "${ft}" -lt "${floor}" ] 2>/dev/null && continue
+    fi
     hit="$(head -n "${BOOT_SCAN_LINES}" "${f}" 2>/dev/null \
       | LC_ALL=C grep -m1 -o -F "${pats[@]}" 2>/dev/null | head -n 1 || true)"
     if [ -n "${hit}" ] && [ "${hit}" = "${want}" ]; then
@@ -316,6 +349,20 @@ role_of_pane() {
   awk -F= -v p="${pane}" '$2==p {print $1; ok=1} END{exit !ok}' "${pf}"
 }
 
+# warn_no_transcript <role> <cwd> - say so, ONCE per process, when a role's transcript cannot be
+# resolved. Diagnostics only: the verdict is unchanged, and a caller running per beat must not flood.
+#
+# This exists because two real bugs hid for hours behind a silent fallback. When resolution fails the
+# reader degrades to the screen-reading path it was written to replace, which is the safe behaviour
+# and also completely invisible. One line would have caught both in minutes.
+WARNED_NO_TRANSCRIPT=""
+warn_no_transcript() {
+  [ -z "${WARNED_NO_TRANSCRIPT}" ] || return 0
+  WARNED_NO_TRANSCRIPT=1
+  printf 'liveness-read: no transcript for role %s under cwd %s - falling back to the pane\n' \
+    "$1" "$2" >&2
+}
+
 # run_live_role <role> <cwd> <state-file> <pane> <max-age> - classify a ROLE, resolving its
 # transcript first and re-resolving before it is allowed to say stuck.
 #
@@ -325,12 +372,15 @@ role_of_pane() {
 # against a fresh sweep, once. Only the stuck path pays, which is the rare one, and a genuine
 # wedge survives it because the sweep finds no newer file.
 run_live_role() {
-  local role="$1" cwd="$2" sf="$3" pane="$4" max_age="$5" sid t topen age plive=-1 verdict sid2
-  sid="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" "${sf}" || true)"
+  local role="$1" cwd="$2" sf="$3" pane="$4" max_age="$5" sid t topen age plive=-1 verdict sid2 sd floor
+  sd="$(state_dir_for_cwd "${cwd}" || true)"
+  floor="$(run_floor "${sd}")"
+  sid="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" "${sf}" "${floor}" || true)"
+  [ -n "${sid}" ] || warn_no_transcript "${role}" "${cwd}"
   [ -n "${pane}" ] && plive="$(pane_live "${pane}")"
   verdict="$(classify_for_session "${sid}" "${cwd}" "${sf}" "${plive}" "${max_age}")"
   if [ "${verdict}" = "stuck" ]; then
-    sid2="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" '' || true)"
+    sid2="$(resolve_session "$(projects_dir)" "${cwd}" "${role}" '' "${floor}" || true)"
     if [ -n "${sid2}" ] && [ "${sid2}" != "${sid}" ]; then
       verdict="$(classify_for_session "${sid2}" "${cwd}" "${sf}" "${plive}" "${max_age}")"
     fi
