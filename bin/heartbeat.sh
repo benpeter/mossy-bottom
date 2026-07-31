@@ -96,6 +96,8 @@
 #   MOSSY_SHAUN_FP               shaun's cross-beat fingerprint file (default: STATE_DIR/.shaun-fp)
 #   MOSSY_WORKER_FP              shirley's cross-beat fingerprint file (default: STATE_DIR/.shirley-fp)
 #   MOSSY_BACKSTOP_FP            combined-pane backstop fingerprint+streak file (default: STATE_DIR/.backstop-fp)
+#   MOSSY_DELIVERY_FP            per-pane consecutive-delivery-failure counts (default: STATE_DIR/.delivery-fails)
+#   MOSSY_DELIVERY_ESCALATE      consecutive failed deliveries before an ESCALATIONS.md entry (default 2)
 #
 # tva
 set -uo pipefail
@@ -134,6 +136,23 @@ WORKER_FP="${MOSSY_WORKER_FP:-${STATE_DIR}/.shirley-fp}"
 # collide with the done-wake (which owns the first frozen beat).
 BACKSTOP_BEATS="${MOSSY_HEARTBEAT_BACKSTOP_BEATS:-4}"
 BACKSTOP_FP="${MOSSY_BACKSTOP_FP:-${STATE_DIR}/.backstop-fp}"
+
+# Delivery-failure escalation. `parked` carries no staleness check by design - that is what removed
+# 18 of the 21 false stuck-recovery wakes of 2026-07-30 - so a parked agent whose process has DIED
+# reads parked forever. Duration cannot close that: in-turn append gaps topped out at 345.7s while
+# legitimate parked silence reached 1983.9s, so the populations overlap across the whole useful range.
+#
+# A poke can, and the chain already pokes. send-verified confirms a delivery by the receiver's
+# transcript growing (0.59s median over 86 measured sends), so a delivery that failed after its retry
+# means the receiver appended NOTHING - which for a parked agent is the dead-or-wedged signal we
+# otherwise lack. Every failure site below used to log and move on.
+#
+# DELIVERY_FP holds "<pane> <consecutive-failures>" per line, the same shape BACKSTOP_FP uses. One
+# failure is normal and self-heals next beat; ESCALATE consecutive failures to the same pane raises an
+# ESCALATIONS.md entry ONCE, and any landed delivery clears that pane's count. No duration is
+# involved, so this cannot reproduce the false-positive class the liveness work removed.
+DELIVERY_FP="${MOSSY_DELIVERY_FP:-${STATE_DIR}/.delivery-fails}"
+DELIVERY_ESCALATE="${MOSSY_DELIVERY_ESCALATE:-2}"
 
 # The terse trigger. The poll body is bitzer.md's, not ours - we only say "go poll", so
 # there is one source of truth and nothing to drift. The "[heartbeat]" tag marks it as
@@ -214,7 +233,13 @@ Env: MOSSY_STATE_DIR (.barn-panes dir), MOSSY_REPO_DIR (timmy location),
      (worker-alert text), MOSSY_HEARTBEAT_WORKER_DONE_TRIGGER (worker-done text),
      MOSSY_HEARTBEAT_WORKER_INPUT_TRIGGER (worker-needs-input text),
      MOSSY_HEARTBEAT_BACKSTOP_TRIGGER (backstop text), MOSSY_HEARTBEAT_BACKSTOP_BEATS (K, default 4),
-     MOSSY_SHAUN_FP / MOSSY_WORKER_FP / MOSSY_BACKSTOP_FP (fingerprint files).
+     MOSSY_SHAUN_FP / MOSSY_WORKER_FP / MOSSY_BACKSTOP_FP (fingerprint files),
+     MOSSY_DELIVERY_FP (per-pane delivery-failure counts), MOSSY_DELIVERY_ESCALATE (default 2).
+
+A delivery that fails after its retry is the only liveness signal a PARKED agent has: `parked`
+carries no staleness check by design, so a dead parked agent would otherwise read parked forever.
+ESCALATE consecutive failures to one pane raise an ESCALATIONS.md entry once; any landed delivery
+clears the count. No duration is involved.
 EOF
 }
 
@@ -274,7 +299,11 @@ shirley_pane() {
 # SAME timmy heartbeat resolved. The ~2s verify is <1% of the 300s beat - negligible vs every
 # sustain cycle actually firing. Returns send-verified's exit code so beat_bitzer logs the outcome.
 send_trigger() {
+  local rc
   MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$1" "$TRIGGER"
+  rc=$?
+  note_delivery "$(role_for_pane_hb "$1")" "$1" "$rc"
+  return "$rc"
 }
 
 # send_wake <pane> <trigger> - deliver a recovery wake and CONFIRM it submitted (#32). Mirrors
@@ -291,9 +320,72 @@ send_trigger() {
 # neither ever sends keys to shirley. Returns send-verified's exit code: 0 submitted, nonzero
 # delivery failed - so the caller logs the outcome instead of assuming the wake landed.
 send_wake() {
-  local pane="$1" trigger="$2"
+  local pane="$1" trigger="$2" rc
   tmux send-keys -t "$pane" C-u
   MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$pane" "$trigger"
+  rc=$?
+  note_delivery "$(role_for_pane_hb "$pane")" "$pane" "$rc"
+  return "$rc"
+}
+
+# role_for_pane_hb <pane> - which role owns this pane, from the panes file. Lets the two send
+# helpers record a delivery outcome without every call site having to pass a role.
+role_for_pane_hb() {
+  [ -f "$panes_file" ] || { printf 'unknown'; return 0; }
+  awk -F= -v p="$1" '$2==p {print $1; ok=1} END{if(!ok) print "unknown"}' "$panes_file" 2>/dev/null | head -1
+}
+
+# delivery_fails <pane> - the consecutive-failure count recorded for a pane, 0 if none.
+delivery_fails() {
+  [ -f "$DELIVERY_FP" ] || { printf '0'; return 0; }
+  awk -v p="$1" '$1==p {print $2; found=1} END{if(!found) print 0}' "$DELIVERY_FP" 2>/dev/null | head -1
+}
+
+# delivery_set <pane> <count> - rewrite the pane's count; count 0 removes the line entirely.
+delivery_set() {
+  local pane="$1" n="$2" tmpf
+  mkdir -p "$(dirname "$DELIVERY_FP")" 2>/dev/null || true
+  tmpf="${DELIVERY_FP}.new"
+  if [ -f "$DELIVERY_FP" ]; then awk -v p="$pane" '$1!=p' "$DELIVERY_FP" >"$tmpf" 2>/dev/null || : >"$tmpf"
+  else : >"$tmpf"
+  fi
+  [ "$n" -gt 0 ] 2>/dev/null && printf '%s %s\n' "$pane" "$n" >>"$tmpf"
+  mv -f "$tmpf" "$DELIVERY_FP" 2>/dev/null || true
+}
+
+# escalate_delivery <role> <pane> <n> - append one ESCALATIONS.md entry in the file's documented
+# format. This is the one thing only the heartbeat can raise: every other role would have to be alive
+# to notice. Written once per failure episode, because delivery_set clears the count on the next
+# landed delivery and the count only ever equals ESCALATE on one beat.
+escalate_delivery() {
+  local role="$1" pane="$2" n="$3" f="${STATE_DIR}/ESCALATIONS.md"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || true
+  {
+    printf '\n## %s - heartbeat: %s delivery failing (%s consecutive), pane %s may be dead\n' \
+      "$(date '+%H:%M')" "$role" "$n" "$pane"
+    printf -- '- What happened: %s consecutive verified deliveries to %s (%s) did not land. send-verified\n' "$n" "$role" "$pane"
+    printf -- '  types the text, sends Enter, and confirms by the receiver transcript growing; it grew not at all.\n'
+    printf -- '- Why the heartbeat cannot resolve it: a parked agent has no liveness signal other than a\n'
+    printf -- '  delivery landing, and this one did not. Duration cannot tell waiting from dead here.\n'
+    printf -- '- What is needed to unblock: look at pane %s. If the process is gone, relaunch that role\n' "$pane"
+    printf -- '  with bin/barn.sh relaunch %s. If it is alive, the input path is broken rather than the agent.\n' "$role"
+  } >>"$f" 2>/dev/null || true
+}
+
+# note_delivery <role> <pane> <rc> - record a delivery outcome and escalate on a streak. rc 0 clears
+# the pane's count; nonzero increments it and raises an entry at exactly ESCALATE.
+note_delivery() {
+  local role="$1" pane="$2" rc="$3" n
+  if [ "$rc" -eq 0 ] 2>/dev/null; then
+    [ "$(delivery_fails "$pane")" != "0" ] && delivery_set "$pane" 0
+    return 0
+  fi
+  n=$(( $(delivery_fails "$pane") + 1 ))
+  delivery_set "$pane" "$n"
+  if [ "$n" -eq "$DELIVERY_ESCALATE" ]; then
+    escalate_delivery "$role" "$pane" "$n"
+    log "${role} (${pane}) -> ${n} consecutive delivery failures, ESCALATIONS.md entry raised"
+  fi
 }
 
 # beat_bitzer - the poll nudge. Read bitzer's id, classify with timmy, nudge IFF idle (exit 0),
