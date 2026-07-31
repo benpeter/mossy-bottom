@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # rotate.test.sh - hermetic, launch-free tests for bin/rotate.sh (Issue #39 - the day-turn
 # chapter-date fix, plus the pre-existing same-day rotation behavior). No tmux, no claude.
-# We SOURCE rotate.sh under its BASH_SOURCE guard (so main() never runs) and drive the pure
-# resolvers (resolve_chapter_date, day_before, valid_date) directly over a fixture table,
-# then black-box the CLI over throwaway state dirs in a temp tree.
+# We SOURCE rotate.sh under its BASH_SOURCE guard (so main() never runs) and drive the
+# resolvers (resolve_chapter_date, ticks_day, valid_date) directly over a fixture table, then
+# black-box the CLI over throwaway state dirs in a temp tree. Fixture mtimes are set with
+# `touch -t`, so the day-turn cases are deterministic without mocking a clock.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -35,50 +36,71 @@ eq() {
 # Pure resolver unit tests - deterministic, no wall clock (today/now are inputs).
 # ---------------------------------------------------------------------------
 
-# day_before: ordinary, month boundary (non-leap Feb), year boundary.
-eq "2026-06-11" "$(day_before 2026-06-12)" "day_before: ordinary day"
-eq "2026-02-28" "$(day_before 2026-03-01)" "day_before: month boundary (non-leap)"
-eq "2025-12-31" "$(day_before 2026-01-01)" "day_before: year boundary"
-eq "2024-02-29" "$(day_before 2024-03-01)" "day_before: leap-year Feb 29"
-
 # valid_date guard.
 if valid_date 2026-06-11; then ok "valid_date: accepts YYYY-MM-DD"; else no "valid_date: accepts YYYY-MM-DD"; fi
 if valid_date 2026-6-1; then no "valid_date: rejects unpadded"; else ok "valid_date: rejects unpadded"; fi
 if valid_date "garbage"; then no "valid_date: rejects non-date"; else ok "valid_date: rejects non-date"; fi
 if valid_date ""; then no "valid_date: rejects empty"; else ok "valid_date: rejects empty"; fi
 
-# A ticks fixture whose newest tick is 23:50 (late on day N).
+# THE CHAPTER DATE COMES FROM THE FILE'S MTIME, NOT FROM THE STAMP AN AGENT TYPED.
+#
+# The old rule compared the newest tick's HH:MM against now and read "later than now" as a
+# midnight wrap. That trusts an agent to author a clock, and on 2026-07-31 bitzer's did not: his
+# tick stamps crossed real time at 06:37 and by 09:20 read 12:30 against a real 09:20, +190
+# minutes and compounding at about 1.5 minutes per real minute. He advanced a counter by roughly
+# 8 minutes per tick while real gaps were 2 to 4. shaun's drifted too, in both directions, one
+# stamp going backwards from 07:15 to 07:12, and shaun's prompt already carried the instruction
+# to read `date`.
+#
+# With a stamp of 12:30 and a real 09:30, "12:30" > "09:30" is true, so a rotation would have
+# sealed 2026-07-31's chapter into ticks/archive/2026-07-30.md. rotate_one APPENDS, so the
+# previous day's chapter would have absorbed today's ticks with nothing to show it happened.
+#
+# mtime is written by the kernel on the append. It cannot drift, it gives the day directly
+# instead of inferring one from a wrap, and it handles a rotation run days late, which the old
+# rule could not express at all.
 late_ticks="$tmp/late_ticks.md"
 printf '08:00 - early on day N\n23:50 - last tick of day N\n' >"$late_ticks"
-# A ticks fixture whose newest tick is 10:00 (mid-day).
+touch -t 202606112350 "$late_ticks" # last appended 23:50 on 2026-06-11
 mid_ticks="$tmp/mid_ticks.md"
 printf '09:00 - earlier\n10:00 - last tick\n' >"$mid_ticks"
+touch -t 202606121000 "$mid_ticks" # last appended 10:00 on 2026-06-12
 
 # 1. Explicit arg takes precedence - returned verbatim, ignoring clock and ticks.
-eq "2026-06-11" "$(resolve_chapter_date 2026-06-11 /nonexistent 2026-06-12 00:07)" \
+eq "2026-06-11" "$(resolve_chapter_date 2026-06-11 /nonexistent 2026-06-12)" \
   "resolve: explicit arg wins (no ticks file)"
 # 2. Explicit arg wins even when inference would yield a different date.
-eq "2025-01-01" "$(resolve_chapter_date 2025-01-01 "$late_ticks" 2026-06-12 00:07)" \
+eq "2025-01-01" "$(resolve_chapter_date 2025-01-01 "$late_ticks" 2026-06-12)" \
   "resolve: explicit arg overrides what inference would pick"
-# 3. Day-turn inference: last tick 23:50 > now 00:07 -> the clock wrapped -> yesterday.
-eq "2026-06-11" "$(resolve_chapter_date '' "$late_ticks" 2026-06-12 00:07)" \
-  "resolve: day-turn infers yesterday (last HH:MM > now)"
-# 3b. Day-turn inference across a month boundary.
-eq "2026-02-28" "$(resolve_chapter_date '' "$late_ticks" 2026-03-01 00:05)" \
-  "resolve: day-turn inference rolls back across a month boundary"
-# 4. Same-day: last tick 10:00 < now 11:00 -> today (no wrap).
-eq "2026-06-12" "$(resolve_chapter_date '' "$mid_ticks" 2026-06-12 11:00)" \
-  "resolve: same-day stays today (last HH:MM < now)"
-# 5. Boundary: last tick == now -> not greater -> today.
-eq "2026-06-12" "$(resolve_chapter_date '' "$mid_ticks" 2026-06-12 10:00)" \
-  "resolve: last == now stays today (not greater)"
-# 6. No / empty ticks file -> today (the default, unchanged).
+# 3. The day-turn case #39 exists for: content written late on day N, rotation run on day N+1.
+eq "2026-06-11" "$(resolve_chapter_date '' "$late_ticks" 2026-06-12)" \
+  "resolve: a rotation the next morning seals under the day the content was appended"
+# 4. Same day, so today.
+eq "2026-06-12" "$(resolve_chapter_date '' "$mid_ticks" 2026-06-12)" \
+  "resolve: appended today -> today"
+# 5. THE DRIFT CASE. A stamp three hours into the future must not move the chapter.
+drift_ticks="$tmp/drift_ticks.md"
+printf '09:22 | working | real time\n12:30 | note | the stamp bitzer wrote at a real 09:20\n' >"$drift_ticks"
+touch -t 202607310920 "$drift_ticks"
+eq "2026-07-31" "$(resolve_chapter_date '' "$drift_ticks" 2026-07-31)" \
+  "resolve: a stamp reading 12:30 at a real 09:20 still seals under today"
+# 6. A rotation run days after the content, which the old rule could not express.
+old_ticks="$tmp/old_ticks.md"
+printf '14:00 - three days ago\n' >"$old_ticks"
+touch -t 202606091400 "$old_ticks"
+eq "2026-06-09" "$(resolve_chapter_date '' "$old_ticks" 2026-06-12)" \
+  "resolve: a rotation three days late seals under the content's day"
+# 7. No / empty ticks file -> today (the default, unchanged).
 empty_ticks="$tmp/empty_ticks.md"
 : >"$empty_ticks"
-eq "2026-06-12" "$(resolve_chapter_date '' "$empty_ticks" 2026-06-12 00:07)" \
+eq "2026-06-12" "$(resolve_chapter_date '' "$empty_ticks" 2026-06-12)" \
   "resolve: empty ticks file falls back to today"
-eq "2026-06-12" "$(resolve_chapter_date '' /nonexistent 2026-06-12 00:07)" \
+eq "2026-06-12" "$(resolve_chapter_date '' /nonexistent 2026-06-12)" \
   "resolve: absent ticks file falls back to today"
+# 8. ticks_day is the seam, and it says nothing rather than guessing.
+eq "2026-06-11" "$(ticks_day "$late_ticks")" "ticks_day: reads the mtime day"
+eq "" "$(ticks_day "$empty_ticks")" "ticks_day: an empty file yields nothing"
+eq "" "$(ticks_day /nonexistent)" "ticks_day: an absent file yields nothing"
 
 # ---------------------------------------------------------------------------
 # Black-box CLI tests over throwaway state dirs.
@@ -109,8 +131,9 @@ if grep -q 'last tick of 2026-06-11' "$d1/ticks/archive/2026-06-11.md"; then ok 
 if [ -s "$d1/TICKS.md" ]; then no "day-turn(explicit): live TICKS truncated"; else ok "day-turn(explicit): live TICKS truncated"; fi
 
 # --- Same-day no-arg default is intact (backward compatible) ---------------
-# Last tick 00:00 is <= any current time, so inference picks today; the no-arg path must seal
-# under today exactly as before this change.
+# The fixture is written now, so its mtime day is today and the no-arg path seals under today
+# exactly as before this change. The 00:00 stamp is deliberately one the old rule would also
+# have read as today, so this case does not depend on which rule is in force.
 today="$(date +%F)"
 d2="$(new_state_dir '00:00 - a same-day tick\n' 'CHRONICLE: same-day\n')"
 out2="$("$rt" "$d2" 2>&1)"
