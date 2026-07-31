@@ -439,6 +439,14 @@ shirley and yourself.
   1. **Who she is and the pane map.** `YOU ARE SHIRLEY, the worker. Panes: bitzer=%1,
      shaun=%2 (me, your driver), shirley=%3 (you).` Plus: she takes slices from you and
      does not pick her own work.
+
+     Keep the words `YOU ARE SHIRLEY` literally, and keep them in the first few lines.
+     A clear mints a new transcript file, and shirley calls no harness tool, so she has
+     no session id to register. That string in the head of her new transcript is what
+     tells `bin/liveness-read.sh` which file is hers. She `/clear`ed 27 times on
+     2026-07-30 alone. Reword it and the heartbeat reads a retired session as the live
+     one. The reader takes `MOSSY_BOOT_SHIRLEY` as an override, so if a rewording is
+     ever wanted, change both together.
   2. **What to read before anything else**, with checksums so she can tell a changed
      rule from a remembered one: `.mossy/GUARDRAILS.md` (binding, md5 `<sum>`) and
      `.mossy/MISSION.md` (`<sum>`), then the last 200 lines of `.mossy/TICKS.md`.
