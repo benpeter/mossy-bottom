@@ -373,6 +373,90 @@ if log_has 'stuck-recovery'; then no "worker-done beat 2: shaun NOT given the #2
 if log_has 'FAILED'; then no "worker-done beat 2: must NOT log a delivery failure"; else ok "worker-done beat 2: no delivery failure logged"; fi
 
 # ============================================================================
+# A WORKER WAITING ON A BACKGROUND TASK IS NOT A FINISHED WORKER.
+#
+# Measured on the live run 2026-07-31. Four worker-done wakes fired, at 12:16:07, 12:21:17,
+# 12:52:20 and 13:07:52, and the driver refused all four after checking. His words at 12:16:35:
+# "The heartbeat's reading is wrong. She is mid-slice, not finished". At 13:07:13: "the
+# discriminator has now been right four times out of four". Four burnt turns of a parked driver's
+# context, zero finished slices, and worse than the latency it was meant to save.
+#
+# 'idle x2' cannot see this. The worker emits a waiter, the Bash tool moves it to the BACKGROUND,
+# she writes one status line, and her turn boundary falls there. She never chose to stop. From the
+# pane that is a settled box with no motion, which is exactly what a finished slice looks like too.
+# Eight of her turn ends that day had this shape and none was a slice ending.
+#
+# liveness-read's pending_tasks answers it from what the HARNESS wrote: a background start records
+# an id, its completion arrives as a task-notification carrying the same id, and an id started but
+# not notified means the work is still running. Replayed against the four wakes above, it reads
+# 2, 2, 1 and 1 pending - it would have suppressed every one.
+#
+# The suppression is one-directional. pending_tasks returns 0 for anything it cannot read, so this
+# can only withhold a wake on positive evidence of running work, never invent a reason to withhold
+# one. A withheld wake is also not a lost wake: the K-beat backstop below is still the net.
+# ============================================================================
+printf '\n== a worker waiting on a background task is not done ==\n'
+
+wbg_shaun="hbt_wbg_shaun_$$"
+make_wakeable "$wbg_shaun" "\xe2\x8f\xba STANDBY (context) - resume monitoring shirley.\n${idle_box}"
+wbg_shirley="hbt_wbg_shirley_$$"
+make_fixture "$wbg_shirley" "$idle_box"
+pfwbg="$(fake_panes2 "$wbg_shaun" "$wbg_shirley")"
+
+# The worker's transcript, resolvable the way the reader resolves one: a state dir with a
+# liveness/ registration, and a projects tree keyed on the agents' cwd.
+wbg_sd="$tmp/wbg/.mossy"; wbg_cwd="$tmp/wbg"; wbg_proj="$tmp/wbgproj"
+wbg_enc="$(printf '%s' "$wbg_cwd" | tr './' '--')"
+mkdir -p "$wbg_sd/liveness" "$wbg_proj/$wbg_enc"
+cp "$pfwbg" "$wbg_sd/.barn-panes"
+wbg_sid='eeee5555-0000-0000-0000-00000000000e'
+printf '%s\n' \
+  '{"type":"user","promptSource":"typed","sessionId":"'"$wbg_sid"'","message":{"role":"user","content":"YOU ARE SHIRLEY, the worker."}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Command running in background with ID: bwait0001"}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting on the 900 leg before touching any served file."}]}}' \
+  '{"type":"system","subtype":"turn_duration"}' \
+  >"$wbg_proj/$wbg_enc/$wbg_sid.jsonl"
+
+beat_wbg() {
+  OUT="$(MOSSY_STATE_DIR="$wbg_sd" MOSSY_AGENT_CWD="$wbg_cwd" MOSSY_CLAUDE_PROJECTS="$wbg_proj" \
+    MOSSY_SHAUN_FP="$tmp/wbg_shaun.fp" MOSSY_WORKER_FP="$tmp/wbg_worker.fp" \
+    MOSSY_BACKSTOP_FP="$tmp/wbg_backstop.fp" MOSSY_DELIVERY_FP="$tmp/wbg_delivery.fp" \
+    "$hb" --once --panes "$pfwbg" 2>&1)"
+}
+
+beat_wbg   # beat 1: fingerprints stored
+beat_wbg   # beat 2: idle x2 would fire the done-wake today
+
+if log_has 'shirley DONE'; then
+  no "a worker with a background task still running must NOT read DONE ($OUT)"
+else
+  ok "a worker with a background task still running does NOT read DONE"
+fi
+if pane_has "$wbg_shaun" 'WAKE-DONE-XYZZY'; then
+  no "shaun must NOT be woken while the worker waits on a background task"
+else
+  ok "shaun is NOT woken while the worker waits on a background task"
+fi
+
+# And when the work genuinely finishes, the SAME pane reads DONE and the wake fires. The
+# notification alone is not that moment: it RE-OPENS her turn, because the harness delivers the
+# result as a user record and she picks the slice back up. So the finished shape is the whole
+# sequence - the result arrives, she acts on it, and THAT turn closes with nothing outstanding.
+# Asserting it this way is what keeps the suppression from being a permanent mute.
+printf '%s\n' \
+  '{"type":"user","message":{"content":"<task-notification>\n<task-id>bwait0001</task-id>\n<summary>done (exit code 0)</summary>\n</task-notification>"}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Both legs clean. The slice is finished."}]}}' \
+  '{"type":"system","subtype":"turn_duration"}' \
+  >>"$wbg_proj/$wbg_enc/$wbg_sid.jsonl"
+
+beat_wbg
+if log_has 'shirley DONE'; then
+  ok "once the task reports complete, the SAME pane reads DONE and the wake fires"
+else
+  no "the wake never fires even after the background task completed ($OUT)"
+fi
+
+# ============================================================================
 # #36 WORKER-BUSY: an ANIMATING (busy) worker + shaun parked on STANDBY -> NEVER a done-wake, whatever
 # shaun is doing. This is the economy win: a worker mid-slice is busy, not done, so shaun stays parked
 # (no turn, no tokens). Two beats; shaun is never woken with the done nudge.
