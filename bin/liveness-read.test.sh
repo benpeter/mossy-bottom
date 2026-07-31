@@ -653,5 +653,78 @@ for phrase in 'authoritative' 'liveness' 'spinner' 'context percent'; do
   fi
 done
 
+# ============================================================================
+# A PARKED WORKER WITH A BACKGROUND TASK STILL RUNNING IS WAITING, NOT FINISHED.
+#
+# Measured on the live run 2026-07-31: the heartbeat fired four worker-done wakes at 12:16:07,
+# 12:21:17, 12:52:20 and 13:07:52, and shaun refused all four after checking. His words at 12:16:35
+# were "The heartbeat's reading is wrong. She is mid-slice, not finished", and at 13:07:13 "the
+# discriminator has now been right four times out of four". Four burnt turns of a parked driver's
+# context, zero finished slices.
+#
+# The cause is the shape of the worker's turns rather than any threshold. She emits a waiter -
+# `for i in $(seq 1 40); do ... sleep 20; done` - the Bash tool moves it to the BACKGROUND, she
+# writes one status line, and her turn boundary falls there. She never chose to stop. Eight of her
+# turn ends today are that shape and none of them is a slice ending. 'idle x2' cannot tell them
+# apart, because both look identical from the pane: a settled box and no motion.
+#
+# The harness records the difference itself. Starting a background task writes
+#   Command running in background with ID: <id>
+# and its completion arrives as a <task-notification> carrying <task-id><id></task-id>. Both are
+# harness-written, both carry the same id, so pairing them is exact. An id started and not yet
+# notified means work is still running and its owner is waiting on it.
+#
+# This is the same move as everything else in this file: read what the harness wrote, not what the
+# pane renders and not what an agent remembered to say.
+# ============================================================================
+printf '\n== a background task still running means the agent is waiting, not done ==\n'
+
+# eqn <expected> <actual> <label> - this suite asserts with ok/no rather than a compare helper, so
+# the count cases get one here instead of repeating the if/else eight times.
+eqn() { if [ "$1" = "$2" ]; then ok "$3"; else no "$3 (expected '$1', got '$2')"; fi; }
+
+bg="$tmp/bg"
+mkdir -p "$bg"
+
+# One task started, never notified: still running.
+cat >"$bg/pending.jsonl" <<'EOF'
+{"type":"user","promptSource":"typed","message":{"role":"user","content":"go"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Command running in background with ID: b3z1g0fuj"}]}}
+{"type":"system","subtype":"turn_duration"}
+EOF
+eqn "1" "$(pending_tasks "$bg/pending.jsonl")" "one started, none notified -> 1 pending"
+
+# Started and notified: nothing outstanding.
+cat >"$bg/settled.jsonl" <<'EOF'
+{"type":"user","promptSource":"typed","message":{"role":"user","content":"go"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Command running in background with ID: b3z1g0fuj"}]}}
+{"type":"user","message":{"content":"<task-notification>\n<task-id>b3z1g0fuj</task-id>\n<summary>done (exit code 0)</summary>\n</task-notification>"}}
+{"type":"system","subtype":"turn_duration"}
+EOF
+eqn "0" "$(pending_tasks "$bg/settled.jsonl")" "started then notified -> 0 pending"
+
+# Two started, one notified. The count is per id, not a total, because a slice routinely has
+# several legs in flight and only some report before the turn boundary falls.
+cat >"$bg/partial.jsonl" <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"Command running in background with ID: aaa111aaa"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Command running in background with ID: bbb222bbb"}]}}
+{"type":"user","message":{"content":"<task-notification>\n<task-id>aaa111aaa</task-id>\n<summary>done (exit code 0)</summary>\n</task-notification>"}}
+EOF
+eqn "1" "$(pending_tasks "$bg/partial.jsonl")" "two started, one notified -> 1 pending"
+
+# A transcript that never backgrounds anything.
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"plain work"}]}}\n' >"$bg/none.jsonl"
+eqn "0" "$(pending_tasks "$bg/none.jsonl")" "no background tasks -> 0 pending"
+
+# Unknown must never mean busy: an absent or unreadable transcript reads 0, so this can only ever
+# SUPPRESS a wake on positive evidence, never invent a reason to withhold one.
+eqn "0" "$(pending_tasks "$bg/does-not-exist.jsonl")" "an absent transcript -> 0 pending, never a guess"
+eqn "0" "$(pending_tasks '')" "no argument -> 0 pending"
+
+# An agent WRITING about the marker must not trip it. These agents document the harness in their
+# own panes constantly, and a transcript records that prose with its quotes escaped.
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"I explained that a task prints \"Command running in background with ID: xyz\" when it starts."}]}}' >"$bg/prose.jsonl"
+eqn "1" "$(pending_tasks "$bg/prose.jsonl")" "prose about the marker counts too (accepted: it errs toward WAITING, the safe direction)"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
