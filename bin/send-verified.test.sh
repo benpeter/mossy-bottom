@@ -29,7 +29,11 @@ cleanup() {
   fi
   rm -rf "$tmp"
 }
-trap cleanup EXIT
+# INT TERM as well as EXIT: bash skips an EXIT-only trap when it is killed by a signal, so an
+# interrupted run left its fixture panes behind. 22 of them were found alive on 2026-07-31 after a
+# suite was cut short, and a stray session is not harmless - barn scans the session list to pick a
+# window name and the attached session.
+trap cleanup EXIT INT TERM
 
 pass=0
 fail=0
@@ -121,8 +125,10 @@ grep -q '^ok' "$tmp/once.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 # "can't find pane" lines from tmux. A caller reading 1 retries, and the heartbeat's delivery
 # escalation counts it as a failed delivery to a pane that was never there. The existing guard,
 #   tmux display-message -p -t "$PANE" '' >/dev/null 2>&1 || ...
-# cannot catch it: display-message exits 0 for a bogus id. 'tmux list-panes -a -F #{pane_id}'
-# grepped exactly does catch it, and costs one tmux call.
+# cannot catch it: display-message exits 0 for a bogus id. Asking it to PRINT the resolved pane id
+# does catch it, because a bogus target prints nothing. An exact match against 'list-panes -a -F
+# #{pane_id}' also catches it but rejects a SESSION NAME, which the CLI documents as a valid target
+# and which the fixtures below pass - that is why the check is the one it is.
 printf '\n== a gone pane is not a delivery failure ==\n'
 
 gone_out="$(MOSSY_STATE_DIR="$tmp/nostate" "$sv" %9999999 'text into the void' 2>&1)"; gone_code=$?

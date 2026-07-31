@@ -18,6 +18,19 @@ export TIMMY_SUSTAIN_SAMPLES="${TIMMY_SUSTAIN_SAMPLES:-2}"
 # Per-fixture warmup before the first snapshot (a pane paints in ~30ms; 0.1 is a 3x margin).
 settle="${TIMMY_SETTLE:-0.1}"
 
+# Each fixture below kills its own session on the line after its assertion, which covers a clean
+# run and nothing else: an interrupted run leaves whichever fixture was live at the time, and one
+# such session was found still alive three days later. There is no central registry to drain, so
+# the trap sweeps by NAME, scoped to this run's pid so it can only ever match sessions this process
+# created. EXIT alone is not enough, because bash skips an EXIT-only trap when killed by a signal.
+sweep_fixtures() {
+  local s
+  for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "^timmy_t_.*_$$\$"); do
+    tmux kill-session -t "$s" 2>/dev/null
+  done
+}
+trap sweep_fixtures EXIT INT TERM
+
 pass=0
 fail=0
 
