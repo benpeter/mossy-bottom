@@ -917,5 +917,113 @@ assert_state "$mfs_sess" idle 0 \
 
 tmux kill-session -t "$mfs_sess" 2>/dev/null
 
+# ============================================================================
+# THE SUFFIX OVERRIDE SWALLOWS A WORKING PANE (found 2026-07-31, from live captures)
+#
+# #17 made the "← for agents" suffix authoritative for settled-idle ABOVE the spinner, on the
+# stated ground that the suffix "is PRESENT when the pane is settled-idle and ABSENT while
+# working" and therefore "can NEVER false-negative a working pane". That is false against the
+# client the run is on. Two captures pulled verbatim out of the agents' own transcripts show a
+# pane SIX MINUTES into a live turn, spinner advancing, with the suffix present:
+#
+#   ● Flibbertigibbeting… (6m 35s · ↓ 20.1k tokens · thought for 49s)
+#
+#   ───────────────────────────────────────
+#   ❯
+#   ───────────────────────────────────────
+#     Opus 5   ~/dev/adobe/cloudadoption/contitires-mossy   main   ▓░░░░░░░ 12% 1M
+#     ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+#
+# Reproduced against the shipped classifier before this fixture existed:
+#   {"state":"idle","evidence":{"snapshots_differ":true,"spinner":true,"idle_suffix":true,...}}
+# Motion, a detected spinner, and a running elapsed counter, all three overridden. false-IDLE on
+# a working pane is the direction every other guard in this file is bent away from, and it is what
+# let send-verified retry a hand that had landed: shaun measured shirley BUSY with pane-state.sh,
+# timmy read the same pane idle, and the retry duplicated the hand. Four of those on 2026-07-30.
+#
+# The suffix is still needed and still correct for what #17 and the wake-gap fixture above cover.
+# The discriminator is the COMBINATION, and no single flag settles it:
+#   suffix + spinner + static     -> idle   (#17: a stale line above a settled box)
+#   suffix + no spinner + motion  -> idle   (the wake-gap: a finished turn, shells still printing)
+#   suffix + spinner + motion     -> BUSY   (a live turn; this is what was missing)
+# ============================================================================
+
+# The live footer, byte for byte from the capture above, wide enough that nothing truncates.
+live_box='\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\xe2\x9d\xaf\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n  Opus 5   ~/dev/adobe/cloudadoption/contitires-mossy   main   \xe2\x96\x93\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91 12%% 1M\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle) \xc2\xb7 \xe2\x86\x90 for agents\n'
+
+# RED 1: the capture itself. An advancing spinner above a settled-looking box whose footer carries
+# the suffix. Today: idle/0. Wanted: busy/10.
+lw_sess="timmy_t_livework_$$"
+spawn_advancing "$lw_sess" 150 24 "\xe2\x97\x8f Flibbertigibbeting\xe2\x80\xa6 (6m %ds \xc2\xb7 \xe2\x86\x93 20.1k tokens \xc2\xb7 thought for 49s)\n\n${live_box}"
+sleep "$settle"
+
+assert_state "$lw_sess" busy 10 \
+  "a LIVE advancing spinner above a suffix-carrying footer -> busy, not idle"
+
+assert_selftest "$lw_sess" busy 10 "spinner +yes" \
+  "the live-work pane's selftest names the spinner as the evidence"
+
+tmux kill-session -t "$lw_sess" 2>/dev/null
+
+# RED 2: the API retry ladder, also verbatim from a live capture. Two things hide it. The suffix
+# is present, and the ladder line is not the anchored candidate: a "⎿" tool-output continuation
+# sits between it and the box, so the structural pick lands on "⎿  If it persists..." instead.
+#
+#   ✻ 529 Overloaded · Retrying in 3s · attempt 3/10
+#     ⎿  If it persists, check https://status.claude.com.
+#
+#   ───────────────────────────────────────
+#   ❯
+#
+# An agent inside the ladder is ALIVE and needs no hand. Four consecutive ladders on 2026-07-29
+# ran 208.6s, 206.3s, 208.2s and 204.4s with nothing appended to the transcript, so a caller that
+# reads this idle either re-sends into a live turn or recovers a pane that needs no recovery.
+rl_sess="timmy_t_retryladder_$$"
+spawn_advancing "$rl_sess" 150 24 "\xe2\x9c\xbb 529 Overloaded \xc2\xb7 Retrying in %ds \xc2\xb7 attempt 3/10\n  \xe2\x8e\xbf  If it persists, check https://status.claude.com.\n\n${live_box}"
+sleep "$settle"
+
+assert_state "$rl_sess" busy 10 \
+  "an API retry ladder behind a tool-output continuation -> busy, not idle"
+
+tmux kill-session -t "$rl_sess" 2>/dev/null
+
+# RED 3: the same ladder STATIC. A countdown between ticks is byte-identical, and a ladder is
+# alive by construction, so it must not read stalled either - stalled invites a recovery that
+# would interrupt a turn the client is already retrying on its own.
+rls_sess="timmy_t_retrystatic_$$"
+tmux new-session -d -s "$rls_sess" -x 150 -y 24 \
+  "printf '\xe2\x9c\xbb 529 Overloaded \xc2\xb7 Retrying in 40s \xc2\xb7 attempt 7/10\n  \xe2\x8e\xbf  If it persists, check https://status.claude.com.\n\n${live_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$rls_sess" busy 10 \
+  "a STATIC retry ladder (countdown between ticks) -> busy, never stalled or idle"
+
+tmux kill-session -t "$rls_sess" 2>/dev/null
+
+# RED 4: a tool-output continuation must not hide an ordinary advancing spinner either. Same
+# structural miss as the ladder, without the ladder wording.
+sc_sess="timmy_t_spincont_$$"
+spawn_advancing "$sc_sess" 150 24 "\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %dk tokens)\n  \xe2\x8e\xbf  Read 412 lines\n\n${live_box}"
+sleep "$settle"
+
+assert_state "$sc_sess" busy 10 \
+  "an advancing spinner above a tool-output continuation -> busy (the continuation is not the status line)"
+
+tmux kill-session -t "$sc_sess" 2>/dev/null
+
+# REGRESSION GUARD: #17's decoy must not become collateral. Same shape as RED 1 but STATIC, which
+# is what a stale spinner-shaped line above a genuinely settled box looks like. It read idle before
+# this change and has to keep reading idle; flipping it to busy or stalled is the false-positive
+# busy that stalls the chain, and it is why the suffix override exists at all.
+dw_sess="timmy_t_decoywide_$$"
+tmux new-session -d -s "$dw_sess" -x 150 -y 24 \
+  "printf '\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 1.2k tokens)\n${live_box}'; sleep 600" 2>/dev/null
+sleep "$settle"
+
+assert_state "$dw_sess" idle 0 \
+  "#17 preserved: a STATIC decoy spinner above a suffix-carrying footer -> still idle"
+
+tmux kill-session -t "$dw_sess" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
