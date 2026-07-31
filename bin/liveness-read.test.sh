@@ -533,6 +533,79 @@ else
 fi
 
 # ============================================================================
+# run_floor / a sweep floored at the run start.
+#
+# The boot-window defect, observed live 2026-07-31 00:57: shirley has no transcript of her own until
+# shaun hands her something, because barn gives her no boot prompt. The sweep then matched the
+# newest file carrying `YOU ARE SHIRLEY`, which was the PREVIOUS run's, and she read `stuck` on a
+# transcript that had stopped moving before this run began. It self-healed at her first hand, but it
+# would recur at every launch, and two of her nine historical sessions carry the phrase nowhere at
+# all, which leaves them permanently resolving to an older run.
+#
+# .barn-panes is written by barn at `up`, so its mtime dates the run: a transcript last written
+# before that cannot belong to this run.
+# ============================================================================
+printf '\n== run_floor and a sweep floored at the run start ==\n'
+
+fl="$tmp/floor"
+mkdir -p "$fl/.mossy"
+nowf="$(date +%s)"
+printf 'shaun=%%1\nshirley=%%2\n' >"$fl/.mossy/.barn-panes"
+touch -t "$(date -r "$((nowf - 600))" '+%Y%m%d%H%M.%S')" "$fl/.mossy/.barn-panes"
+
+got="$(run_floor "$fl/.mossy")"
+if [ "$got" = "$((nowf - 600))" ]; then ok "run_floor reads .barn-panes mtime as the run start"; else no "run_floor gave '$got', wanted $((nowf - 600))"; fi
+if [ -z "$(run_floor "$tmp/nodir")" ]; then ok "no .barn-panes -> no floor (behaviour unchanged)"; else no "a missing .barn-panes produced a floor"; fi
+
+flproj="$tmp/flproj"
+flenc="$(encode_cwd "$fl")"
+mkdir -p "$flproj/$flenc"
+old_sid='aaaa0000-0000-0000-0000-0000000000ld'
+new_sid='bbbb0000-0000-0000-0000-00000000new1'
+boot "$flproj/$flenc/$old_sid.jsonl" 'YOU ARE SHIRLEY, the worker. Panes from the PREVIOUS run.'
+touch -t "$(date -r "$((nowf - 1200))" '+%Y%m%d%H%M.%S')" "$flproj/$flenc/$old_sid.jsonl"
+
+# With a floor, the pre-run transcript must be invisible even though it is the only candidate.
+got="$(MOSSY_CLAUDE_PROJECTS="$flproj" resolve_session "$flproj" "$fl" shirley '' "$((nowf - 600))" || true)"
+if [ -z "$got" ]; then ok "a PRE-RUN transcript is skipped, even as the only candidate"; else no "pre-run transcript was used: '$got'"; fi
+
+# Without a floor the old behaviour holds, so the change is opt-in per caller.
+got="$(MOSSY_CLAUDE_PROJECTS="$flproj" resolve_session "$flproj" "$fl" shirley '' || true)"
+if [ "$got" = "$old_sid" ]; then ok "with no floor the pre-run transcript is still found (unchanged)"; else no "no-floor path changed: '$got'"; fi
+
+# A post-run transcript is found normally.
+boot "$flproj/$flenc/$new_sid.jsonl" 'YOU ARE SHIRLEY, the worker. This run.'
+touch -t "$(date -r "$((nowf - 60))" '+%Y%m%d%H%M.%S')" "$flproj/$flenc/$new_sid.jsonl"
+got="$(MOSSY_CLAUDE_PROJECTS="$flproj" resolve_session "$flproj" "$fl" shirley '' "$((nowf - 600))" || true)"
+if [ "$got" = "$new_sid" ]; then ok "a POST-RUN transcript is found"; else no "post-run transcript not found: '$got'"; fi
+
+# End to end, the case that misfired live: only a stale candidate exists, so the verdict must be
+# parked and never stuck. An agent nobody has handed anything is waiting, not wedged.
+rm -f "$flproj/$flenc/$new_sid.jsonl"
+got="$(MOSSY_CLAUDE_PROJECTS="$flproj" run_live_role shirley "$fl" '' '' 600)"
+if [ "$got" = "parked" ]; then ok "only a pre-run candidate -> parked, NEVER stuck (the 00:57 misfire)"; else no "boot window gave '$got', wanted parked"; fi
+
+# ============================================================================
+# A resolution miss must complain, once.
+#
+# Both #42 and #44 hid for hours because "cannot resolve" degrades silently to the old
+# screen-reading behaviour. A single line to stderr would have surfaced each in minutes. It is
+# diagnostics only: the verdict must not change.
+# ============================================================================
+printf '\n== a resolution miss says so, once, without changing the verdict ==\n'
+
+miss_out="$tmp/miss.err"
+got="$( (MOSSY_CLAUDE_PROJECTS="$tmp/nothing-here" run_live_role shirley /no/such/tree '' '' 600) 2>"$miss_out" )"
+if [ "$got" = "parked" ]; then ok "a resolution miss still returns parked (verdict unchanged)"; else no "resolution miss changed the verdict to '$got'"; fi
+if LC_ALL=C grep -q 'no transcript' "$miss_out"; then ok "a resolution miss writes a diagnostic to stderr"; else no "a resolution miss was silent (stderr: $(cat "$miss_out"))"; fi
+
+# Rate-limited: a per-beat caller must not flood. Two misses in ONE process, one message.
+cnt="$( (MOSSY_CLAUDE_PROJECTS="$tmp/nothing-here"
+         run_live_role shirley /no/such/tree '' '' 600 >/dev/null
+         run_live_role shirley /no/such/tree '' '' 600 >/dev/null) 2>&1 | LC_ALL=C grep -c 'no transcript' )"
+if [ "$cnt" = "1" ]; then ok "the diagnostic is rate-limited to once per process (got $cnt)"; else no "diagnostic printed $cnt times, wanted 1"; fi
+
+# ============================================================================
 # CLI: the verdict word plus a distinct exit code per verdict, matching stuck-check.sh.
 # ============================================================================
 printf '\n== CLI verdicts and exit codes ==\n'
