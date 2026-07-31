@@ -84,20 +84,26 @@ SV_DEADLINE="${SV_DEADLINE:-90}"
 # 90-second sleeper: it outlives the caller, and any pipeline waiting on the subshell's writers
 # blocks for the full deadline. Found when every sourcing assertion started taking 90s.
 if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${SV_DEADLINE}" -gt 0 ] 2>/dev/null; then
+  # The watchdog's own stderr is silenced and its intentional messages go through a SAVED copy of
+  # the caller's stderr instead. Killing the subshell's `sleep` makes that subshell announce
+  # "Terminated: 15  sleep ..." on its stderr, and with stderr inherited that landed in the
+  # heartbeat's log on every successful delivery - noise in the one log a person reads when
+  # something is wrong at three in the morning.
+  exec {SV_ERR}>&2
   (
     sleep "${SV_DEADLINE}"
     kill -0 "$$" 2>/dev/null || exit 0
     printf 'send-verified: WATCHDOG - exceeded %ss wall clock, killing this delivery attempt.\n' \
-      "${SV_DEADLINE}" >&2
-    printf 'send-verified: the caller should treat this as a failed submit and check the receiver\n' >&2
-    printf 'send-verified: transcript before concluding the pane is dead.\n' >&2
+      "${SV_DEADLINE}" >&"${SV_ERR}"
+    printf 'send-verified: the caller should treat this as a failed submit and check the receiver\n' >&"${SV_ERR}"
+    printf 'send-verified: transcript before concluding the pane is dead.\n' >&"${SV_ERR}"
     kill -TERM "$$" 2>/dev/null
-  ) >/dev/null &
+  ) >/dev/null 2>/dev/null &
   SV_WATCHDOG=$!
+  disown "${SV_WATCHDOG}" 2>/dev/null || true
   # Kill the sleep as well as the shell that owns it. Killing only the subshell orphans its `sleep`,
   # which keeps the inherited descriptors open, so a caller reading this script through a command
-  # substitution blocks for the whole deadline even after the script has exited. stdout is sent to
-  # /dev/null for the same reason; the watchdog's own diagnostics go to stderr and still surface.
+  # substitution blocks for the whole deadline even after the script has exited.
   # shellcheck disable=SC2064
   trap "pkill -P ${SV_WATCHDOG} 2>/dev/null; kill ${SV_WATCHDOG} 2>/dev/null; true" EXIT
 fi
