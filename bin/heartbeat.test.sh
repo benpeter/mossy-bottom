@@ -578,5 +578,67 @@ if log_has 'worker-done wake delivered + verified'; then ok "worker-done/livenes
 if log_has 'worker-alert'; then no "worker-done/liveness: NOT the #29 worker-alert (a parked worker is not stalled)"; else ok "worker-done/liveness: NOT the #29 worker-alert (a parked worker is not stalled)"; fi
 if log_has 'stuck-recovery'; then no "worker-done/liveness: shaun NOT given a stuck-recovery (his turn ended, he is parked)"; else ok "worker-done/liveness: shaun NOT given a stuck-recovery (his turn ended, he is parked)"; fi
 
+# ============================================================================
+# A FAILED DELIVERY ESCALATES, which is the only detector a parked agent has.
+#
+# `parked` carries no staleness check by design: that is what removed 18 of the 21 false
+# stuck-recovery wakes of 2026-07-30. The cost is that a parked agent whose process has DIED reads
+# parked forever. Duration cannot close it - in-turn gaps topped out at 345.7s while legitimate
+# parked silence reached 1983.9s, so the two populations overlap across the whole useful range.
+#
+# What can close it is a poke, and the chain already pokes: send-verified confirms a delivery by the
+# receiver's transcript growing, measured at 0.59s median over 86 real sends. A delivery that failed
+# after its retry means the receiver did not append at all, which for a parked agent is the
+# dead-or-wedged signal. Until now all six failure sites in this file logged and moved on.
+#
+# No duration is involved, so this cannot produce the class of false positive the liveness work
+# removed: it fires only when a real send genuinely failed to land.
+# ============================================================================
+esc_dir="$tmp/escrun"
+mkdir -p "$esc_dir"
+export MOSSY_STATE_DIR="$esc_dir"
+esc_file="$esc_dir/ESCALATIONS.md"
+dfp="$tmp/delivery.fp"
+
+esc_count() { if [ -f "$esc_file" ]; then LC_ALL=C grep -c 'delivery failing' "$esc_file"; else echo 0; fi; }
+beat_esc() {
+  OUT="$(MOSSY_STATE_DIR="$esc_dir" MOSSY_DELIVERY_FP="$dfp" MOSSY_SHAUN_FP="$tmp/esc_shaun.fp" \
+    MOSSY_WORKER_FP="$tmp/esc_worker.fp" MOSSY_BACKSTOP_FP="$tmp/esc_backstop.fp" \
+    "$hb" --once --panes "$1" 2>&1)"
+}
+
+# A bitzer pane that swallows every delivered line and never changes visually, so send-verified
+# retries once and then reports failure. The nudge is the most frequent send, so it is the cheapest
+# way to drive the failure path.
+ec="hbt_esc_$$"
+make_counter "$ec" "$idle_box" "$tmp/esc_delivered.log"
+pfec="$(fake_panes_bitzer "$ec")"
+
+printf '\n== a failed delivery escalates after the second consecutive failure ==\n'
+
+beat_esc "$pfec"
+if log_has 'nudge FAILED'; then ok "failure 1: the delivery failure is logged"; else no "failure 1: not logged ($OUT)"; fi
+if [ "$(esc_count)" = "0" ]; then ok "failure 1: NO escalation yet (one failure self-heals next beat)"; else no "failure 1: escalated too early"; fi
+
+beat_esc "$pfec"
+if [ "$(esc_count)" = "1" ]; then ok "failure 2: an ESCALATIONS entry is written"; else no "failure 2: no entry written ($(esc_count))"; fi
+if [ -f "$esc_file" ] && LC_ALL=C grep -q 'bitzer' "$esc_file"; then ok "failure 2: the entry names the role"; else no "failure 2: entry does not name the role"; fi
+if [ -f "$esc_file" ] && LC_ALL=C grep -q "$ec" "$esc_file"; then ok "failure 2: the entry names the pane"; else no "failure 2: entry does not name the pane"; fi
+
+beat_esc "$pfec"
+if [ "$(esc_count)" = "1" ]; then ok "failure 3: still exactly ONE entry (fires once per episode, no loop)"; else no "failure 3: escalated again ($(esc_count))"; fi
+
+# A delivery that lands clears the streak, so an intermittent failure never accumulates to an
+# escalation. Same counter file, a pane that accepts input and goes busy.
+printf '\n== a successful delivery clears the failure streak ==\n'
+ew="hbt_escok_$$"
+make_wakeable "$ew" "$idle_box"
+pfew="$(fake_panes_bitzer "$ew")"
+beat_esc "$pfew"
+if log_has 'nudged + verified'; then ok "the recovering pane accepted the nudge"; else no "the recovering pane did not accept it ($OUT)"; fi
+if ! LC_ALL=C grep -q "$ew" "$dfp" 2>/dev/null; then ok "a landed delivery leaves no failure count for that pane"; else no "a landed delivery left a failure count ($(cat "$dfp"))"; fi
+
+unset MOSSY_STATE_DIR
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
