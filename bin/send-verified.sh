@@ -102,6 +102,24 @@ Environment:
 EOF
 }
 
+# pane_exists <target> - is this target actually there? The obvious check does not work:
+# `tmux display-message -p -t "$t" ''` exits 0 for a bogus id, which is why the guard that used to
+# read that way never fired. Asking it to PRINT the resolved pane id does work: a live target
+# prints one, a bogus one prints nothing and still exits 0, so the emptiness is the signal.
+#
+# It has to accept a SESSION NAME as well as a "%N" pane id, because that is what the CLI documents
+# and what the suite's fixtures pass. An exact match against `list-panes -F #{pane_id}` would reject
+# every session-name caller, which is how the first cut at this broke four existing assertions.
+#
+# Getting it wrong is not cosmetic: a gone pane used to exit 1, the code that means "the prompt did
+# not submit", so a caller retried and the heartbeat's delivery escalation counted a failed delivery
+# against a pane that was never there.
+pane_exists() {
+  local id
+  id="$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null)"
+  [ -n "${id}" ]
+}
+
 # deliver <pane> <text> - the smoke-test send rule (barn.sh send_prompt): literal text, a
 # settle, then a SEPARATE Enter. The settle is the first line of defence against the 06:39
 # race; the poll that follows is the confirmation that closes the gap the settle alone left.
@@ -262,6 +280,7 @@ main() {
   local pane="$1" text="$2"
   [ -n "${pane}" ] || die "<pane> must not be empty"
   command -v tmux >/dev/null 2>&1 || die "tmux not found (required)"
+  pane_exists "${pane}" || die "no such pane '${pane}' - nothing was sent"
   [ -x "${TIMMY}" ] || die "timmy not found or not executable at '${TIMMY}' (set MOSSY_TIMMY)"
 
   # Liveness hook. Record that the CALLING agent's session was alive; see bin/liveness-append.sh.
