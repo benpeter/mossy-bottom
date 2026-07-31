@@ -1011,6 +1011,22 @@ assert_state "$sc_sess" busy 10 \
 
 tmux kill-session -t "$sc_sess" 2>/dev/null
 
+# RED 5: the repaint-skip on the suffix side. A working pane whose spinner ticks more slowly than
+# the capture interval yields byte-identical pairs now and then, and one such pair must not be
+# enough to hand the verdict back to the suffix. #25 already refuses to call that a stall on the
+# mirror side, using a multi-sample window; the same window has to decide here, or a working pane
+# reads idle on a one-frame skip. Ticks every ~0.15s against a 0.1s interval, so an identical pair
+# really occurs, while the confirm window is wide enough to catch a tick.
+ls_sess="timmy_t_liveskip_$$"
+tmux new-session -d -s "$ls_sess" -x 150 -y 24 \
+  "i=0; while true; do printf '\033[H\xe2\x97\x8f Whirring\xe2\x80\xa6 (esc to interrupt \xc2\xb7 %ds)\033[K\n${live_box}' \"\$((i/3))\"; i=\$((i+1)); sleep 0.05; done" 2>/dev/null
+sleep "$settle"
+
+assert_state "$ls_sess" busy 10 \
+  "a working spinner with a one-sample repaint-skip above a suffix footer -> busy, not idle"
+
+tmux kill-session -t "$ls_sess" 2>/dev/null
+
 # REGRESSION GUARD: #17's decoy must not become collateral. Same shape as RED 1 but STATIC, which
 # is what a stale spinner-shaped line above a genuinely settled box looks like. It read idle before
 # this change and has to keep reading idle; flipping it to busy or stalled is the false-positive
