@@ -779,6 +779,11 @@ cmd_relaunch() {
     return 0
   fi
 
+  # Placed AFTER --plan returns, so a plan read is never gated, and BEFORE respawn-pane -k,
+  # which is the step that destroys the running agent. A delivery-failure report is not
+  # evidence a pane is dead: see bin/relaunch-guard.sh for the 2026-07-31 count.
+  "${REPO_ROOT}/bin/relaunch-guard.sh" "${role}" "${dir}" || exit 1
+
   local id
   id="$(pane_id_for "${role}" "${panes_file}")"
   [ -n "${id}" ] || { echo "barn: no pane id for ${role} in ${panes_file}" >&2; exit 1; }

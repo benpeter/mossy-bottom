@@ -395,6 +395,53 @@ if log_has 'FAILED'; then no "worker-done beat 2: must NOT log a delivery failur
 # can only withhold a wake on positive evidence of running work, never invent a reason to withhold
 # one. A withheld wake is also not a lost wake: the K-beat backstop below is still the net.
 # ============================================================================
+# ============================================================================
+# A DELIVERED-BUT-UNCONFIRMED SEND IS NOT A DELIVERY FAILURE.
+#
+# send-verified exit 3 means the Enter took the text - the input box is empty - and the receiver
+# simply has not appended yet. On 2026-07-31 that was 13 sends out of 13 between 21:43 and 23:00,
+# with the append arriving 23s, 24s and 71s after a 5s window.
+#
+# Counting those as failures is what put two ESCALATIONS entries into the run advising
+# `bin/barn.sh relaunch <role>`, at 21:59:10 for bitzer and 22:05:40 for shaun, against panes alive
+# and receiving at 65% and 46% context. The escalation's own remedy destroys a working agent, so a
+# false failure here is expensive in a way a missed beat is not.
+# ============================================================================
+printf '\n== an unconfirmed delivery is not counted as a failure ==\n'
+
+# A stub send-verified that reports the delivered-but-unconfirmed code, driven through a real
+# beat so the assertion covers the wiring rather than the function in isolation.
+unc_sv="$tmp/unc-sv.sh"
+printf '#!/usr/bin/env bash\nexit 3\n' >"$unc_sv"; chmod +x "$unc_sv"
+unc_state="$tmp/unc-state"; mkdir -p "$unc_state"
+unc_dfp="$tmp/unc-delivery.fp"
+
+uc="hbt_unc_$$"
+make_counter "$uc" "$idle_box" "$tmp/unc_delivered.log"
+pfuc="$(fake_panes_bitzer "$uc")"
+
+beat_unc() {
+  OUT="$(MOSSY_STATE_DIR="$unc_state" MOSSY_SEND_VERIFIED="$unc_sv" MOSSY_DELIVERY_FP="$unc_dfp" \
+    MOSSY_SHAUN_FP="$tmp/unc_shaun.fp" MOSSY_WORKER_FP="$tmp/unc_worker.fp" \
+    MOSSY_BACKSTOP_FP="$tmp/unc_backstop.fp" "$hb" --once --panes "$1" 2>&1)"
+}
+
+beat_unc "$pfuc"
+beat_unc "$pfuc"
+beat_unc "$pfuc"
+
+if [ ! -s "$unc_dfp" ] || ! LC_ALL=C grep -qE "^${uc} [1-9]" "$unc_dfp" 2>/dev/null; then
+  ok "three unconfirmed deliveries leave NO failure count"
+else
+  no "an unconfirmed delivery was counted as a failure ($(cat "$unc_dfp" 2>/dev/null))"
+fi
+if [ -f "$unc_state/ESCALATIONS.md" ] && LC_ALL=C grep -q 'delivery failing' "$unc_state/ESCALATIONS.md"; then
+  no "an unconfirmed delivery raised an ESCALATIONS entry"
+else
+  ok "no ESCALATIONS entry, so nothing advises relaunching a live agent"
+fi
+if log_has 'FAILED'; then no "an unconfirmed delivery must not be logged as FAILED"; else ok "not logged as FAILED"; fi
+
 printf '\n== a worker waiting on a background task is not done ==\n'
 
 wbg_shaun="hbt_wbg_shaun_$$"

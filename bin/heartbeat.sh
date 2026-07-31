@@ -122,7 +122,9 @@ SHAUN_FP="${MOSSY_SHAUN_FP:-${STATE_DIR}/.shaun-fp}"
 # that the pane went busy (the turn started), retrying ONCE before giving up - so a failed
 # recovery delivery is caught and logged, not lost. Only the recovery wakes use it; the
 # frequent bitzer sustain trigger stays a plain fire-and-forget send (a separate follow-up).
-SEND_VERIFIED="${SCRIPT_DIR}/send-verified.sh"
+# Overridable so the suite can drive the exit codes this file BRANCHES on without standing up a
+# pane that produces each one. Production never sets it.
+SEND_VERIFIED="${MOSSY_SEND_VERIFIED:-${SCRIPT_DIR}/send-verified.sh}"
 
 # Stalled-worker alert (#29). shirley's fingerprint persists BETWEEN beats, exactly like
 # shaun's, so the worker 'changed' signal is cross-beat too.
@@ -304,6 +306,8 @@ send_trigger() {
   MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$1" "$TRIGGER"
   rc=$?
   note_delivery "$(role_for_pane_hb "$1")" "$1" "$rc"
+  # 3 is delivered-unconfirmed: the caller's `if` must read it as a delivery, not a failure.
+  [ "$rc" -eq 3 ] && return 0
   return "$rc"
 }
 
@@ -326,6 +330,8 @@ send_wake() {
   MOSSY_TIMMY="$TIMMY" "$SEND_VERIFIED" "$pane" "$trigger"
   rc=$?
   note_delivery "$(role_for_pane_hb "$pane")" "$pane" "$rc"
+  # 3 is delivered-unconfirmed: the caller's `if` must read it as a delivery, not a failure.
+  [ "$rc" -eq 3 ] && return 0
   return "$rc"
 }
 
@@ -375,9 +381,15 @@ escalate_delivery() {
 
 # note_delivery <role> <pane> <rc> - record a delivery outcome and escalate on a streak. rc 0 clears
 # the pane's count; nonzero increments it and raises an entry at exactly ESCALATE.
+# rc 3 is DELIVERED-but-unconfirmed, not a failure: send-verified saw the receiver mid-turn, so its
+# enqueue had not reached the file inside the grow window. On 2026-07-31 that shape was 13 sends out
+# of 13 between 21:43 and 23:00, the append arriving 23s, 24s and 71s later. Counting those raised
+# two ESCALATIONS entries advising `bin/barn.sh relaunch <role>` against panes alive at 65% and 46%
+# context, and that remedy destroys a working agent. So it clears the streak exactly like a
+# confirmed delivery.
 note_delivery() {
   local role="$1" pane="$2" rc="$3" n
-  if [ "$rc" -eq 0 ] 2>/dev/null; then
+  if [ "$rc" -eq 0 ] 2>/dev/null || [ "$rc" -eq 3 ] 2>/dev/null; then
     [ "$(delivery_fails "$pane")" != "0" ] && delivery_set "$pane" 0
     return 0
   fi
