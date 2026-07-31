@@ -1041,5 +1041,30 @@ assert_state "$dw_sess" idle 0 \
 
 tmux kill-session -t "$dw_sess" 2>/dev/null
 
+# ============================================================================
+# A GONE PANE IS A RUNTIME CONDITION, NOT A USAGE ERROR
+#
+# The help promises "65 capture failed (gone pane)" and the driver's prompt has a branch for
+# exactly that code. Single-shot returns 64 instead, which is the code for a mistyped flag, so a
+# caller cannot tell "the pane died" from "you called me wrong". It also lets tmux's own
+# "can't find pane: %N" reach stderr, so the diagnosis arrives twice in two different voices.
+# ============================================================================
+gone_out="$("$timmy" --pane %9999999 2>&1)"; gone_code=$?
+if [ "$gone_code" -eq 65 ]; then
+  ok "a gone pane exits 65 (capture failed), not 64 (usage) (got $gone_code)"
+else
+  no "a gone pane exited $gone_code, wanted 65"
+fi
+if printf '%s\n' "$gone_out" | grep -q "can't find pane"; then
+  no "tmux's own error leaks to stderr alongside timmy's ($(printf '%s' "$gone_out" | tr '\n' '|'))"
+else
+  ok "tmux's raw error is suppressed; the message is timmy's own"
+fi
+if printf '%s\n' "$gone_out" | grep -qi 'pane'; then
+  ok "the message names the pane problem"
+else
+  no "the message does not mention the pane ($gone_out)"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
