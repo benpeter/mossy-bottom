@@ -96,8 +96,96 @@ after="$(wc -l <"$log" 2>/dev/null | tr -d ' ')"
 if [ "$before" = "$after" ]; then ok "no session id (the heartbeat) writes NOTHING - the detector cannot blind itself"; else no "a session-less caller wrote a liveness line"; fi
 if [ "$rc" -eq 0 ]; then ok "a session-less caller still exits 0"; else no "a session-less caller exited $rc"; fi
 
+# --- the tick line, stamped by the tool ----------------------------------------------------
+# bitzer's tick stamps ran 190 minutes into the future on 2026-07-31, and he named the cause
+# himself: "I have never once run date to stamp a tick. I composed them from my own sense of
+# elapsed time, adding a plausible interval per batch." He advanced a counter by about 8 minutes
+# per batch while real gaps were 2 to 4, crossed real time at 06:37, and read 12:30 at 09:20.
+# shaun drifted too, in both directions, one stamp going backwards from 07:15 to 07:12, and his
+# prompt already carried the instruction to read `date`. So the instruction is not the fix: the
+# clock has to leave the agent.
+printf '\n== the tick line ==\n'
+
+ticks="$sd/TICKS.md"
+now_hhmm="$(date +%H:%M)"
+run --tick working --note 'PARITY DOC UPDATED, b8aebfa, through the Contents API'
+if [ -f "$ticks" ]; then ok "a tick call writes TICKS.md in the state dir"; else no "no TICKS.md at $ticks"; fi
+tl="$(tail -n 1 "$ticks" 2>/dev/null)"
+if [ "$(wc -l <"$ticks" | tr -d ' ')" = "1" ]; then ok "one call writes exactly one line"; else no "one call wrote $(wc -l <"$ticks") lines"; fi
+if printf '%s' "$tl" | grep -qE '^[0-9][0-9]:[0-9][0-9] \| working \| PARITY DOC UPDATED'; then
+  ok "the line is 'HH:MM | <label> | <text>'"
+else
+  no "wrong shape: '$tl'"
+fi
+# The stamp is the machine's, so it matches the clock at the moment of the call. A minute may
+# turn between the two reads, so either is accepted and nothing else is.
+stamp="$(printf '%s' "$tl" | cut -c1-5)"
+if [ "$stamp" = "$now_hhmm" ] || [ "$stamp" = "$(date +%H:%M)" ]; then
+  ok "the stamp comes from date, not from the caller ($stamp)"
+else
+  no "the stamp is '$stamp', wanted $now_hhmm or $(date +%H:%M)"
+fi
+
+# An agent cannot supply the clock even by putting one in the text. This is the whole point: the
+# stamp is prepended by the tool and the text is only text.
+run --tick note --note '12:30 | note | a stamp the agent tried to author'
+tl="$(tail -n 1 "$ticks")"
+if printf '%s' "$tl" | grep -qE '^[0-9][0-9]:[0-9][0-9] \| note \| 12:30 \|'; then
+  ok "a clock inside the text is text, and the real stamp still leads the line"
+else
+  no "the caller's clock reached the stamp position: '$tl'"
+fi
+
+# The label is free-form on purpose. TICKS labels seen live are working, note, escalation, idle,
+# standby and blocked, nothing reads them programmatically, and a validated set would reject the
+# next one someone needs.
+run --tick escalation --note 'THE FARMER CAUGHT MY TICK TIMESTAMPS RUNNING THREE HOURS AHEAD'
+if tail -n 1 "$ticks" | grep -q '| escalation |'; then ok "an unlisted label is accepted"; else no "the label was rejected or rewritten"; fi
+
+# A batch on stdin, because bitzer writes five to seven lines per tick and one heredoc is what he
+# already does. Every line gets its own real stamp.
+before="$(wc -l <"$ticks" | tr -d ' ')"
+printf 'first of the batch\nsecond of the batch\n' | run --tick note
+after="$(wc -l <"$ticks" | tr -d ' ')"
+if [ "$((after - before))" = "2" ]; then ok "stdin: two lines in, two tick lines out"; else no "stdin wrote $((after - before)) lines"; fi
+if [ "$(grep -cE '^[0-9][0-9]:[0-9][0-9] \| note \| (first|second) of the batch$' "$ticks")" = "2" ]; then
+  ok "stdin: each batch line is stamped and labelled on its own"
+else
+  no "stdin lines are malformed: $(tail -2 "$ticks")"
+fi
+
+# A newline in the text would split one tick into a line with no stamp, breaking the file's only
+# invariant. It is collapsed rather than rejected, because the hook must not fail its caller.
+before="$(wc -l <"$ticks" | tr -d ' ')"
+run --tick note --note "$(printf 'first half\nsecond half')"
+after="$(wc -l <"$ticks" | tr -d ' ')"
+if [ "$((after - before))" = "1" ]; then ok "an embedded newline still yields ONE line"; else no "an embedded newline wrote $((after - before)) lines"; fi
+if tail -n 1 "$ticks" | grep -q 'first half second half'; then ok "both halves survive on that one line"; else no "the text was truncated at the newline"; fi
+
+# THE BLINDNESS GUARD AGAIN, and it is why a tick may not touch the state file. shaun ticks every
+# 150 seconds. liveness-read's activity_age reads liveness/<role>.state, so a per-tick write there
+# would keep it permanently fresh and "nothing appended for 600s" could never be observed. A tick
+# is a narrative record, not a liveness record.
+sf_before="$(wc -l <"$sf" | tr -d ' ')"
+log_before="$(wc -l <"$log" | tr -d ' ')"
+run --tick working --note 'a tick, mid-slice'
+if [ "$(wc -l <"$sf" | tr -d ' ')" = "$sf_before" ]; then ok "a tick does NOT touch liveness/<role>.state"; else no "a tick refreshed the file the staleness check reads"; fi
+if [ "$(wc -l <"$log" | tr -d ' ')" = "$log_before" ]; then ok "a tick does NOT touch liveness/sessions"; else no "a tick wrote to the session log"; fi
+
 # --- it must never fail its caller ----------------------------------------------------------
 printf '\n== never fail the calling tool ==\n'
+
+env -u CLAUDE_CODE_SESSION_ID MOSSY_STATE_DIR="" "$la" --tick working --note x; rc=$?
+if [ "$rc" -eq 0 ]; then ok "tick with no state dir -> silent no-op, exit 0"; else no "tick with no state dir exited $rc"; fi
+
+rot="$tmp/readonly-ticks"
+mkdir -p "$rot"; chmod 500 "$rot"
+MOSSY_STATE_DIR="$rot" "$la" --tick working --note x 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ]; then ok "tick into an unwritable state dir -> exit 0"; else no "unwritable tick exited $rc"; fi
+chmod 700 "$rot"
+
+MOSSY_STATE_DIR="$sd" "$la" --tick 2>/dev/null; rc=$?
+if [ "$rc" -eq 64 ]; then ok "--tick with no label -> usage error 64"; else no "--tick with no label exited $rc, wanted 64"; fi
 
 MOSSY_STATE_DIR="" CLAUDE_CODE_SESSION_ID="$SID" "$la" --tool timmy; rc=$?
 if [ "$rc" -eq 0 ]; then ok "no state dir configured -> silent no-op, exit 0"; else no "no state dir exited $rc"; fi
