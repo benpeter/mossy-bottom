@@ -153,9 +153,18 @@ make_wakeable_tx() {
 }
 
 # beat <panes-file> <shaun-fp> [worker-fp] [backstop-fp] - run a single heartbeat; OUT captures its log.
-# The worker fp defaults to an unused path so the #20 (shaun-only) calls are byte-unaffected; the backstop
-# fp ALWAYS points at a temp path (default unused) so the #36-sl.3 freeze-state never pollutes the repo root.
-beat() { OUT="$(MOSSY_SHAUN_FP="$2" MOSSY_WORKER_FP="${3:-$tmp/unused-worker.fp}" MOSSY_BACKSTOP_FP="${4:-$tmp/unused-backstop.fp}" "$hb" --once --panes "$1" 2>&1)"; }
+# The worker fp defaults to an unused path so the #20 (shaun-only) calls are byte-unaffected.
+#
+# MOSSY_STATE_DIR points into the temp tree, and that is the containment rather than a tidiness
+# preference. STATE_DIR defaults to the repo root in dogfood mode, so every file the heartbeat
+# derives from it lands in the working copy: the delivery-failure counts, and ESCALATIONS.md, which
+# is tracked. The delivery escalation added both, and this suite drives panes that swallow input on
+# purpose, so a full run wrote four real-looking escalation entries into the repo's own issue log.
+# The named fps are kept as explicit temp paths because individual assertions read them back.
+beat() {
+  OUT="$(MOSSY_STATE_DIR="$tmp/beat-state" MOSSY_SHAUN_FP="$2" MOSSY_WORKER_FP="${3:-$tmp/unused-worker.fp}" \
+    MOSSY_BACKSTOP_FP="${4:-$tmp/unused-backstop.fp}" "$hb" --once --panes "$1" 2>&1)"
+}
 log_has() { printf '%s\n' "$OUT" | grep -q "$1"; }
 pane_has() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -q "$2"; }
 
