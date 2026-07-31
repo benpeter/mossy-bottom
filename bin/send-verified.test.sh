@@ -116,6 +116,32 @@ grep -q '^ok' "$tmp/retry.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 ) | tee "$tmp/once.out"
 grep -q '^ok' "$tmp/once.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 
+# --- a gone pane is a TARGET error, not a delivery failure ------------------------------------
+# Today a nonexistent pane exits 1, the code for "the prompt did not submit", after leaking three
+# "can't find pane" lines from tmux. A caller reading 1 retries, and the heartbeat's delivery
+# escalation counts it as a failed delivery to a pane that was never there. The existing guard,
+#   tmux display-message -p -t "$PANE" '' >/dev/null 2>&1 || ...
+# cannot catch it: display-message exits 0 for a bogus id. 'tmux list-panes -a -F #{pane_id}'
+# grepped exactly does catch it, and costs one tmux call.
+printf '\n== a gone pane is not a delivery failure ==\n'
+
+gone_out="$(MOSSY_STATE_DIR="$tmp/nostate" "$sv" %9999999 'text into the void' 2>&1)"; gone_code=$?
+if [ "$gone_code" -eq 64 ]; then ok "a gone pane -> usage/target error 64, not delivery-failed 1"; else no "a gone pane exited $gone_code, wanted 64"; fi
+if printf '%s' "$gone_out" | grep -q 'no such pane'; then ok "it says 'no such pane'"; else no "no clear message: $gone_out"; fi
+if printf '%s' "$gone_out" | grep -q "can't find pane"; then no "tmux's raw error leaks through"; else ok "tmux's raw error is suppressed"; fi
+if printf '%s' "$gone_out" | grep -q 'NOT submitted'; then no "it still claims a delivery failure"; else ok "it does not claim a delivery failure"; fi
+
+# A REAL pane must still be accepted, so the guard cannot be a blanket refusal.
+new_pane sv_live 'sleep 600'; live_pane="$PANE"
+sleep 0.3
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  if pane_exists "$live_pane"; then printf 'VERDICT ok\n'; else printf 'VERDICT a real pane was rejected\n'; fi
+) | tee "$tmp/live-pane.out" >/dev/null
+if grep -q 'VERDICT ok' "$tmp/live-pane.out"; then ok "a real pane passes the existence check"; else no "a real pane was rejected"; fi
+
 # --- usage guards ----------------------------------------------------------------------------
 printf '\n== usage guards ==\n'
 "$sv" >/dev/null 2>&1; code=$?
