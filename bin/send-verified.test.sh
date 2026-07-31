@@ -120,6 +120,87 @@ grep -q '^ok' "$tmp/retry.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 ) | tee "$tmp/once.out"
 grep -q '^ok' "$tmp/once.out" && pass=$((pass + 1)) || fail=$((fail + 1))
 
+# --- a landed prompt whose receiver has not appended YET is not a failed submit ---------------
+# The 5-second grow window came from 86 sends on 2026-07-30 where the append arrived within 3.09s.
+# Those receivers were idle. On 2026-07-31 the chain's turns ran 1 to 4 minutes and the append
+# arrived 23s, 24s and 71s after the send: 13 reported failures between 21:43 and 23:00, and all
+# 13 had landed. Raising the window is not the fix, because the heartbeat calls this SYNCHRONOUSLY
+# and a longer window is a longer wedge on every genuine miss.
+#
+# The harm is not the missed confirmation, it is the WORD. Two consecutive "failures" raise an
+# ESCALATIONS entry whose documented remedy is `bin/barn.sh relaunch <role>`, and that fired for
+# bitzer at 21:59:10 and shaun at 22:05:40 against panes alive at 65% and 46% context. A relaunch
+# there destroys a working agent on a false negative.
+#
+# There is local evidence the send went out, available in one capture and needing no window at all:
+# the text is no longer in the input box. So three outcomes, not two - delivered (0), delivered but
+# unconfirmed (3, no retry), and genuinely unsent (1, the text is still sitting in the box).
+printf '\n== a slow receiver is delivered-unconfirmed, not failed ==\n'
+
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  deliver_calls=0
+  # shellcheck disable=SC2329
+  deliver() { deliver_calls=$((deliver_calls + 1)); }
+  # shellcheck disable=SC2329
+  clear_input() { :; }
+  # shellcheck disable=SC2329
+  receiver_grew() { return 1; }      # resolvable, and it has NOT appended inside the window
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 1; }      # no token back either
+  # shellcheck disable=SC2329
+  text_in_box() { return 1; }        # but the box is empty: the text went out
+  send_verified DUMMY 'x'; rc=$?
+  if [ "$rc" -eq 3 ] && [ "$deliver_calls" -eq 1 ]; then
+    printf 'ok   - an empty box with no append yet -> exit 3, delivered once, NOT retried\n'
+  else
+    printf 'FAIL - slow receiver: rc %s after %s deliveries, wanted rc 3 after 1\n' "$rc" "$deliver_calls"
+  fi
+) | tee "$tmp/slow-recv.out"
+grep -q '^ok' "$tmp/slow-recv.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
+# The genuinely unsent case must keep today's behaviour exactly: the text is still in the box, so
+# nothing left, so clear and retry and then report failure.
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  deliver_calls=0
+  # shellcheck disable=SC2329
+  deliver() { deliver_calls=$((deliver_calls + 1)); }
+  # shellcheck disable=SC2329
+  clear_input() { :; }
+  # shellcheck disable=SC2329
+  receiver_grew() { return 1; }
+  # shellcheck disable=SC2329
+  timmy_nonidle() { return 1; }
+  # shellcheck disable=SC2329
+  text_in_box() { return 0; }        # still sitting in the box: it never submitted
+  send_verified DUMMY 'x'; rc=$?
+  if [ "$rc" -eq 1 ] && [ "$deliver_calls" -eq 2 ]; then
+    printf 'ok   - text still in the box -> retried once then exit 1, unchanged\n'
+  else
+    printf 'FAIL - unsent: rc %s after %s deliveries, wanted rc 1 after 2\n' "$rc" "$deliver_calls"
+  fi
+) | tee "$tmp/unsent.out"
+grep -q '^ok' "$tmp/unsent.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
+# text_in_box reads the pane, so it must answer NO when it cannot read one. Unknown resolving to
+# "still in the box" would turn every unreadable pane into a retry, which is the duplicate path.
+(
+  # shellcheck source=/dev/null
+  . "$sv"
+  set +o pipefail
+  if text_in_box '%9999999' 'anything at all'; then
+    printf 'FAIL - an unreadable pane reported the text still in its box\n'
+  else
+    printf 'ok   - an unreadable pane reads NOT-in-box, so it never manufactures a retry\n'
+  fi
+) | tee "$tmp/box-unreadable.out"
+grep -q '^ok' "$tmp/box-unreadable.out" && pass=$((pass + 1)) || fail=$((fail + 1))
+
 # --- a gone pane is a TARGET error, not a delivery failure ------------------------------------
 # Today a nonexistent pane exits 1, the code for "the prompt did not submit", after leaking three
 # "can't find pane" lines from tmux. A caller reading 1 retries, and the heartbeat's delivery
