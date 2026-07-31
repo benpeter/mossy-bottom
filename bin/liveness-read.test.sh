@@ -33,7 +33,11 @@ cleanup() {
   fi
   rm -rf "$tmp"
 }
-trap cleanup EXIT
+# INT TERM as well as EXIT: bash skips an EXIT-only trap when it is killed by a signal, so an
+# interrupted run left its fixture panes behind. 22 of them were found alive on 2026-07-31 after a
+# suite was cut short, and a stray session is not harmless - barn scans the session list to pick a
+# window name and the attached session.
+trap cleanup EXIT INT TERM
 
 pass=0
 fail=0
