@@ -188,10 +188,10 @@ snapshot() { tmux capture-pane -p -t "$pane"; }
 #     is a "───" rule (the box's top fence). The fence is what makes it the REAL input box,
 #     not a menu cursor ("❯ 1.") or a "❯" quoted in displayed content - those have no rule
 #     above them, so they are not mistaken for the prompt.
-#   - Walk UP from the top fence, skipping ONLY blank lines and "───" rules, and take the
-#     first line that is neither. That candidate is the live status line - the spinner when
-#     working, the closing content line otherwise. No footer/mode-wording dependency, so no
-#     #9/#10-class drift.
+#   - Walk UP from the top fence, skipping ONLY blank lines, "───" rules and "⎿" tool-output
+#     continuations, and take the first line that is none of those. That candidate is the live
+#     status line - the spinner when working, the closing content line otherwise. No
+#     footer/mode-wording dependency, so no #9/#10-class drift.
 #   - No rule-fenced prompt visible (a streaming pane, or a synthetic fixture with no box,
 #     or a working pane displaying menu source): fall back to the last non-blank line, where
 #     a live spinner renders.
@@ -200,7 +200,9 @@ snapshot() { tmux capture-pane -p -t "$pane"; }
 # Residual for a later slice (no fixture exercises it): a decoy spinner sitting IMMEDIATELY
 # above the box fence with NO content between is structurally identical to a real spinner
 # and still fires. Closing that needs the input-region distinction the idle-box slice adds.
-has_spinner() {
+# status_line <capture> - echo the ONE structurally-selected line the matchers below test.
+# Shared by has_spinner and has_retry_ladder so the two can never disagree about WHERE to look.
+status_line() {
   printf '%s\n' "$1" \
     | LC_ALL=C awk '
         { line[NR] = $0 }
@@ -218,14 +220,38 @@ has_spinner() {
             for (i = prompt - 1; i >= 1; i--) {
               if (line[i] ~ /^[ \t]*$/) continue
               if (line[i] ~ /───/) continue
+              if (line[i] ~ /^[ \t]*⎿/) continue
               cand = i; break
             }
           } else {
             cand = last
           }
           if (cand > 0) print line[cand]
-        }' \
+        }'
+}
+
+# has_spinner <capture> - the #9 shape matcher, byte-identical to what it always was, now run over
+# status_line's pick rather than picking the line itself.
+has_spinner() {
+  status_line "$1" \
     | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
+}
+
+# has_retry_ladder <capture> - the API retry ladder, which is a LIVE turn the client is retrying on
+# its own. Its line carries no verb and no ellipsis, so the #9 shape cannot see it:
+#   ✻ 529 Overloaded · Retrying in 3s · attempt 3/10
+# Four consecutive ladders on 2026-07-29 ran 208.6s, 206.3s, 208.2s and 204.4s and appended NOTHING
+# to the transcript, so a caller reading this idle either re-sends into a live turn or recovers a
+# pane that needs no recovery.
+#
+# BOTH halves of the shape are required, on status_line's single anchored candidate. The agents
+# print this very wording into their own panes when they discuss the ladder, and half the shape
+# ("attempt 3/10" alone, say) appears in ordinary prose. Requiring the countdown AND the attempt
+# counter AND the leading glyph on the anchored line is what keeps a report about a ladder from
+# reading as a ladder.
+has_retry_ladder() {
+  status_line "$1" \
+    | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ .*Retrying in [0-9]+s.*attempt [0-9]+/[0-9]+'
 }
 
 # A selection menu (smoke-test.md sections 1 and 9) is a NUMBERED OPTION LIST with a
@@ -508,6 +534,25 @@ sustained_freeze() {
   return 0
 }
 
+# spinner_is_advancing - is a spinner present AND the pane moving? This is what the "for agents"
+# suffix must not outrank, and it needs the multi-sample window rather than one pair.
+#
+# A working pane whose counter ticks more slowly than INTERVAL yields byte-identical pairs now and
+# then. Measured 2026-07-31 on a fixture ticking every 0.15s against a 0.1s interval: 8 reads out
+# of 8 came back idle on a pane that was plainly working. One identical pair is therefore not
+# enough to hand the verdict back to the suffix.
+#
+# sustained_freeze already answers exactly this question for #25, from the other side: it returns 0
+# only when EVERY pair across the window is identical, so its negation means some pair advanced.
+# Reusing it keeps one definition of "moving" in the file instead of two. It costs an extra window
+# ONLY when a spinner is present, the suffix is present, and the first pair matched - the decoy and
+# repaint-skip cases. A settled pane has no spinner and short-circuits on the first test.
+spinner_is_advancing() {
+  [ "$spinner" = "true" ] || return 1
+  [ "$differ" = "true" ] && return 0
+  ! sustained_freeze
+}
+
 # Take one fresh pair of snapshots and classify them. Sets the globals `state`,
 # `code`, and the evidence vars (differ/spinner/menu/idle_box/sustained/ends_q). Returns
 # nonzero if a capture fails. Both the single-shot path and --watch call THIS, so
@@ -552,6 +597,7 @@ classify_once() {
 
   if [ "$snap1" = "$snap2" ]; then differ="false"; else differ="true"; fi
   if has_spinner "$snap2"; then spinner="true"; else spinner="false"; fi
+  if has_retry_ladder "$snap2"; then ladder="true"; else ladder="false"; fi
   if has_menu "$snap2"; then menu="true"; else menu="false"; fi
   if is_idle_box "$snap2"; then idle_box="true"; else idle_box="false"; fi
   if has_idle_suffix "$snap2"; then idle_suffix="true"; else idle_suffix="false"; fi
@@ -559,10 +605,30 @@ classify_once() {
   sustained="false"  # set true only when the idle_box+differ branch confirms persistent motion
   spinner_frozen="false"  # set true only when the spinner branch confirms a persistent freeze (#25)
 
-  if [ "$idle_suffix" = "true" ]; then
-    # settled-idle box confirmed by the "← for agents" suffix: beats the spinner, closing
-    # the decoy-above-the-box case. A working pane never shows the suffix, so this branch
-    # cannot mislabel a working pane idle.
+  if [ "$ladder" = "true" ]; then
+    # An API retry ladder is a live turn the client is retrying on its own. Decided FIRST, above
+    # the suffix, because the footer renders the settled suffix throughout a ladder, and above the
+    # freeze check, because a countdown between ticks is byte-identical while the turn is alive.
+    # Never stalled: a recovery here would interrupt work that needs no help.
+    state="busy"; code="$EXIT_BUSY"
+  elif [ "$idle_suffix" = "true" ] && ! spinner_is_advancing; then
+    # settled-idle box confirmed by the "← for agents" suffix: beats a DECOY spinner, closing the
+    # decoy-above-the-box case (#17), and beats motion with no spinner, which is a finished turn
+    # whose background shells keep printing (the wake-gap repro).
+    #
+    # It does NOT beat a spinner that is ADVANCING, and the "cannot mislabel a working pane" claim
+    # that used to stand here was wrong. Verbatim from a live capture on 2026-07-31, a pane 6m35s
+    # into a turn: "● Flibbertigibbeting… (6m 35s · ↓ 20.1k tokens · thought for 49s)" above a box
+    # whose footer read "⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents". The
+    # shipped classifier answered idle with snapshots_differ true and spinner true, and that
+    # false-IDLE let send-verified retry a hand that had landed - four duplicates on 2026-07-30.
+    #
+    # So the discriminator is the COMBINATION, and no single flag settles it:
+    #   suffix + spinner + static     -> idle   (#17: a stale line above a settled box)
+    #   suffix + no spinner + motion  -> idle   (the wake-gap: finished turn, shells printing)
+    #   suffix + spinner + motion     -> busy   (a live turn)
+    # "motion" here is spinner_is_advancing, which takes the multi-sample window rather than one
+    # pair, so a working spinner that skips a repaint is not handed back to the suffix.
     if [ "$ends_q" = "true" ]; then
       state="question"; code="$EXIT_QUESTION"
     else
@@ -681,7 +747,9 @@ state_reason() {
     stalled)
       printf 'a spinner line is present but byte-identical across the confirm window (its counter frozen) - a wedged turn, not live work' ;;
     busy)
-      if [ "$spinner" = "true" ]; then
+      if [ "$ladder" = "true" ]; then
+        printf 'an API retry countdown is on the status line - the client is retrying a live turn'
+      elif [ "$spinner" = "true" ]; then
         printf 'an active spinner line is present at the bottom'
       elif [ "$sustained" = "true" ]; then
         printf 'an idle-box is rendered but the pane kept changing across samples (sustained motion) - still working'
@@ -720,6 +788,7 @@ print_selftest() {
   printf '    snapshots_differ   %s   the two captures differed between snapshots\n'           "$(yesno "$differ")"
   printf '    spinner            %s   an active spinner line at the bottom\n'                  "$(yesno "$spinner")"
   printf '    spinner_frozen     %s   spinner byte-identical across the confirm window\n'      "$(yesno "$spinner_frozen")"
+  printf '    retry_ladder       %s   an API retry countdown is on the status line\n'          "$(yesno "$ladder")"
   printf '    menu               %s   a numbered selection-menu shape is present\n'            "$(yesno "$menu")"
   printf '    idle_box           %s   a rule-fenced empty input box is rendered\n'             "$(yesno "$idle_box")"
   printf '    idle_suffix        %s   box mode line carries the settled "for agents" suffix\n' "$(yesno "$idle_suffix")"
@@ -741,8 +810,8 @@ classify_once || die "capture-pane failed for pane '$pane'"
 if [ "$selftest" -eq 1 ]; then
   print_selftest
 elif [ "$json" -eq 1 ]; then
-  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s,"sustain_samples":%s}}\n' \
-    "$state" "$differ" "$spinner" "$spinner_frozen" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL" "$SUSTAIN_SAMPLES"
+  printf '{"state":"%s","evidence":{"snapshots_differ":%s,"spinner":%s,"spinner_frozen":%s,"retry_ladder":%s,"menu":%s,"idle_box":%s,"idle_suffix":%s,"sustained_motion":%s,"ends_in_question":%s,"interval":%s,"sustain_samples":%s}}\n' \
+    "$state" "$differ" "$spinner" "$spinner_frozen" "$ladder" "$menu" "$idle_box" "$idle_suffix" "$sustained" "$ends_q" "$INTERVAL" "$SUSTAIN_SAMPLES"
 else
   printf '%s\n' "$state"
 fi
