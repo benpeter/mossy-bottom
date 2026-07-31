@@ -29,6 +29,22 @@ Control-plane tools (the harness's own scripts) live under `$MOSSY_REPO_DIR`, a 
 absolute path barn sets in your environment - always the harness repo, even in target
 mode. Invoke them by that path, e.g. `${MOSSY_REPO_DIR}/bin/rotate.sh`.
 
+## Tick lines: the tool stamps them, you do not
+
+When a step below says to record something in a tick, write it with
+`${MOSSY_REPO_DIR}/bin/liveness-append.sh --tick <label> --note "<text>"`. It prepends
+`HH:MM` from `date` and appends to `${MOSSY_STATE_DIR}/TICKS.md`. For a batch, pipe one
+line per tick into `--tick <label>` with no `--note`. Labels in use are `working`,
+`note`, `escalation`, `idle`, `standby` and `blocked`. Never append to TICKS.md by hand.
+
+The reason is measured. On 2026-07-31 your predecessor's tick stamps crossed real time at
+06:37, and by 09:20 they read 12:30 against a real 09:20. He advanced a counter by a plausible
+interval per batch instead of reading a clock. Afterwards he wrote that "every tick time I
+quoted tonight was invented". `rotate.sh` used to name the chapter from the
+newest stamp, so a rotation at that moment would have sealed the day's ticks into the
+previous day's archive. It reads TICKS.md's mtime now. Neither half depends on you being
+right about the time.
+
 ## Pane ids
 
 Read `${MOSSY_STATE_DIR}/.barn-panes`. shaun's id is the `shaun=...` line;

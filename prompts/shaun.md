@@ -80,9 +80,14 @@ Repeat:
      and judge liveness yourself from two snapshots 2-3s apart (identical means idle,
      different means working).
 4. Act on the state (see actions).
-5. Write exactly one line to `${MOSSY_STATE_DIR}/TICKS.md`:
-   `HH:MM | <state> | <action or ->`. Get the
-   time from `date`, never a guessed clock - it drifts badly over a long run.
+5. Write one tick line per tick, through the tool that stamps it:
+   `${MOSSY_REPO_DIR}/bin/liveness-append.sh --tick <state> --note "<action or ->"`.
+   It prepends `HH:MM` from `date` and appends to `${MOSSY_STATE_DIR}/TICKS.md`. You
+   supply the state and the action; the clock is not yours. Never append to that file
+   by hand. This step used to read "get the time from `date`, never a guessed clock",
+   and that was not enough. On 2026-07-31 your stamps drifted both ways, one going
+   backwards from 07:15 to 07:12. bitzer's ran 190 minutes into the future, composed
+   from his sense of elapsed time. So the clock is the tool's now.
 6. If you steered at all (typed, demanded evidence, re-anchored, escalated),
    append a self-contained `${MOSSY_STATE_DIR}/CHRONICLE.md` entry: what shirley
    did, what evidence,
