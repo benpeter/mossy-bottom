@@ -425,6 +425,43 @@ turn_open() {
   return 1
 }
 
+# pending_tasks <transcript> - how many BACKGROUND TASKS this agent started that have not yet
+# reported completion. 0 when the file is absent, empty or unreadable.
+#
+# WHY THIS EXISTS, and it is a different question from turn_open. A closed turn means the agent
+# stopped emitting; it does NOT mean the work stopped. The worker's turns end in a shape she never
+# chooses: she emits a waiter, the Bash tool moves it to the BACKGROUND, she writes one status line,
+# and the turn boundary falls there. Eight of her turn ends on 2026-07-31 were that shape and not
+# one was a finished slice. The pane cannot tell the two apart either - a settled box and no motion
+# is what both look like - so 'idle x2' called them done and the heartbeat woke a parked driver four
+# times at 12:16:07, 12:21:17, 12:52:20 and 13:07:52. He refused all four after checking, and said
+# so: "The heartbeat's reading is wrong. She is mid-slice, not finished". Four burnt turns of his
+# context, zero finished slices.
+#
+# The harness records both ends itself. A start writes "Command running in background with ID: <id>"
+# and the completion arrives as a <task-notification> carrying <task-id><id></task-id>. Same id at
+# both ends, both written by the harness, so the pairing is exact and no agent discipline is
+# involved. An id started and not yet notified means work is still running and its owner is waiting.
+#
+# UNKNOWN MUST NEVER MEAN BUSY. Every failure path returns 0, so this can only ever suppress a wake
+# on positive evidence of running work. It can never invent a reason to withhold one, which would be
+# the false-BUSY direction: a driver that is never told is a chain that stalls.
+#
+# An agent writing PROSE about the marker is counted as a start. That is the wrong answer in the
+# right direction: it delays a wake rather than firing a false one, and the K-beat backstop is the
+# net underneath. Tightening it would mean parsing the record's role, which buys little and can be
+# wrong the other way.
+pending_tasks() {
+  local f="${1:-}" started finished
+  [ -s "${f}" ] || { printf '0'; return 0; }
+  started="$(LC_ALL=C grep -oE 'Command running in background with ID: [A-Za-z0-9]+' "${f}" 2>/dev/null \
+    | grep -oE '[A-Za-z0-9]+$' | sort -u)"
+  [ -n "${started}" ] || { printf '0'; return 0; }
+  finished="$(LC_ALL=C grep -oE 'task-id>[A-Za-z0-9]+' "${f}" 2>/dev/null \
+    | grep -oE '[A-Za-z0-9]+$' | sort -u)"
+  printf '%s' "$(comm -23 <(printf '%s\n' "${started}") <(printf '%s\n' "${finished}") | grep -c .)"
+}
+
 # reverse_lines - stream stdin last line first. BSD tail has -r, GNU coreutils has tac; pick by
 # availability rather than trying one and falling through, so neither prints an error.
 reverse_lines() {
