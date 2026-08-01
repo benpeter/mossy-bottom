@@ -48,13 +48,22 @@ no() { printf 'FAIL - %s\n' "$1"; fail=$((fail + 1)); }
 # classify_liveness <turn_open> <age> <pane_live> <max_age> - the pure decision core.
 #
 # The precedence the verdict encodes, and every clause is a measured fact:
-#   pane_live=1  -> working. A spinner or a retry ladder rendering RIGHT NOW outranks any
-#                   timestamp, because four consecutive 529 ladders appended ZERO records
-#                   over 206s each and chain to ~830s of silence with the agent alive.
-#   turn_open=0  -> parked. The turn ended, so a stale timestamp means waiting, not wedged.
+#   turn_open=0  -> parked, whatever the pane shows. The turn ended, so a stale timestamp means
+#                   waiting, not wedged, and a pane with no history can still be rendering a
+#                   ladder from a turn that has since finished. 18 of the 21 stuck-recovery
+#                   wakes on 2026-07-30 fired here. The table below pins this as "0 5 1 600".
+#   pane_live=1  -> working, WITHIN AN OPEN TURN. A spinner or a retry ladder rendering RIGHT
+#                   NOW outranks any timestamp, because four consecutive 529 ladders appended
+#                   ZERO records over 206s each and chain to ~830s of silence with the agent
+#                   alive. It is a veto against `stuck`, never a promotion out of `parked`.
 #                   18 of the 21 stuck-recovery wakes on 2026-07-30 fired here.
 #   age<max_age  -> working. Measured in-turn gaps: max 345.7s over 31,122 samples.
 #   otherwise    -> stuck. An open turn that has written nothing and renders nothing.
+#
+# The first two clauses were stated in the other order until 2026-08-01, which read as an
+# unconditional pane veto and contradicted the table 40 lines down. A reader who checks the
+# summary and not the table builds the wrong model - and one did, passing --pane beside a bad
+# --session and expecting the pane to carry it.
 # ============================================================================
 printf '== classify_liveness (turn_open / age / pane_live -> verdict) ==\n'
 

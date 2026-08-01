@@ -45,9 +45,12 @@
 # recover it. That distinction is what 18 of the 21 false wakes were missing.
 #
 # classify_liveness <turn_open> <age> <pane_live> <max_age> -> one of:
-#   working  a spinner or retry ladder renders now, OR the turn is open and something was
+#   working  the turn is OPEN and either a spinner/retry ladder renders now or something was
 #            appended inside max_age - the agent is advancing.
-#   parked   the turn ENDED. Nothing is wedged; it is waiting to be handed something.
+#   parked   the turn ENDED, WHATEVER THE PANE SHOWS. Nothing is wedged; it is waiting to be
+#            handed something. The pane is a veto WITHIN an open turn and cannot outrank a
+#            closed one, because it keeps no history and may still be rendering a ladder from
+#            a turn that has since finished.
 #   stuck    the turn is OPEN, nothing has been appended for max_age, and the pane renders
 #            neither a spinner nor a ladder. A frozen process writes nothing, so the signal is
 #            a stale timestamp, not a self-report of being frozen.
@@ -132,7 +135,8 @@ Live mode (gathers the inputs itself):
                     pane-to-role lookup and liveness/<role>.state when --state-file is absent
 
 Verdict (printed) and exit code:
-  working  0   advancing: a live pane, or an open turn that appended inside max-age
+  working  0   advancing: an OPEN turn that either renders a live pane or appended inside
+               max-age. A live pane on a CLOSED turn is parked, not working
   parked  10   the turn ended - waiting to be handed something, not wedged
   stuck   20   the turn is open, nothing appended for max-age, pane renders nothing
   usage error 64
