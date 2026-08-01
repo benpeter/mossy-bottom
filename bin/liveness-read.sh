@@ -318,6 +318,23 @@ resolve_session() {
     if [ -n "${hit}" ]; then printf '%s' "${hit}"; return 0; fi
   fi
   want="$(role_boot_pattern "${role}")" || return 1
+  # Ids that ANOTHER role's state file claims. A rotating driver reads the worker's prompt, so his
+  # new transcript leads with her phrase and carries none of his own: first-in-file-order cannot
+  # tell them apart, and the newest-wins sweep then hands her his turn state. Measured live
+  # 2026-08-01 20:30, her verdict flipping parked/working across 18 seconds while she worked.
+  # A registration is authoritative and already on disk, so it separates them without guessing at
+  # prompt wording - and guessing is how the worker would become unresolvable instead.
+  local claimed=" " lsdir osf orole
+  osf="$(state_dir_for_cwd "${cwd}" 2>/dev/null || true)"
+  lsdir="${osf:+${osf}/liveness}"
+  if [ -n "${lsdir}" ] && [ -d "${lsdir}" ]; then
+    for orole in ${KNOWN_ROLES}; do
+      [ "${orole}" = "${role}" ] && continue
+      [ -s "${lsdir}/${orole}.state" ] || continue
+      hit="$(tail -n 1 "${lsdir}/${orole}.state" 2>/dev/null | awk '$4 ~ /^[0-9a-f]{8}-/ {print $4}')"
+      [ -n "${hit}" ] && claimed="${claimed}${hit} "
+    done
+  fi
   dir="${root}/$(encode_cwd "${cwd}")"
   [ -d "${dir}" ] || return 1
   # One grep per file rather than one shell iteration per line: -m1 stops at the first matching
@@ -339,6 +356,7 @@ resolve_session() {
       | LC_ALL=C grep -m1 -o -F "${pats[@]}" 2>/dev/null | head -n 1 || true)"
     if [ -n "${hit}" ] && [ "${hit}" = "${want}" ]; then
       base="$(basename "${f}")"
+      case "${claimed}" in *" ${base%.jsonl} "*) continue ;; esac
       printf '%s' "${base%.jsonl}"
       return 0
     fi
