@@ -726,5 +726,58 @@ eqn "0" "$(pending_tasks '')" "no argument -> 0 pending"
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"I explained that a task prints \"Command running in background with ID: xyz\" when it starts."}]}}' >"$bg/prose.jsonl"
 eqn "1" "$(pending_tasks "$bg/prose.jsonl")" "prose about the marker counts too (accepted: it errs toward WAITING, the safe direction)"
 
+# ============================================================================
+# A RELATIVE --cwd must resolve like the absolute one.
+#
+# Measured live 2026-08-01 19:02. Called as `--cwd .` from inside the target repo, this tool
+# returned `parked` for all three roles while shaun's pane timer was advancing. It was right to
+# warn - it printed "no transcript for role shaun under cwd . - falling back to the pane" on
+# stderr - but a caller who redirects stderr gets a plausible wrong verdict and exit 10, which is
+# indistinguishable from a real park. That is what happened: the warning was thrown away with
+# 2>/dev/null and the degraded answer was reported as an instrument fault for six hours.
+#
+# `.` is a legitimate thing for a caller to pass. encode_cwd turns it into a single `-`, so the
+# project dir never exists and the sweep has nothing to sweep. Resolving the path first removes
+# the whole class, and keeps encode_cwd a pure string function.
+# ============================================================================
+printf '\n== a relative --cwd resolves like an absolute one ==\n'
+
+rel="$tmp/reltgt"
+mkdir -p "$rel/.mossy/liveness"
+relenc="$(encode_cwd "$rel")"
+mkdir -p "$tmp/relproj/$relenc"
+relsid='cccc0000-1111-2222-3333-444444444444'
+cp "$tmp/open.jsonl" "$tmp/relproj/$relenc/$relsid.jsonl"
+boot "$tmp/relproj/$relenc/$relsid.jsonl.boot" 'YOU ARE SHIRLEY'
+# One file, carrying the boot phrase AND an open turn, so the only way to read anything but
+# `working` is to fail to find it.
+{ boot /dev/stdout 'YOU ARE SHIRLEY, the worker.'; cat "$tmp/open.jsonl"; } \
+  >"$tmp/relproj/$relenc/$relsid.jsonl" 2>/dev/null
+printf 'shirley=%%2999\n' >"$rel/.mossy/.barn-panes"
+touch "$tmp/relproj/$relenc/$relsid.jsonl"
+
+abs_out="$(MOSSY_CLAUDE_PROJECTS="$tmp/relproj" "$lr" --role shirley --cwd "$rel" 2>/dev/null)"
+rel_out="$(cd "$rel" && MOSSY_CLAUDE_PROJECTS="$tmp/relproj" "$lr" --role shirley --cwd . 2>/dev/null)"
+if [ "$rel_out" = "$abs_out" ]; then
+  ok "--cwd . from the target dir agrees with the absolute path (both '$abs_out')"
+else
+  no "--cwd . gave '$rel_out' where the absolute path gave '$abs_out'"
+fi
+
+# The same for a path with a trailing slash and for one reached through .., both of which a
+# caller composes by accident and neither of which encode_cwd can normalise on its own.
+slash_out="$(MOSSY_CLAUDE_PROJECTS="$tmp/relproj" "$lr" --role shirley --cwd "$rel/" 2>/dev/null)"
+if [ "$slash_out" = "$abs_out" ]; then
+  ok "a trailing slash agrees with the absolute path"
+else
+  no "trailing slash gave '$slash_out', wanted '$abs_out'"
+fi
+dots_out="$(MOSSY_CLAUDE_PROJECTS="$tmp/relproj" "$lr" --role shirley --cwd "$rel/./" 2>/dev/null)"
+if [ "$dots_out" = "$abs_out" ]; then
+  ok "a path carrying /./ agrees with the absolute path"
+else
+  no "/./ gave '$dots_out', wanted '$abs_out'"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
