@@ -41,6 +41,18 @@ trap cleanup EXIT INT TERM
 
 pass=0
 fail=0
+# THE SUITE MUST NOT INHERIT THE RUNNING HARNESS'S STATE DIR. state_dir_for_cwd returns
+# MOSSY_STATE_DIR unconditionally and never looks at its cwd argument, so an operator with the
+# variable exported - which every pane in a live run has - makes the fixtures read the REAL run's
+# .barn-panes instead of their own. The boot-window case then floors the sweep at the live run's
+# start, roughly 9.6 hours old on 2026-08-01, the fixture's deliberately-stale transcript is no
+# longer below that floor, and the case reads `stuck` where it asserts `parked`.
+#
+# It failed for MONTHS OF OPERATOR-SHELL RUNS ONLY, passing in any clean shell, which is the worst
+# shape a gate can have: whether the suite is green depended on who ran it. Cases that mean a
+# specific state dir now SAY SO rather than relying on the variable being absent.
+unset MOSSY_STATE_DIR
+
 ok() { printf 'ok   - %s\n' "$1"; pass=$((pass + 1)); }
 no() { printf 'FAIL - %s\n' "$1"; fail=$((fail + 1)); }
 
@@ -595,7 +607,7 @@ if [ "$got" = "$new_sid" ]; then ok "a POST-RUN transcript is found"; else no "p
 # End to end, the case that misfired live: only a stale candidate exists, so the verdict must be
 # parked and never stuck. An agent nobody has handed anything is waiting, not wedged.
 rm -f "$flproj/$flenc/$new_sid.jsonl"
-got="$(MOSSY_CLAUDE_PROJECTS="$flproj" run_live_role shirley "$fl" '' '' 600)"
+got="$(MOSSY_CLAUDE_PROJECTS="$flproj" MOSSY_STATE_DIR="$fl/.mossy" run_live_role shirley "$fl" '' '' 600)"
 if [ "$got" = "parked" ]; then ok "only a pre-run candidate -> parked, NEVER stuck (the 00:57 misfire)"; else no "boot window gave '$got', wanted parked"; fi
 
 # ============================================================================
