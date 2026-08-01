@@ -842,5 +842,30 @@ else
   no "no registration should mean unchanged behaviour, got '$got'"
 fi
 
+# ============================================================================
+# An explicit --session that resolves to NO transcript is a BAD ARGUMENT, not a parked agent.
+#
+# Measured 2026-08-01 22:52. The heartbeat asked for two panes with the tmux SESSION NAME passed
+# to --session, which wants a Claude Code session id. Both agents were mid-slice with spinners
+# rendering; both read `parked`, exit 10. The reader was one step from waking a parked driver and
+# re-handing a worker 36 minutes into her slice.
+#
+# The direction is what makes it worth a verdict of its own. `parked` is not a neutral wrong
+# answer: this file's own precedence says a parked agent is WAITING and the answer is to send it
+# something, so an unresolvable id does not merely fail to inform, it ARGUES FOR THE ONE ACTION
+# that damages a working agent. Seventh absent-reading-as-negative of the day and the second
+# inside an instrument the chain gates on.
+#
+# The ROLE path keeps reading a missing transcript as CLOSED, and must: a role that has not
+# booted yet is legitimately not running a turn. The difference is that --session <id> is an
+# ASSERTION by the caller. Nothing asserted it, so nothing vouches for it.
+printf '\n== an unresolvable --session is a usage error, not a verdict ==\n'
+"$lr" --session zzz-no-such-session-zzz >/dev/null 2>&1; c=$?
+if [ "$c" -eq 64 ]; then ok "CLI unresolvable --session -> usage error 64"; else no "CLI unresolvable --session -> usage 64 (got $c)"; fi
+# And the pane must not launder it: passing --pane alongside a bad id still fails loudly, because
+# the pane cannot vouch for an id it was never asked about.
+"$lr" --session zzz-no-such-session-zzz --pane %0 >/dev/null 2>&1; c=$?
+if [ "$c" -eq 64 ]; then ok "CLI unresolvable --session with --pane -> still 64"; else no "CLI unresolvable --session with --pane -> 64 (got $c)"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
