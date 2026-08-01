@@ -742,7 +742,10 @@ eqn "1" "$(pending_tasks "$bg/prose.jsonl")" "prose about the marker counts too 
 # ============================================================================
 printf '\n== a relative --cwd resolves like an absolute one ==\n'
 
-rel="$tmp/reltgt"
+# The fixture path must be one `pwd` can reproduce, or the test measures mktemp rather than the
+# tool. $TMPDIR ends in a slash on macOS, so `mktemp -d "$TMPDIR/x"` yields a `//` that cd+pwd
+# collapses; a fixture keyed on the raw string is then unreachable by any navigation.
+rel="$(cd "$tmp" && pwd)/reltgt"
 mkdir -p "$rel/.mossy/liveness"
 relenc="$(encode_cwd "$rel")"
 mkdir -p "$tmp/relproj/$relenc"

@@ -199,6 +199,35 @@ encode_cwd() {
   printf '%s' "$1" | tr './' '--'
 }
 
+# abs_cwd <path> - the physical absolute form of <path>, or <path> unchanged if it cannot be
+# reached. Pure-string encode_cwd cannot normalise a caller's path: it turns `.` into a single
+# `-`, so the project dir never exists, the sweep has nothing to sweep, and the verdict falls
+# back to the pane. That fallback is announced on stderr and NOTHING ELSE, so a caller who
+# redirects stderr reads `parked` with exit 10 and cannot tell it from a real park. Measured
+# 2026-08-01 19:02: `--cwd .` returned parked for all three roles while shaun was mid-turn.
+# Leaving an unreachable path alone keeps a fictional path readable, which several callers and
+# tests rely on.
+#
+# THE GIVEN STRING ALWAYS WINS WHERE IT RESOLVES. The encoding is exact and the harness never
+# normalises, so a caller whose path already works must be left byte-identical. Two attempts got
+# this wrong before it was right, and both are worth recording because both LOOKED green:
+# `pwd -P` resolved symlinks, and on macOS /tmp and /var are symlinks; then logical `pwd`
+# collapsed the `//` that a $TMPDIR ending in a slash puts in the path. Each rewrote a path that
+# encoded correctly, and each made the test compare two wrong answers that agreed.
+#
+# So: keep the given string if its project dir exists, fall back to the navigated form only when
+# it does not, and to the string unchanged when neither resolves. That fixes `.` without being
+# able to break a caller that already works.
+abs_cwd() {
+  local p="${1:-}" root nav
+  [ -n "${p}" ] || return 0
+  root="$(projects_dir)"
+  if [ -d "${root}/$(encode_cwd "${p}")" ]; then printf '%s' "${p}"; return 0; fi
+  nav="$( (cd -- "${p}" 2>/dev/null && pwd) || true )"
+  if [ -n "${nav}" ] && [ -d "${root}/$(encode_cwd "${nav}")" ]; then printf '%s' "${nav}"; return 0; fi
+  printf '%s' "${p}"
+}
+
 # transcript_for <projects-dir> <cwd> <session-id> - echo the path to a session's transcript, or
 # return 1. Measured invariant across all 349 files of the live project dir: the filename IS the
 # session uuid and no file ever carries a foreign sessionId. We try the encoded cwd first, then
@@ -574,6 +603,9 @@ main() {
   # No --cwd given: derive it from the state dir rather than trusting $PWD, which inside the
   # heartbeat window is the harness repo and not where the agents run.
   [ -n "${cwd}" ] || cwd="$(agent_cwd "${state_dir}")"
+  # Normalise whatever we ended up with. A caller may pass `.`, a trailing slash or a /./, and
+  # the encoding is exact, so an unnormalised path silently resolves nothing.
+  cwd="$(abs_cwd "${cwd}")"
   # A pane plus a state dir is enough: derive the role, and its state file, ourselves.
   if [ -z "${role}" ] && [ -z "${sid}" ] && [ -n "${pane}" ] && [ -n "${state_dir}" ]; then
     role="$(role_of_pane "${state_dir}" "${pane}" || true)"
