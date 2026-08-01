@@ -632,6 +632,17 @@ main() {
     sf="${state_dir}/liveness/${role}.state"
   fi
   [ -n "${sid}${role}" ] || die "need --role <name>, --session <id>, or --pane with --state-dir"
+  # An explicit --session that resolves to no transcript is a BAD ARGUMENT, not a verdict. Without
+  # this the reader answers `parked`, which is the one verdict that ARGUES FOR AN ACTION: parked
+  # means waiting, so the caller hands the agent something. On 2026-08-01 a tmux session name was
+  # passed here and two agents mid-slice, spinners up, both read parked. A wrong id must not be
+  # able to look like an agent state, and the pane cannot launder it - the pane was never asked
+  # about that id. The --role path is untouched: a role that has not booted yet has no transcript
+  # and legitimately reads closed, because a role is a name this harness defines rather than an
+  # id the caller asserts.
+  if [ -z "${role}" ] && [ -n "${sid}" ] && [ -z "$(transcript_for "$(projects_dir)" "${cwd}" "${sid}" || true)" ]; then
+    die "no transcript for --session '${sid}' under ${cwd} (a tmux session name is not a session id; use --role)"
+  fi
   run_live "${sid}" "${cwd}" "${sf}" "${pane}" "${max_age}" "${role}"
 }
 
