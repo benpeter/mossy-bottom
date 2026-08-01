@@ -18,7 +18,7 @@
 # verb-agnostic FOR SINGLE WORDS, and the comment is what a reader checks instead of the
 # pattern.
 set -uo pipefail
-PAT='^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
+PAT='^[[:space:]]*[^ -~]+ +[A-Za-z-]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 fails=0
 
 check() { # <expected 0|1> <name> <line>

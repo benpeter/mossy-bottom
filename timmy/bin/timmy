@@ -233,11 +233,24 @@ status_line() {
         }'
 }
 
-# has_spinner <capture> - the #9 shape matcher, byte-identical to what it always was, now run over
-# status_line's pick rather than picking the line itself.
+# has_spinner <capture> - the #9 shape matcher, run over status_line's pick rather than picking
+# the line itself.
+#
+# THE VERB IS `[A-Za-z-]+` AND THE HYPHEN IS load-BEARING (2026-08-01). It was `[A-Za-z]+`,
+# one word, and a worker 25 minutes into a slice with a live spinner read IDLE three times out
+# of three on `Topsy-turvying…`: the pattern matched `Topsy`, then required the ellipsis and met
+# a hyphen. The comment here used to say verb-agnostic and list single words; it was
+# verb-agnostic FOR SINGLE WORDS, and the comment is what a reader checks instead of the pattern.
+#
+# THE FAILURE DIRECTION IS WHY THIS IS NOT COSMETIC. During a tool call idle_box and idle_suffix
+# are BOTH true, so the spinner is the only discriminator left. When it misses, timmy has no
+# signal and returns `idle` rather than `unknown`: --await answers wrongly, worker-done fires on
+# a working worker, and a driver trusting it clears her mid-slice.
+# Shapes are covered by timmy/test/spinner-shapes.sh, including the gap-7 prose decoy the `^`
+# anchor exists for.
 has_spinner() {
   status_line "$1" \
-    | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
+    | LC_ALL=C grep -qE '^[[:space:]]*[^ -~]+ +[A-Za-z-]+(…|\.\.\.).*\([^)]*(esc|[0-9])'
 }
 
 # has_retry_ladder <capture> - the API retry ladder, which is a LIVE turn the client is retrying on
@@ -294,7 +307,7 @@ has_menu() {
     function isbottomstruct(s) {
       return (s ~ /───/ || s ~ /^❯[ \t]*$/ || s ~ /⏵⏵|shift\+tab|for agents/ \
         || s ~ /^[ \t]*⏺/ \
-        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
+        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z-]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
     }
     END {
       last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
@@ -345,7 +358,7 @@ is_idle_box() {
     function competes(s) {
       return (s ~ /^❯[ \t]+[0-9]/ \
         || s ~ /^[ \t]*⏺/ \
-        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
+        || s ~ /^[[:space:]]*[^ -~]+ +[A-Za-z-]+(…|\.\.\.).*\([^)]*(esc|[0-9])/)
     }
     END {
       last = NR; while (last > 0 && line[last] ~ /^[ \t]*$/) last--
