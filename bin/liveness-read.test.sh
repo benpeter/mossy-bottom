@@ -782,5 +782,65 @@ else
   no "/./ gave '$dots_out', wanted '$abs_out'"
 fi
 
+# ============================================================================
+# A transcript REGISTERED BY ANOTHER ROLE is not this role's, whatever phrase it carries.
+#
+# Measured live 2026-08-01 20:30. shirley's verdict flipped parked/working across 18 seconds while
+# her pane timer advanced through both. Two transcripts answered to her boot pattern: her real one,
+# carrying YOU ARE SHIRLEY at line 13, and shaun's ROTATED session at line 26, because a rotating
+# driver reads the worker prompt. shaun.state registers the second as HIS. The sweep takes the
+# newest match, so whichever agent wrote last decided the worker's verdict, and when shaun's was
+# newer she inherited his closed turn and read parked.
+#
+# The existing contamination case covers shaun's file LEADING with his own phrase. A rotated shaun
+# has no phrase of his own in the boot window at all, so first-in-file-order cannot separate them.
+# The registration can: it is authoritative, already on disk, and needs no guess at prompt wording.
+# ============================================================================
+printf '\n== a transcript registered by another role belongs to that role ==\n'
+
+col="$(cd "$tmp" && pwd)/collide"
+mkdir -p "$col/.mossy/liveness"
+printf 'shaun=%%3001\nshirley=%%3002\n' >"$col/.mossy/.barn-panes"
+colenc="$(encode_cwd "$col")"
+colproj="$tmp/colproj"
+mkdir -p "$colproj/$colenc"
+
+hers='dddd0000-0000-0000-0000-00000000hers'
+his='eeee0000-0000-0000-0000-000000000his'
+# Both lead with the worker phrase. His is a rotated driver: it quotes her prompt and never
+# carries his own, which is the shape measured at 20:30.
+boot "$colproj/$colenc/$hers.jsonl" 'YOU ARE SHIRLEY, the worker.'
+boot "$colproj/$colenc/$his.jsonl" 'YOU ARE SHIRLEY, the worker. Handing you the slice.'
+nowc="$(date +%s)"
+touch -t "$(date -r "$((nowc - 120))" '+%Y%m%d%H%M.%S')" "$colproj/$colenc/$hers.jsonl"
+touch -t "$(date -r "$((nowc - 10))" '+%Y%m%d%H%M.%S')" "$colproj/$colenc/$his.jsonl"
+# shaun's state file claims the NEWER file, which is what makes it his rather than hers.
+printf '%s shaun standby %s STANDBY - rotated\n' "$nowc" "$his" >"$col/.mossy/liveness/shaun.state"
+
+got="$(MOSSY_STATE_DIR= resolve_session "$colproj" "$col" shirley '' '' || true)"
+if [ "$got" = "$hers" ]; then
+  ok "the worker resolves to HER transcript, not the driver's registered one"
+else
+  no "the worker resolved to '$got', wanted '$hers' (the driver's is '$his')"
+fi
+
+# And the driver must still resolve to his own, by his registration, unchanged.
+got="$(MOSSY_STATE_DIR= resolve_session "$colproj" "$col" shaun "$col/.mossy/liveness/shaun.state" '' || true)"
+if [ "$got" = "$his" ]; then
+  ok "the driver still resolves to his registered transcript"
+else
+  no "the driver resolved to '$got', wanted '$his'"
+fi
+
+# With no other role registering anything, the newest match still wins: the skip must not
+# swallow a legitimate file.
+rm -f "$col/.mossy/liveness/shaun.state"
+got="$(MOSSY_STATE_DIR= resolve_session "$colproj" "$col" shirley '' '' || true)"
+if [ "$got" = "$his" ]; then
+  ok "with nothing registered elsewhere, newest-match wins as before"
+else
+  no "no registration should mean unchanged behaviour, got '$got'"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
