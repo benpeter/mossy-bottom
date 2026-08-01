@@ -381,11 +381,25 @@ SAYS she is done closes that gap to seconds.
 
 **Put this in every cold hand and every mid-slice hand, in shirley's own instructions:**
 
-> When your turn ends, make the LAST tool call of that turn a handback to shaun's pane:
-> `tmux send-keys -l -t <SHAUN> -- "HANDBACK: turn ended on <issue>. Artifacts at <paths>."`
-> then `tmux send-keys -t <SHAUN> Enter`. It must be last, because a pane cannot act after its
-> turn ends. Say what you did and where the evidence is. Do NOT say it works, do NOT say it is
-> ready, and do NOT say a gate passed.
+> When you believe you are finished, hand back to shaun before you stop:
+> `${MOSSY_REPO_DIR}/bin/send-verified.sh <SHAUN> "HANDBACK: turn ended on <issue>. Artifacts at <paths>."`
+> Exit 0 and exit 3 both mean it landed; exit 1 means it did not, so send it again. Say what you
+> did and where the evidence is. Do NOT say it works, do NOT say it is ready, and do NOT say a
+> gate passed. If you find more to do after handing back, do it and hand back again.
+
+Two words changed there on 2026-08-01 and both were load-bearing.
+
+It said "make the LAST tool call of that turn a handback", which asks her to predict her own
+last tool call. She cannot: the turn boundary is a record the harness writes AFTER she stops, so
+she is being asked to know something that does not exist yet. What she can know is that she
+thinks she is done, so that is the trigger now. A second handback after she resumes costs you
+one read. A missing one costs the run a beat, which is the whole reason this section exists.
+
+And it said `tmux send-keys`, which contradicts guardrail 13: every prompt goes through
+`bin/send-verified.sh` with its exit status checked. A raw `send-keys -l` plus Enter races, and a
+handback that sits buffered in your box is indistinguishable from a worker still thinking. Exit 3
+is the case worth naming to her: you are mid-turn when her handback arrives, which is normal and
+not a failure, and re-typing it would stack a second copy into your input.
 
 Three things make this safe rather than a hole in the trust rule.
 
@@ -393,12 +407,15 @@ Three things make this safe rather than a hole in the trust rule.
   input. A handback saying "turn ended, evidence here" does not ask you to believe anything, so it
   changes nothing about verification. You still read her pane and the artifacts exactly as now.
   A handback that asserts a result is a defect in the hand: rewrite the hand.
-- **The polling stays as the backstop.** A `send-keys` can fail to submit, and on 2026-07-30 about
-  half the heartbeat's confirmations did. A lost handback with no backstop is a silent stall, so
-  the heartbeat's worker-done detection keeps running. Fast path plus safety net, not a swap.
-- **Do the same upward.** When you finish a slice and are waiting on bitzer, make your own last
-  tool call a handback to his pane on the same terms. He is woken by the heartbeat anyway, so this
-  buys less than shirley's does, but it costs one call.
+- **The polling stays as the backstop.** A send can fail to submit, and on 2026-07-30 about half
+  the heartbeat's confirmations did. `send-verified.sh` catches that and tells her (exit 1), but a
+  handback she never thought to send raises no error at all, so the heartbeat's worker-done
+  detection keeps running. Fast path plus safety net, not a swap.
+- **Do the same upward.** When you finish a slice and are waiting on bitzer, hand back to his pane
+  on the same terms, through `send-verified.sh`. Your park sequence is: handback to bitzer, then
+  the `liveness-append.sh` call, then the STANDBY marker, then stop. That order is fixed and it is
+  yours to control, so nothing here asks you to guess which call turns out to be last. He is woken
+  by the heartbeat anyway, so this buys less than shirley's does, but it costs one call.
 
 Do not lengthen the heartbeat interval to pay for this. That trade is only available once
 handbacks have proven reliable across a run, and it is the Farmer's call, not yours.
@@ -462,6 +479,11 @@ shirley and yourself.
      the cheapest thing a clear would otherwise destroy.
   6. **The next slice, and the Farmer's placement reason** if he set one.
   7. **The binding constraints for this slice**, numbered, naming which one protects her.
+  8. **The handback**, spelled out as a command she can run, in the words of Handback above
+     with `<SHAUN>` filled in. This list is the shape you write from. Until 2026-08-01 the
+     handback was not on it. It lived one section up, addressed to you, so a cold hand could
+     leave it out, and some did. A hand with no handback puts the worker-done gap back at a
+     full beat.
 
   Auto-compaction remains the final backstop, and it should never fire for shirley.
 - **Yourself - STANDBY at every slice boundary.** You cannot compact yourself mid-turn
